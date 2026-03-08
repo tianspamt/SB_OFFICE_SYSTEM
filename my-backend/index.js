@@ -939,4 +939,57 @@ app.delete('/api/session-minutes/:id', verifyToken, adminOnly, (req, res) => {
   })
 })
 
+// PUBLIC: Get all announcements
+app.get('/api/announcements', (req, res) => {
+  db.query('SELECT * FROM announcements ORDER BY created_at DESC', (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
+// PUBLIC: Get single announcement
+app.get('/api/announcements/:id', (req, res) => {
+  db.query('SELECT * FROM announcements WHERE id = ?', [req.params.id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!results.length) return res.status(404).json({ error: 'Not found' });
+    res.json(results[0]);
+  });
+});
+
+// ADMIN: Create announcement
+app.post('/api/announcements', verifyToken, adminOnly, (req, res) => {
+  const { title, body, priority, expires_at } = req.body;
+  if (!title || !body) return res.status(400).json({ error: 'Title and body are required.' });
+  db.query(
+    'INSERT INTO announcements (title, body, priority, expires_at) VALUES (?, ?, ?, ?)',
+    [title, body, priority || 'normal', expires_at || null],
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, id: result.insertId });
+    }
+  );
+});
+
+// ADMIN: Update announcement
+app.put('/api/announcements/:id', verifyToken, adminOnly, (req, res) => {
+  const { title, body, priority, expires_at } = req.body;
+  if (!title || !body) return res.status(400).json({ error: 'Title and body are required.' });
+  db.query(
+    'UPDATE announcements SET title=?, body=?, priority=?, expires_at=? WHERE id=?',
+    [title, body, priority || 'normal', expires_at || null, req.params.id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true });
+    }
+  );
+});
+
+// ADMIN: Delete announcement
+app.delete('/api/announcements/:id', verifyToken, adminOnly, (req, res) => {
+  db.query('DELETE FROM announcements WHERE id=?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
 app.listen(5000, () => console.log("Server running on port 5000"))

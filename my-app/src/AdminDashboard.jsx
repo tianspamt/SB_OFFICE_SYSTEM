@@ -6,8 +6,10 @@ import {
   Search, X, Filter, Eye, Pencil, Trash2,
   FileText, Image, CalendarDays, LogOut,
   ClipboardList, Copy, Upload, CheckSquare, AlertCircle,
-  BookOpen, Plus, Printer, FileEdit, Camera, Gavel
+  BookOpen, Plus, Printer, FileEdit, Camera, Gavel,
+  Megaphone, ChevronDown, ChevronRight
 } from "lucide-react";
+import ConfirmModal from "./ConfirmModal";
 
 // ---- Auth helper ----
 const authFetch = (url, options = {}) => {
@@ -29,14 +31,16 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("users");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
-
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUser, setNewUser] = useState({ name: "", username: "", email: "", password: "" });
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [fetchingUsers, setFetchingUsers] = useState(false);
   const [fetchingOrdinances, setFetchingOrdinances] = useState(false);
   const [fetchingOfficials, setFetchingOfficials] = useState(false);
   const [fetchingMinutes, setFetchingMinutes] = useState(false);
   const [fetchingResolutions, setFetchingResolutions] = useState(false);
-
+  
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
   const [showOrdinanceModal, setShowOrdinanceModal] = useState(false);
   const [showOfficialModal, setShowOfficialModal] = useState(false);
@@ -45,6 +49,9 @@ export default function AdminDashboard() {
   const [selectedOfficialProfile, setSelectedOfficialProfile] = useState(null);
 
   const [newAdmin, setNewAdmin] = useState({ name: "", username: "", email: "", password: "" });
+
+  // ---- Sidebar section collapse ----
+  const [userMgmtOpen, setUserMgmtOpen] = useState(true);
 
   // ---- Ordinances ----
   const [ordinances, setOrdinances] = useState([]);
@@ -111,6 +118,21 @@ export default function AdminDashboard() {
     venue: "", agenda: "", minutes_text: ""
   });
 
+  // ---- Announcements ----
+  const [announcements, setAnnouncements] = useState([]);
+  const [fetchingAnnouncements, setFetchingAnnouncements] = useState(false);
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [showEditAnnouncementModal, setShowEditAnnouncementModal] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState(null);
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: "", body: "", priority: "normal", expires_at: ""
+  });
+  const [editAnnouncementForm, setEditAnnouncementForm] = useState({
+    title: "", body: "", priority: "normal", expires_at: ""
+  });
+  const [announcementSearch, setAnnouncementSearch] = useState("");
+  const [announcementPriorityFilter, setAnnouncementPriorityFilter] = useState("all");
+
   // ---- Sidebar ----
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -131,6 +153,7 @@ export default function AdminDashboard() {
     fetchOfficials();
     fetchSessionMinutes();
     fetchResolutions();
+    fetchAnnouncements();
   }, []);
 
   const showMsg = (msg, type = "success") => {
@@ -198,6 +221,16 @@ export default function AdminDashboard() {
     finally { setFetchingMinutes(false); }
   };
 
+  const fetchAnnouncements = async () => {
+    setFetchingAnnouncements(true);
+    try {
+      const res = await fetch("http://localhost:5000/api/announcements");
+      const data = await res.json();
+      setAnnouncements(Array.isArray(data) ? data : []);
+    } catch (err) { console.error(err); setAnnouncements([]); }
+    finally { setFetchingAnnouncements(false); }
+  };
+
   // ---- Admin handlers ----
   const handleAddAdmin = async () => {
     if (!newAdmin.name || !newAdmin.username || !newAdmin.email || !newAdmin.password) {
@@ -216,7 +249,6 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteUser = async (id) => {
-    if (!window.confirm("Delete this user?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/users/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -254,6 +286,26 @@ export default function AdminDashboard() {
     } catch { showMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
+  // ---- Add User handler ----
+  const handleAddUser = async () => {
+  if (!newUser.name || !newUser.username || !newUser.email || !newUser.password) {
+    showMsg("All fields required!", "error"); return;
+  }
+  setSubmitting(true);
+  try {
+    const res = await fetch("http://localhost:5000/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newUser)
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showMsg("User added!"); setNewUser({ name: "", username: "", email: "", password: "" });
+      setShowAddUserModal(false); fetchUsers();
+    } else showMsg(data.error || "Failed!", "error");
+  } catch { showMsg("Server error!", "error"); }
+  finally { setSubmitting(false); }
+};
 
   const handleOpenEditOrdinance = (o) => {
     setEditingOrdinance(o);
@@ -489,6 +541,66 @@ export default function AdminDashboard() {
     } catch { showMsg("Error!", "error"); }
   };
 
+  // ---- Announcement handlers ----
+  const resetAnnouncementForm = () => setAnnouncementForm({ title: "", body: "", priority: "normal", expires_at: "" });
+
+  const handleAddAnnouncement = async () => {
+    if (!announcementForm.title || !announcementForm.body) {
+      showMsg("Title and body are required!", "error"); return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authFetch("http://localhost:5000/api/announcements", {
+        method: "POST", body: JSON.stringify(announcementForm)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Announcement posted!"); resetAnnouncementForm();
+        setShowAnnouncementModal(false); fetchAnnouncements();
+      } else showMsg(data.error || "Failed!", "error");
+    } catch { showMsg("Server error!", "error"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleOpenEditAnnouncement = (a) => {
+    setEditingAnnouncement(a);
+    setEditAnnouncementForm({
+      title: a.title || "",
+      body: a.body || "",
+      priority: a.priority || "normal",
+      expires_at: a.expires_at ? a.expires_at.split("T")[0] : ""
+    });
+    setShowEditAnnouncementModal(true);
+  };
+
+  const handleUpdateAnnouncement = async () => {
+    if (!editAnnouncementForm.title || !editAnnouncementForm.body) {
+      showMsg("Title and body are required!", "error"); return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`http://localhost:5000/api/announcements/${editingAnnouncement.id}`, {
+        method: "PUT", body: JSON.stringify(editAnnouncementForm)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Announcement updated!"); setShowEditAnnouncementModal(false);
+        setEditingAnnouncement(null); fetchAnnouncements();
+      } else showMsg(data.error || "Update failed!", "error");
+    } catch { showMsg("Server error!", "error"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleDeleteAnnouncement = async (id) => {
+    if (!window.confirm("Delete this announcement?")) return;
+    try {
+      const res = await authFetch(`http://localhost:5000/api/announcements/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) { showMsg("Announcement deleted!"); fetchAnnouncements(); }
+      else showMsg(data.error || "Error!", "error");
+    } catch { showMsg("Error!", "error"); }
+  };
+
   // ---- Computed ----
   const totalUsers = users.filter((u) => u.role === "user").length;
   const totalAdmins = users.filter((u) => u.role === "admin").length;
@@ -539,8 +651,23 @@ export default function AdminDashboard() {
     return matchesSearch && matchesType && matchesYear;
   });
 
-  const pageLoading = fetchingUsers || fetchingOrdinances || fetchingOfficials || fetchingMinutes || fetchingResolutions;
+  const filteredAnnouncements = announcements.filter((a) => {
+    const matchesSearch =
+      (a.title || "").toLowerCase().includes(announcementSearch.toLowerCase()) ||
+      (a.body || "").toLowerCase().includes(announcementSearch.toLowerCase());
+    const matchesPriority = announcementPriorityFilter === "all" ? true : a.priority === announcementPriorityFilter;
+    return matchesSearch && matchesPriority;
+  });
+
+  const pageLoading = fetchingUsers || fetchingOrdinances || fetchingOfficials || fetchingMinutes || fetchingResolutions || fetchingAnnouncements;
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const priorityConfig = {
+    urgent:  { label: "Urgent",  color: "#c53030", bg: "#fff5f5", border: "#feb2b2" },
+    high:    { label: "High",    color: "#975a16", bg: "#fffbeb", border: "#f6e05e" },
+    normal:  { label: "Normal",  color: "#276749", bg: "#f0fff4", border: "#9ae6b4" },
+    low:     { label: "Low",     color: "#4a5568", bg: "#f7fafc", border: "#cbd5e0" },
+  };
 
   // ---- Reusable officials checklist ----
   const OfficialsCheckList = ({ selected, onToggle }) => (
@@ -560,6 +687,14 @@ export default function AdminDashboard() {
       ))}
     </div>
   );
+
+  const tabTitles = {
+    users: "Manage Users", admins: "Manage Admins",
+    ordinances: "Ordinances", resolutions: "Resolutions",
+    officials: "Sangguniang Bayan Officials",
+    sessions: "Session Minutes & Agenda",
+    announcements: "Announcements"
+  };
 
   return (
     <div className={styles.container}>
@@ -581,9 +716,7 @@ export default function AdminDashboard() {
           <span className={styles.hamburgerLine} />
           <span className={styles.hamburgerLine} />
         </button>
-        <span className={styles.mobileTopTitle}>
-          {{ users: "Manage Users", admins: "Manage Admins", ordinances: "Ordinances", resolutions: "Resolutions", officials: "SB Officials", sessions: "Session Minutes" }[activeTab]}
-        </span>
+        <span className={styles.mobileTopTitle}>{tabTitles[activeTab]}</span>
         <div style={{ width: 34 }} />
       </div>
 
@@ -612,13 +745,51 @@ export default function AdminDashboard() {
         </div>
 
         <nav className={styles.nav}>
+
+          {/* ── USER MANAGEMENT SECTION ── */}
+          <div className={styles.navSection}>
+            <button
+              className={styles.navSectionHeader}
+              onClick={() => !sidebarCollapsed && setUserMgmtOpen(v => !v)}
+              title="User Management"
+            >
+              <span className={styles.navSectionIcon}><Users size={14} strokeWidth={1.8} /></span>
+              <span className={styles.navSectionLabel}>User Management</span>
+              {!sidebarCollapsed && (
+                <span className={styles.navSectionChevron}>
+                  {userMgmtOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </span>
+              )}
+            </button>
+
+            <div className={`${styles.navSectionItems} ${userMgmtOpen && !sidebarCollapsed ? styles.navSectionItemsOpen : ""}`}>
+              {[
+                { key: "users",  icon: <Users size={17} strokeWidth={1.5} />,       label: "Manage Users" },
+                { key: "admins", icon: <ShieldCheck size={17} strokeWidth={1.5} />, label: "Manage Admins" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  data-label={tab.label}
+                  className={`${styles.navBtn} ${styles.navBtnIndented} ${activeTab === tab.key ? styles.navBtnActive : ""}`}
+                  onClick={() => handleTabChange(tab.key)}
+                >
+                  <span className={styles.navIcon}>{tab.icon}</span>
+                  <span className={styles.navLabel}>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── DIVIDER ── */}
+          <div className={styles.navDivider} />
+
+          {/* ── REMAINING TABS ── */}
           {[
-            { key: "users",       icon: <Users size={18} strokeWidth={1.5} />,       label: "Manage Users" },
-            { key: "admins",      icon: <ShieldCheck size={18} strokeWidth={1.5} />, label: "Manage Admins" },
-            { key: "ordinances",  icon: <ScrollText size={18} strokeWidth={1.5} />,  label: "Ordinances" },
-            { key: "resolutions", icon: <Gavel size={18} strokeWidth={1.5} />,       label: "Resolutions" },
-            { key: "officials",   icon: <Landmark size={18} strokeWidth={1.5} />,    label: "SB Officials" },
-            { key: "sessions",    icon: <BookOpen size={18} strokeWidth={1.5} />,    label: "Session Minutes" },
+            { key: "ordinances",    icon: <ScrollText size={18} strokeWidth={1.5} />,  label: "Ordinances" },
+            { key: "resolutions",   icon: <Gavel size={18} strokeWidth={1.5} />,       label: "Resolutions" },
+            { key: "officials",     icon: <Landmark size={18} strokeWidth={1.5} />,    label: "SB Officials" },
+            { key: "sessions",      icon: <BookOpen size={18} strokeWidth={1.5} />,    label: "Session Minutes" },
+            { key: "announcements", icon: <Megaphone size={18} strokeWidth={1.5} />,   label: "Announcements" },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -651,17 +822,17 @@ export default function AdminDashboard() {
       <div className={styles.main}>
         <div className={styles.header}>
           <div>
-            <h1 className={styles.headerTitle}>
-              {{ users: "Manage Users", admins: "Manage Admins", ordinances: "Ordinances", resolutions: "Resolutions", officials: "Sangguniang Bayan Officials", sessions: "Session Minutes & Agenda" }[activeTab]}
-            </h1>
+            <h1 className={styles.headerTitle}>{tabTitles[activeTab]}</h1>
             <p className={styles.headerSub}>LGU Administration Dashboard</p>
           </div>
           <div className={styles.headerActions}>
-            {activeTab === "admins"      && <button className={styles.addBtn} onClick={() => setShowAddAdminModal(true)}>+ Add Admin</button>}
-            {activeTab === "ordinances"  && <button className={styles.addBtn} onClick={() => setShowOrdinanceModal(true)}>+ Upload Ordinance</button>}
-            {activeTab === "resolutions" && <button className={styles.addBtn} onClick={() => { setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setShowResolutionModal(true); }}>+ Upload Resolution</button>}
-            {activeTab === "officials"   && <button className={styles.addBtn} onClick={() => setShowOfficialModal(true)}>+ Add Official</button>}
-            {activeTab === "sessions"    && <button className={styles.addBtn} onClick={() => { resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
+            {activeTab === "users" && <button className={styles.addBtn} onClick={() => setShowAddUserModal(true)}>+ Add User</button>}
+            {activeTab === "admins"        && <button className={styles.addBtn} onClick={() => setShowAddAdminModal(true)}>+ Add Admin</button>}
+            {activeTab === "ordinances"    && <button className={styles.addBtn} onClick={() => setShowOrdinanceModal(true)}>+ Upload Ordinance</button>}
+            {activeTab === "resolutions"   && <button className={styles.addBtn} onClick={() => { setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setShowResolutionModal(true); }}>+ Upload Resolution</button>}
+            {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => setShowOfficialModal(true)}>+ Add Official</button>}
+            {activeTab === "sessions"      && <button className={styles.addBtn} onClick={() => { resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
+            {activeTab === "announcements" && <button className={styles.addBtn} onClick={() => { resetAnnouncementForm(); setShowAnnouncementModal(true); }}>+ New Announcement</button>}
           </div>
         </div>
 
@@ -691,7 +862,7 @@ export default function AdminDashboard() {
                       <td className={styles.td}>{u.id}</td><td className={styles.td}>{u.name}</td>
                       <td className={styles.td}>{u.username}</td><td className={styles.td}>{u.email}</td>
                       <td className={styles.td}><span className={`${styles.badge} ${styles.badgeUser}`}>user</span></td>
-                      <td className={styles.td}><button className={styles.deleteBtn} onClick={() => handleDeleteUser(u.id)}><Trash2 size={13} /> Delete</button></td>
+                      <td className={styles.td}><button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: u.id, type: "user", name: u.name })}><Trash2 size={13} /> Delete</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -715,7 +886,7 @@ export default function AdminDashboard() {
                     <tr key={u.id} className={i % 2 === 0 ? styles.rowEven : styles.rowOdd}>
                       <td className={styles.td}>{u.id}</td><td className={styles.td}>{u.name}</td>
                       <td className={styles.td}>{u.username}</td><td className={styles.td}>{u.email}</td>
-                      <td className={styles.td}>{u.id !== admin?.id && <button className={styles.deleteBtn} onClick={() => handleDeleteUser(u.id)}><Trash2 size={13} /> Delete</button>}</td>
+                      <td className={styles.td}><button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: u.id, type: "user", name: u.name })}><Trash2 size={13} /> Delete</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -974,6 +1145,82 @@ export default function AdminDashboard() {
                   {minutesSearch || minutesTypeFilter !== "all" || minutesYearFilter !== "all"
                     ? "No session records match your search."
                     : "No session minutes recorded yet. Click \"+ Add Session\" to get started."}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ---- ANNOUNCEMENTS TAB ---- */}
+        {activeTab === "announcements" && !fetchingAnnouncements && (
+          <>
+            <div className={styles.statsRow}>
+              <div className={styles.statCard}><div className={styles.statNumber}>{announcements.length}</div><div className={styles.statLabel}>Total Announcements</div></div>
+              <div className={`${styles.statCard} ${styles.statCardOrange}`}><div className={styles.statNumber}>{announcements.filter(a => a.priority === "urgent").length}</div><div className={styles.statLabel}>Urgent</div></div>
+              <div className={`${styles.statCard} ${styles.statCardGreen}`}><div className={styles.statNumber}>{announcements.filter(a => !a.expires_at || new Date(a.expires_at) >= new Date()).length}</div><div className={styles.statLabel}>Active</div></div>
+            </div>
+
+            <div className={styles.searchFilterBar}>
+              <div className={styles.searchInputWrapper}>
+                <Search size={16} className={styles.searchIcon} />
+                <input className={styles.searchInput} type="text" placeholder="Search announcements..." value={announcementSearch} onChange={(e) => setAnnouncementSearch(e.target.value)} />
+                {announcementSearch && <button className={styles.clearSearch} onClick={() => setAnnouncementSearch("")}><X size={14} /></button>}
+              </div>
+              <div className={styles.filterGroup}>
+                <Filter size={15} className={styles.filterIcon} />
+                {["all", "urgent", "high", "normal", "low"].map((p) => (
+                  <button key={p} className={`${styles.filterBtn} ${announcementPriorityFilter === p ? styles.filterBtnActive : ""}`} onClick={() => setAnnouncementPriorityFilter(p)}>
+                    {p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className={styles.searchResultCount}>Showing {filteredAnnouncements.length} of {announcements.length} announcements</div>
+
+            <div className={styles.announcementList}>
+              {filteredAnnouncements.map((a) => {
+                const cfg = priorityConfig[a.priority] || priorityConfig.normal;
+                const isExpired = a.expires_at && new Date(a.expires_at) < new Date();
+                return (
+                  <div key={a.id} className={`${styles.announcementCard} ${isExpired ? styles.announcementExpired : ""}`}>
+                    <div className={styles.announcementLeft}>
+                      <div className={styles.announcementIconWrap} style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                        <Megaphone size={20} strokeWidth={1.5} style={{ color: cfg.color }} />
+                      </div>
+                    </div>
+                    <div className={styles.announcementBody}>
+                      <div className={styles.announcementTop}>
+                        <span className={styles.announcementPriorityBadge} style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                          {cfg.label}
+                        </span>
+                        {isExpired && <span className={styles.expiredBadge}>Expired</span>}
+                        <span className={styles.announcementDate}>
+                          <CalendarDays size={11} strokeWidth={1.5} />
+                          {new Date(a.created_at).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}
+                        </span>
+                      </div>
+                      <div className={styles.announcementTitle}>{a.title}</div>
+                      <div className={styles.announcementText}>
+                        {a.body.length > 200 ? a.body.slice(0, 200) + "…" : a.body}
+                      </div>
+                      {a.expires_at && (
+                        <div className={styles.announcementExpiry} style={{ color: isExpired ? "#c53030" : "#718096" }}>
+                          {isExpired ? "⚠ Expired" : "⏱ Expires"}: {new Date(a.expires_at).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" })}
+                        </div>
+                      )}
+                    </div>
+                    <div className={styles.announcementActions}>
+                      <button className={styles.editBtn} onClick={() => handleOpenEditAnnouncement(a)}><Pencil size={13} /> Edit</button>
+                      <button className={styles.deleteBtn} onClick={() => handleDeleteAnnouncement(a.id)}><Trash2 size={13} /> Delete</button>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredAnnouncements.length === 0 && (
+                <div className={styles.empty}>
+                  {announcementSearch || announcementPriorityFilter !== "all"
+                    ? "No announcements match your search."
+                    : "No announcements yet. Click \"+ New Announcement\" to post one."}
                 </div>
               )}
             </div>
@@ -1316,6 +1563,102 @@ export default function AdminDashboard() {
           </div>
         </div></div>
       )}
+
+      {/* ADD ANNOUNCEMENT MODAL */}
+      {showAnnouncementModal && (
+        <div className={styles.modalOverlay}><div className={`${styles.modal} ${styles.sessionModal}`}>
+          <h2 className={styles.modalTitle}><Megaphone size={18} strokeWidth={1.5} /> New Announcement</h2>
+          <label className={styles.fieldLabel}>Title <span style={{color:"#e53e3e"}}>*</span></label>
+          <input className={styles.input} placeholder="Announcement title..." value={announcementForm.title} onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })} />
+          <label className={styles.fieldLabel}>Priority Level</label>
+          <div className={styles.priorityRow}>
+            {["urgent", "high", "normal", "low"].map((p) => {
+              const cfg = priorityConfig[p];
+              return (
+                <button
+                  key={p}
+                  className={`${styles.priorityBtn} ${announcementForm.priority === p ? styles.priorityBtnActive : ""}`}
+                  style={announcementForm.priority === p ? { background: cfg.bg, borderColor: cfg.border, color: cfg.color } : {}}
+                  onClick={() => setAnnouncementForm({ ...announcementForm, priority: p })}
+                >
+                  {cfg.label}
+                </button>
+              );
+            })}
+          </div>
+          <label className={styles.fieldLabel}>Announcement Body <span style={{color:"#e53e3e"}}>*</span></label>
+          <textarea className={styles.textArea} placeholder="Write your announcement here..." value={announcementForm.body} onChange={(e) => setAnnouncementForm({ ...announcementForm, body: e.target.value })} rows={7} style={{ height: "auto" }} />
+          <label className={styles.fieldLabel}>Expiry Date <span className={styles.fieldHint}>(optional — leave blank for no expiry)</span></label>
+          <input className={styles.input} type="date" value={announcementForm.expires_at} onChange={(e) => setAnnouncementForm({ ...announcementForm, expires_at: e.target.value })} />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowAnnouncementModal(false); resetAnnouncementForm(); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleAddAnnouncement} disabled={submitting}>{submitting ? "Posting..." : "Post Announcement"}</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* EDIT ANNOUNCEMENT MODAL */}
+      {showEditAnnouncementModal && editingAnnouncement && (
+        <div className={styles.modalOverlay}><div className={`${styles.modal} ${styles.sessionModal}`}>
+          <h2 className={styles.modalTitle}><Pencil size={16} strokeWidth={1.5} /> Edit Announcement</h2>
+          <label className={styles.fieldLabel}>Title <span style={{color:"#e53e3e"}}>*</span></label>
+          <input className={styles.input} placeholder="Announcement title..." value={editAnnouncementForm.title} onChange={(e) => setEditAnnouncementForm({ ...editAnnouncementForm, title: e.target.value })} />
+          <label className={styles.fieldLabel}>Priority Level</label>
+          <div className={styles.priorityRow}>
+            {["urgent", "high", "normal", "low"].map((p) => {
+              const cfg = priorityConfig[p];
+              return (
+                <button
+                  key={p}
+                  className={`${styles.priorityBtn} ${editAnnouncementForm.priority === p ? styles.priorityBtnActive : ""}`}
+                  style={editAnnouncementForm.priority === p ? { background: cfg.bg, borderColor: cfg.border, color: cfg.color } : {}}
+                  onClick={() => setEditAnnouncementForm({ ...editAnnouncementForm, priority: p })}
+                >
+                  {cfg.label}
+                </button>
+              );
+            })}
+          </div>
+          <label className={styles.fieldLabel}>Announcement Body <span style={{color:"#e53e3e"}}>*</span></label>
+          <textarea className={styles.textArea} value={editAnnouncementForm.body} onChange={(e) => setEditAnnouncementForm({ ...editAnnouncementForm, body: e.target.value })} rows={7} style={{ height: "auto" }} />
+          <label className={styles.fieldLabel}>Expiry Date <span className={styles.fieldHint}>(optional)</span></label>
+          <input className={styles.input} type="date" value={editAnnouncementForm.expires_at} onChange={(e) => setEditAnnouncementForm({ ...editAnnouncementForm, expires_at: e.target.value })} />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditAnnouncementModal(false); setEditingAnnouncement(null); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleUpdateAnnouncement} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
+          </div>
+        </div></div>
+      )}
+
+   
+      {showAddUserModal && (
+    <div className={styles.modalOverlay}><div className={styles.modal}>
+    <h2 className={styles.modalTitle}>Add New User</h2>
+    <input className={styles.input} placeholder="Full Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+    <input className={styles.input} placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
+    <input className={styles.input} type="email" placeholder="Email Address" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+    <input className={styles.input} type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+    <div className={styles.modalBtns}>
+      <button className={styles.cancelBtn} onClick={() => setShowAddUserModal(false)}>Cancel</button>
+      <button className={styles.confirmBtn} onClick={handleAddUser} disabled={submitting}>{submitting ? "Adding..." : "Add User"}</button>
+    </div>
+  </div></div>
+)}
+
+{/* DELETE CONFIRM MODAL — ADD THIS */}
+      {deleteTarget && (
+        <ConfirmModal
+          type="delete"
+          title="Delete this user?"
+          message={`"${deleteTarget.name}" will be permanently removed. This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={() => { handleDeleteUser(deleteTarget.id); setDeleteTarget(null); }}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+
+
     </div>
   );
 }
