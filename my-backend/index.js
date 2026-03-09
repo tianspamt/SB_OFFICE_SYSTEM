@@ -1,3 +1,4 @@
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') })
 const express = require("express")
 const cors = require("cors")
 const bodyParser = require("body-parser")
@@ -11,8 +12,7 @@ const jwt = require('jsonwebtoken')
 
 
 const app = express()
-const JWT_SECRET = 'your_super_secret_jwt_key_change_this_in_production' // ⚠️ Move to .env in production
-const SALT_ROUNDS = 10
+const JWT_SECRET = process.env.JWT_SECRET;
 
 app.use(cors({
   origin: 'http://localhost:5173',
@@ -131,8 +131,9 @@ app.post("/api/login", (req, res) => {
         user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role }
       })
     } catch (err) {
-      res.status(500).json({ error: err.message })
-    }
+    console.error('LOGIN ERROR:', err); // add this
+    res.status(500).json({ error: err.message });
+  }
   })
 })
 
@@ -987,6 +988,36 @@ app.put('/api/announcements/:id', verifyToken, adminOnly, (req, res) => {
 // ADMIN: Delete announcement
 app.delete('/api/announcements/:id', verifyToken, adminOnly, (req, res) => {
   db.query('DELETE FROM announcements WHERE id=?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
+});
+
+// GET all calendar events
+app.get('/api/calendar-events', (req, res) => {
+  db.query('SELECT * FROM calendar_events ORDER BY start_date ASC', (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// POST new calendar event
+app.post('/api/calendar-events', verifyToken, adminOnly, (req, res) => {
+  const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body;
+  if (!title || !start_date) return res.status(400).json({ error: 'Title and start date required' });
+  db.query(
+    'INSERT INTO calendar_events (title, description, location, start_date, start_time, end_date, end_time, all_day, color) VALUES (?,?,?,?,?,?,?,?,?)',
+    [title, description, location, start_date, start_time || null, end_date || start_date, end_time || null, all_day ? 1 : 0, color || '#009439'],
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, id: result.insertId });
+    }
+  );
+});
+
+// DELETE calendar event
+app.delete('/api/calendar-events/:id', verifyToken, adminOnly, (req, res) => {
+  db.query('DELETE FROM calendar_events WHERE id = ?', [req.params.id], (err) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true });
   });
