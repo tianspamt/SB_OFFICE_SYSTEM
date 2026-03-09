@@ -7,7 +7,9 @@ import {
   FileText, Image, CalendarDays, LogOut,
   ClipboardList, Copy, Upload, CheckSquare, AlertCircle,
   BookOpen, Plus, Printer, FileEdit, Camera, Gavel,
-  Megaphone, ChevronDown, ChevronRight
+ Megaphone, ChevronDown, ChevronRight, Calendar,
+  ChevronLeft, Clock, MapPin, ExternalLink, RefreshCw,
+  PlusCircle, Link
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 
@@ -26,6 +28,8 @@ const authFetch = (url, options = {}) => {
 };
 
 export default function AdminDashboard() {
+  const GCAL_API_KEY_STORAGE = "gcal_api_key";
+  const GCAL_ID_STORAGE      = "gcal_calendar_id";
   const [users, setUsers] = useState([]);
   const [admin, setAdmin] = useState(null);
   const [activeTab, setActiveTab] = useState("users");
@@ -40,7 +44,9 @@ export default function AdminDashboard() {
   const [fetchingOfficials, setFetchingOfficials] = useState(false);
   const [fetchingMinutes, setFetchingMinutes] = useState(false);
   const [fetchingResolutions, setFetchingResolutions] = useState(false);
-  
+  const [modalMessage, setModalMessage] = useState("");
+  const [modalMessageType, setModalMessageType] = useState("success");
+
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
   const [showOrdinanceModal, setShowOrdinanceModal] = useState(false);
   const [showOfficialModal, setShowOfficialModal] = useState(false);
@@ -52,6 +58,7 @@ export default function AdminDashboard() {
 
   // ---- Sidebar section collapse ----
   const [userMgmtOpen, setUserMgmtOpen] = useState(true);
+  
 
   // ---- Ordinances ----
   const [ordinances, setOrdinances] = useState([]);
@@ -137,6 +144,29 @@ export default function AdminDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // ---- Calendar (Google Calendar API) ----
+  const [calendarApiKey, setCalendarApiKey]           = useState(() => localStorage.getItem(GCAL_API_KEY_STORAGE) || "");
+  const [calendarId, setCalendarId]                   = useState(() => localStorage.getItem(GCAL_ID_STORAGE) || "");
+  const [calendarApiKeyInput, setCalendarApiKeyInput] = useState("");
+  const [calendarIdInput, setCalendarIdInput]         = useState("");
+  const [showCalendarSetup, setShowCalendarSetup]     = useState(false);
+  const [calendarEvents, setCalendarEvents]           = useState([]);
+  const [fetchingCalendar, setFetchingCalendar]       = useState(false);
+  const [calendarError, setCalendarError]             = useState("");
+  const [calendarViewDate, setCalendarViewDate]       = useState(new Date());
+  const [selectedCalDay, setSelectedCalDay]           = useState(null);
+  const [showAddEventModal, setShowAddEventModal]     = useState(false);
+  const [showEventDetailModal, setShowEventDetailModal] = useState(false);
+  const [selectedEvent, setSelectedEvent]             = useState(null);
+  const [addingEvent, setAddingEvent]                 = useState(false);
+  const [calendarModalMsg, setCalendarModalMsg]       = useState("");
+  const [eventForm, setEventForm] = useState({
+    summary: "", description: "", location: "",
+    startDate: "", startTime: "08:00",
+    endDate:   "", endTime:   "09:00",
+    allDay: false,
+  });
+
   const handleTabChange = (key) => { setActiveTab(key); setMobileOpen(false); };
 
   useEffect(() => {
@@ -155,6 +185,11 @@ export default function AdminDashboard() {
     fetchResolutions();
     fetchAnnouncements();
   }, []);
+
+  const showModalMsg = (msg, type = "success") => {
+    setModalMessage(msg); setModalMessageType(type);
+    setTimeout(() => setModalMessage(""), 3500);
+  };
 
   const showMsg = (msg, type = "success") => {
     setMessage(msg); setMessageType(type);
@@ -231,10 +266,92 @@ export default function AdminDashboard() {
     finally { setFetchingAnnouncements(false); }
   };
 
+  // ---- Calendar functions ----
+  const fetchCalendarEvents = async (apiKey, calId, viewDate) => {
+    setFetchingCalendar(true); setCalendarError("");
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const timeMin = new Date(year, month - 1, 1).toISOString();
+    const timeMax = new Date(year, month + 2, 0).toISOString();
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?key=${apiKey}&timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&orderBy=startTime&maxResults=100`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) { setCalendarError(data.error.message || "API Error"); setCalendarEvents([]); }
+      else setCalendarEvents(data.items || []);
+    } catch { setCalendarError("Failed to fetch events. Check your API key and Calendar ID."); setCalendarEvents([]); }
+    finally { setFetchingCalendar(false); }
+  };
+
+  const handleSaveCalendarConfig = () => {
+    localStorage.setItem(GCAL_API_KEY_STORAGE, calendarApiKeyInput);
+    localStorage.setItem(GCAL_ID_STORAGE, calendarIdInput);
+    setCalendarApiKey(calendarApiKeyInput);
+    setCalendarId(calendarIdInput);
+    setShowCalendarSetup(false);
+    fetchCalendarEvents(calendarApiKeyInput, calendarIdInput, calendarViewDate);
+  };
+
+  const handleAddEvent = async () => {
+    if (!eventForm.summary) { setCalendarModalMsg("Event title is required."); return; }
+    if (!eventForm.startDate) { setCalendarModalMsg("Start date is required."); return; }
+    setAddingEvent(true);
+    try {
+      const body = eventForm.allDay
+        ? { summary: eventForm.summary, description: eventForm.description, location: eventForm.location,
+            start: { date: eventForm.startDate }, end: { date: eventForm.endDate || eventForm.startDate } }
+        : { summary: eventForm.summary, description: eventForm.description, location: eventForm.location,
+            start: { dateTime: `${eventForm.startDate}T${eventForm.startTime}:00`, timeZone: "Asia/Manila" },
+            end:   { dateTime: `${eventForm.endDate || eventForm.startDate}T${eventForm.endTime}:00`, timeZone: "Asia/Manila" } };
+      const res = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?key=${calendarApiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+      const data = await res.json();
+      if (data.error) {
+        if (data.error.code === 401 || data.error.code === 403)
+          setCalendarModalMsg("Write access denied. Use an OAuth2 access token or a Service Account key to add events.");
+        else setCalendarModalMsg(data.error.message || "Failed to create event.");
+      } else {
+        setShowAddEventModal(false); resetEventForm();
+        showMsg("Event added to Google Calendar!");
+        fetchCalendarEvents(calendarApiKey, calendarId, calendarViewDate);
+      }
+    } catch { setCalendarModalMsg("Network error. Please try again."); }
+    finally { setAddingEvent(false); }
+  };
+
+  const resetEventForm = () => {
+    setEventForm({ summary: "", description: "", location: "", startDate: "", startTime: "08:00", endDate: "", endTime: "09:00", allDay: false });
+    setCalendarModalMsg("");
+  };
+
+  const getEventsForDay = (date) => {
+    const iso = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+    return calendarEvents.filter(ev => {
+      const start = ev.start?.date || ev.start?.dateTime?.slice(0,10);
+      const end   = ev.end?.date   || ev.end?.dateTime?.slice(0,10);
+      return start <= iso && iso <= end;
+    });
+  };
+
+  const getUpcomingEvents = () => {
+    const today = new Date().toISOString().slice(0,10);
+    return calendarEvents
+      .filter(ev => (ev.start?.date || ev.start?.dateTime?.slice(0,10)) >= today)
+      .slice(0, 8);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (activeTab === "calendar" && calendarApiKey && calendarId)
+      fetchCalendarEvents(calendarApiKey, calendarId, calendarViewDate);
+  }, [calendarViewDate, activeTab, calendarApiKey, calendarId]);
+
   // ---- Admin handlers ----
   const handleAddAdmin = async () => {
     if (!newAdmin.name || !newAdmin.username || !newAdmin.email || !newAdmin.password) {
-      showMsg("All fields required!", "error"); return;
+      showModalMsg("All fields required!", "error"); return;
     }
     setSubmitting(true);
     try {
@@ -243,8 +360,29 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Admin added!"); setNewAdmin({ name: "", username: "", email: "", password: "" });
         setShowAddAdminModal(false); fetchUsers();
-      } else showMsg(data.error || "Failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
+    finally { setSubmitting(false); }
+  };
+
+  // ---- Add User handler ----
+  const handleAddUser = async () => {
+    if (!newUser.name || !newUser.username || !newUser.email || !newUser.password) {
+      showModalMsg("All fields required!", "error"); return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("http://localhost:5000/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("User added!"); setNewUser({ name: "", username: "", email: "", password: "" });
+        setShowAddUserModal(false); fetchUsers();
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
@@ -260,7 +398,7 @@ export default function AdminDashboard() {
   // ---- Ordinance handlers ----
   const handleUploadOrdinance = async () => {
     if (!ordinanceNumber || !ordinanceTitle || !ordinanceYear || !ordinanceFile || !uploadType) {
-      showMsg("Please fill all fields and choose upload type!", "error"); return;
+      showModalMsg("Please fill all fields and choose upload type!", "error"); return;
     }
     setSubmitting(true);
     const formData = new FormData();
@@ -282,30 +420,10 @@ export default function AdminDashboard() {
         setOrdinanceNumber(""); setOrdinanceTitle(""); setOrdinanceYear("");
         setOrdinanceFile(null); setSelectedOfficials([]); setUploadType("");
         setShowOrdinanceModal(false); fetchOrdinances();
-      } else showMsg(data.error || "Upload failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Upload failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
-  // ---- Add User handler ----
-  const handleAddUser = async () => {
-  if (!newUser.name || !newUser.username || !newUser.email || !newUser.password) {
-    showMsg("All fields required!", "error"); return;
-  }
-  setSubmitting(true);
-  try {
-    const res = await fetch("http://localhost:5000/api/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newUser)
-    });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      showMsg("User added!"); setNewUser({ name: "", username: "", email: "", password: "" });
-      setShowAddUserModal(false); fetchUsers();
-    } else showMsg(data.error || "Failed!", "error");
-  } catch { showMsg("Server error!", "error"); }
-  finally { setSubmitting(false); }
-};
 
   const handleOpenEditOrdinance = (o) => {
     setEditingOrdinance(o);
@@ -314,6 +432,7 @@ export default function AdminDashboard() {
     setEditOrdinanceYear(o.year || "");
     setEditSelectedOfficials(o.officials ? o.officials.map((off) => off.id) : []);
     setEditOrdinanceFile(null);
+    setModalMessage("");
     setShowEditOrdinanceModal(true);
   };
 
@@ -322,7 +441,7 @@ export default function AdminDashboard() {
 
   const handleUpdateOrdinance = async () => {
     if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceYear) {
-      showMsg("All fields required!", "error"); return;
+      showModalMsg("All fields required!", "error"); return;
     }
     setSubmitting(true);
     const formData = new FormData();
@@ -337,13 +456,12 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Ordinance updated!"); setShowEditOrdinanceModal(false);
         setEditingOrdinance(null); fetchOrdinances();
-      } else showMsg(data.error || "Update failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteOrdinance = async (id) => {
-    if (!window.confirm("Delete this ordinance?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/ordinances/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -355,7 +473,7 @@ export default function AdminDashboard() {
   // ---- Resolution handlers ----
   const handleUploadResolution = async () => {
     if (!resolutionNumber || !resolutionTitle || !resolutionYear || !resolutionFile || !resolutionUploadType) {
-      showMsg("Please fill all fields and choose upload type!", "error"); return;
+      showModalMsg("Please fill all fields and choose upload type!", "error"); return;
     }
     setSubmitting(true);
     const formData = new FormData();
@@ -377,8 +495,8 @@ export default function AdminDashboard() {
         setResolutionNumber(""); setResolutionTitle(""); setResolutionYear("");
         setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType("");
         setShowResolutionModal(false); fetchResolutions();
-      } else showMsg(data.error || "Upload failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Upload failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
@@ -389,6 +507,7 @@ export default function AdminDashboard() {
     setEditResolutionYear(r.year || "");
     setEditResolutionSelectedOfficials(r.officials ? r.officials.map((off) => off.id) : []);
     setEditResolutionFile(null);
+    setModalMessage("");
     setShowEditResolutionModal(true);
   };
 
@@ -397,7 +516,7 @@ export default function AdminDashboard() {
 
   const handleUpdateResolution = async () => {
     if (!editResolutionNumber || !editResolutionTitle || !editResolutionYear) {
-      showMsg("All fields required!", "error"); return;
+      showModalMsg("All fields required!", "error"); return;
     }
     setSubmitting(true);
     const formData = new FormData();
@@ -412,13 +531,12 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Resolution updated!"); setShowEditResolutionModal(false);
         setEditingResolution(null); fetchResolutions();
-      } else showMsg(data.error || "Update failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteResolution = async (id) => {
-    if (!window.confirm("Delete this resolution?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/resolutions/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -433,7 +551,7 @@ export default function AdminDashboard() {
   // ---- Officials handlers ----
   const handleAddOfficial = async () => {
     if (!newOfficial.full_name || !newOfficial.position || !newOfficial.term_period) {
-      showMsg("All fields required!", "error"); return;
+      showModalMsg("All fields required!", "error"); return;
     }
     setSubmitting(true);
     const formData = new FormData();
@@ -447,13 +565,12 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Official added!"); setNewOfficial({ full_name: "", position: "", term_period: "" });
         setOfficialPhoto(null); setShowOfficialModal(false); fetchOfficials();
-      } else showMsg(data.error || "Failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteOfficial = async (id) => {
-    if (!window.confirm("Delete this official?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/sb-officials/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -477,11 +594,11 @@ export default function AdminDashboard() {
   };
 
   const handleAddSession = async () => {
-    if (!sessionForm.session_date) { showMsg("Session date is required!", "error"); return; }
+    if (!sessionForm.session_date) { showModalMsg("Session date is required!", "error"); return; }
     setSubmitting(true);
     try {
       if (sessionInputMode === "ocr") {
-        if (!sessionFile) { showMsg("Please upload an image file!", "error"); setSubmitting(false); return; }
+        if (!sessionFile) { showModalMsg("Please upload an image file!", "error"); setSubmitting(false); return; }
         const formData = new FormData();
         Object.entries(sessionForm).forEach(([k, v]) => formData.append(k, v));
         formData.append("file", sessionFile);
@@ -491,16 +608,16 @@ export default function AdminDashboard() {
         if (res.ok && data.success) {
           showMsg(`Session added! OCR extracted text from ${data.ocr_target}.`);
           resetSessionForm(); setShowSessionModal(false); fetchSessionMinutes();
-        } else showMsg(data.error || "Upload failed!", "error");
+        } else showModalMsg(data.error || "Upload failed!", "error");
       } else {
         const res = await authFetch("http://localhost:5000/api/session-minutes", { method: "POST", body: JSON.stringify(sessionForm) });
         const data = await res.json();
         if (res.ok && data.success) {
           showMsg("Session minutes saved!"); resetSessionForm();
           setShowSessionModal(false); fetchSessionMinutes();
-        } else showMsg(data.error || "Save failed!", "error");
+        } else showModalMsg(data.error || "Save failed!", "error");
       }
-    } catch { showMsg("Server error!", "error"); }
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
@@ -514,11 +631,12 @@ export default function AdminDashboard() {
       agenda: s.agenda || "",
       minutes_text: s.minutes_text || "",
     });
+    setModalMessage("");
     setShowEditSessionModal(true);
   };
 
   const handleUpdateSession = async () => {
-    if (!editSessionForm.session_date) { showMsg("Session date is required!", "error"); return; }
+    if (!editSessionForm.session_date) { showModalMsg("Session date is required!", "error"); return; }
     setSubmitting(true);
     try {
       const res = await authFetch(`http://localhost:5000/api/session-minutes/${editingSession.id}`, { method: "PUT", body: JSON.stringify(editSessionForm) });
@@ -526,13 +644,12 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Session minutes updated!"); setShowEditSessionModal(false);
         setEditingSession(null); fetchSessionMinutes();
-      } else showMsg(data.error || "Update failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteSession = async (id) => {
-    if (!window.confirm("Delete this session record?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/session-minutes/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -546,7 +663,7 @@ export default function AdminDashboard() {
 
   const handleAddAnnouncement = async () => {
     if (!announcementForm.title || !announcementForm.body) {
-      showMsg("Title and body are required!", "error"); return;
+      showModalMsg("Title and body are required!", "error"); return;
     }
     setSubmitting(true);
     try {
@@ -557,8 +674,8 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Announcement posted!"); resetAnnouncementForm();
         setShowAnnouncementModal(false); fetchAnnouncements();
-      } else showMsg(data.error || "Failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
@@ -570,12 +687,13 @@ export default function AdminDashboard() {
       priority: a.priority || "normal",
       expires_at: a.expires_at ? a.expires_at.split("T")[0] : ""
     });
+    setModalMessage("");
     setShowEditAnnouncementModal(true);
   };
 
   const handleUpdateAnnouncement = async () => {
     if (!editAnnouncementForm.title || !editAnnouncementForm.body) {
-      showMsg("Title and body are required!", "error"); return;
+      showModalMsg("Title and body are required!", "error"); return;
     }
     setSubmitting(true);
     try {
@@ -586,13 +704,12 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showMsg("Announcement updated!"); setShowEditAnnouncementModal(false);
         setEditingAnnouncement(null); fetchAnnouncements();
-      } else showMsg(data.error || "Update failed!", "error");
-    } catch { showMsg("Server error!", "error"); }
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteAnnouncement = async (id) => {
-    if (!window.confirm("Delete this announcement?")) return;
     try {
       const res = await authFetch(`http://localhost:5000/api/announcements/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -688,12 +805,27 @@ export default function AdminDashboard() {
     </div>
   );
 
+  // ---- Inline modal alert ----
+  const ModalAlert = () => modalMessage ? (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "10px 14px", borderRadius: 8, marginBottom: 14, fontSize: 13,
+      background: modalMessageType === "error" ? "#fff5f5" : "#f0fff4",
+      border: `1px solid ${modalMessageType === "error" ? "#feb2b2" : "#9ae6b4"}`,
+      color: modalMessageType === "error" ? "#c53030" : "#276749",
+    }}>
+      <AlertCircle size={14} />
+      {modalMessage}
+    </div>
+  ) : null;
+
   const tabTitles = {
     users: "Manage Users", admins: "Manage Admins",
+    calendar: "Calendar & Schedule",
+    announcements: "Announcements",
+    sessions: "Session Minutes & Agenda",
     ordinances: "Ordinances", resolutions: "Resolutions",
     officials: "Sangguniang Bayan Officials",
-    sessions: "Session Minutes & Agenda",
-    announcements: "Announcements"
   };
 
   return (
@@ -745,7 +877,6 @@ export default function AdminDashboard() {
         </div>
 
         <nav className={styles.nav}>
-
           {/* ── USER MANAGEMENT SECTION ── */}
           <div className={styles.navSection}>
             <button
@@ -761,7 +892,6 @@ export default function AdminDashboard() {
                 </span>
               )}
             </button>
-
             <div className={`${styles.navSectionItems} ${userMgmtOpen && !sidebarCollapsed ? styles.navSectionItemsOpen : ""}`}>
               {[
                 { key: "users",  icon: <Users size={17} strokeWidth={1.5} />,       label: "Manage Users" },
@@ -785,11 +915,14 @@ export default function AdminDashboard() {
 
           {/* ── REMAINING TABS ── */}
           {[
+            { key: "sessions",      icon: <BookOpen size={18} strokeWidth={1.5} />,    label: "Session Minutes" },
+            { key: "calendar",      icon: <Calendar size={18} strokeWidth={1.5} />,    label: "Calendar" },
+            { key: "announcements", icon: <Megaphone size={18} strokeWidth={1.5} />,   label: "Announcements" },
             { key: "ordinances",    icon: <ScrollText size={18} strokeWidth={1.5} />,  label: "Ordinances" },
             { key: "resolutions",   icon: <Gavel size={18} strokeWidth={1.5} />,       label: "Resolutions" },
             { key: "officials",     icon: <Landmark size={18} strokeWidth={1.5} />,    label: "SB Officials" },
-            { key: "sessions",      icon: <BookOpen size={18} strokeWidth={1.5} />,    label: "Session Minutes" },
-            { key: "announcements", icon: <Megaphone size={18} strokeWidth={1.5} />,   label: "Announcements" },
+            
+           
           ].map((tab) => (
             <button
               key={tab.key}
@@ -826,13 +959,13 @@ export default function AdminDashboard() {
             <p className={styles.headerSub}>LGU Administration Dashboard</p>
           </div>
           <div className={styles.headerActions}>
-            {activeTab === "users" && <button className={styles.addBtn} onClick={() => setShowAddUserModal(true)}>+ Add User</button>}
-            {activeTab === "admins"        && <button className={styles.addBtn} onClick={() => setShowAddAdminModal(true)}>+ Add Admin</button>}
-            {activeTab === "ordinances"    && <button className={styles.addBtn} onClick={() => setShowOrdinanceModal(true)}>+ Upload Ordinance</button>}
-            {activeTab === "resolutions"   && <button className={styles.addBtn} onClick={() => { setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setShowResolutionModal(true); }}>+ Upload Resolution</button>}
-            {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => setShowOfficialModal(true)}>+ Add Official</button>}
-            {activeTab === "sessions"      && <button className={styles.addBtn} onClick={() => { resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
-            {activeTab === "announcements" && <button className={styles.addBtn} onClick={() => { resetAnnouncementForm(); setShowAnnouncementModal(true); }}>+ New Announcement</button>}
+            {activeTab === "users"         && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowAddUserModal(true); }}>+ Add User</button>}
+            {activeTab === "admins"        && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowAddAdminModal(true); }}>+ Add Admin</button>}
+            {activeTab === "ordinances"    && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOrdinanceModal(true); }}>+ Upload Ordinance</button>}
+            {activeTab === "resolutions"   && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setShowResolutionModal(true); }}>+ Upload Resolution</button>}
+            {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOfficialModal(true); }}>+ Add Official</button>}
+            {activeTab === "sessions"      && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
+            {activeTab === "announcements" && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetAnnouncementForm(); setShowAnnouncementModal(true); }}>+ New Announcement</button>}
           </div>
         </div>
 
@@ -896,6 +1029,127 @@ export default function AdminDashboard() {
           </>
         )}
 
+        {/* ---- CALENDAR TAB ---- */}
+        {activeTab === "calendar" && (() => {
+          const year = calendarViewDate.getFullYear();
+          const month = calendarViewDate.getMonth();
+          const firstDay = new Date(year, month, 1).getDay();
+          const daysInMonth = new Date(year, month + 1, 0).getDate();
+          const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+          const DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+          const today = new Date();
+          const cells = [];
+          for (let i = 0; i < firstDay; i++) cells.push(null);
+          for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+          return (
+            <div className={styles.calendarWrapper}>
+              {/* Top bar */}
+              <div className={styles.calendarTopBar}>
+                <div className={styles.calendarNav}>
+                  <button className={styles.calNavBtn} onClick={() => setCalendarViewDate(new Date(year, month - 1, 1))}><ChevronLeft size={16}/></button>
+                  <span className={styles.calMonthLabel}>{MONTH_NAMES[month]} {year}</span>
+                  <button className={styles.calNavBtn} onClick={() => setCalendarViewDate(new Date(year, month + 1, 1))}><ChevronRight size={16}/></button>
+                  <button className={styles.calTodayBtn} onClick={() => setCalendarViewDate(new Date())}>Today</button>
+                </div>
+                <div className={styles.calendarTopActions}>
+                  {calendarApiKey && calendarId && (
+                    <button className={styles.calRefreshBtn} onClick={() => fetchCalendarEvents(calendarApiKey, calendarId, calendarViewDate)} disabled={fetchingCalendar}>
+                      <RefreshCw size={14} className={fetchingCalendar ? styles.spinning : ""}/> {fetchingCalendar ? "Loading..." : "Refresh"}
+                    </button>
+                  )}
+                  <button className={styles.calAddBtn} onClick={() => { resetEventForm(); setShowAddEventModal(true); }} disabled={!calendarApiKey || !calendarId}>
+                    <PlusCircle size={14}/> Add Event
+                  </button>
+                  <button className={styles.calSetupBtn} onClick={() => { setCalendarApiKeyInput(calendarApiKey); setCalendarIdInput(calendarId); setShowCalendarSetup(true); }}>
+                    <Link size={14}/> {calendarApiKey ? "Reconfigure" : "Connect Calendar"}
+                  </button>
+                </div>
+              </div>
+
+              {!calendarApiKey && (
+                <div className={styles.calNotConfigured}>
+                  <Calendar size={32} strokeWidth={1.2}/>
+                  <p>Connect your Google Calendar to view and manage events.</p>
+                  <button className={styles.addBtn} onClick={() => setShowCalendarSetup(true)}>Connect Google Calendar</button>
+                </div>
+              )}
+
+              {calendarError && <div className={styles.calError}><AlertCircle size={14}/> {calendarError}</div>}
+
+              {calendarApiKey && (
+                <div className={styles.calendarBody}>
+                  {/* Grid */}
+                  <div className={styles.calendarGrid}>
+                    <div className={styles.calGrid}>
+                      <div className={styles.calDayHeaders}>
+                        {DAY_NAMES.map(d => <div key={d} className={styles.calDayHeader}>{d}</div>)}
+                      </div>
+                      <div className={styles.calCells}>
+                        {cells.map((day, idx) => {
+                          if (!day) return <div key={`empty-${idx}`} className={styles.calCellEmpty}/>;
+                          const cellDate = new Date(year, month, day);
+                          const isToday = today.getFullYear()===year && today.getMonth()===month && today.getDate()===day;
+                          const isSelected = selectedCalDay?.getDate()===day && selectedCalDay?.getMonth()===month && selectedCalDay?.getFullYear()===year;
+                          const evs = getEventsForDay(cellDate);
+                          return (
+                            <button key={day} className={`${styles.calCell} ${isToday?styles.calCellToday:""} ${isSelected?styles.calCellSelected:""}`}
+                              onClick={() => setSelectedCalDay(cellDate)}>
+                              <span className={styles.calDayNum}>{day}</span>
+                              <div className={styles.calDots}>
+                                {evs.slice(0,3).map((_,i) => <span key={i} className={styles.calDot}/>)}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right panel */}
+                  <div className={styles.calSidePanel}>
+                    {selectedCalDay ? (
+                      <>
+                        <div className={styles.calSidePanelTitle}>
+                          {selectedCalDay.toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"})}
+                        </div>
+                        {getEventsForDay(selectedCalDay).length === 0
+                          ? <div className={styles.calNoEvents}>No events this day.</div>
+                          : getEventsForDay(selectedCalDay).map((ev) => (
+                            <button key={ev.id} className={styles.calEventItem} onClick={() => { setSelectedEvent(ev); setShowEventDetailModal(true); }}>
+                              <div className={styles.calEventTitle}>{ev.summary}</div>
+                              {ev.start?.dateTime && <div className={styles.calEventTime}><Clock size={11}/> {new Date(ev.start.dateTime).toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})}</div>}
+                              {ev.location && <div className={styles.calEventTime}><MapPin size={11}/> {ev.location.slice(0,40)}</div>}
+                            </button>
+                          ))
+                        }
+                      </>
+                    ) : (
+                      <>
+                        <div className={styles.calSidePanelTitle}>Upcoming Events</div>
+                        {getUpcomingEvents().length === 0
+                          ? <div className={styles.calNoEvents}>No upcoming events.</div>
+                          : getUpcomingEvents().map((ev) => {
+                            const evDate = new Date(ev.start?.date || ev.start?.dateTime);
+                            return (
+                              <button key={ev.id} className={styles.calEventItem} onClick={() => { setSelectedEvent(ev); setShowEventDetailModal(true); }}>
+                                <div className={styles.calEventDate}>{evDate.toLocaleDateString("en-PH",{month:"short",day:"numeric"})}</div>
+                                <div className={styles.calEventTitle}>{ev.summary}</div>
+                                {ev.start?.dateTime && <div className={styles.calEventTime}><Clock size={11}/> {new Date(ev.start.dateTime).toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})}</div>}
+                                {ev.location && <div className={styles.calEventTime}><MapPin size={11}/> {ev.location.slice(0,35)}{ev.location.length>35?"…":""}</div>}
+                              </button>
+                            );
+                          })
+                        }
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* ---- ORDINANCES TAB ---- */}
         {activeTab === "ordinances" && !fetchingOrdinances && (
           <>
@@ -952,7 +1206,7 @@ export default function AdminDashboard() {
                   <div className={styles.ordinanceActions}>
                     <a href={o.extracted_text ? `http://localhost:5000/api/ordinances/${o.id}/print` : `http://localhost:5000/uploads/${o.filename}`} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
                     <button className={styles.editBtn} onClick={() => handleOpenEditOrdinance(o)}><Pencil size={13} /> Edit</button>
-                    <button className={styles.deleteBtn} onClick={() => handleDeleteOrdinance(o.id)}><Trash2 size={13} /> Delete</button>
+                    <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: o.id, type: "ordinance", name: o.title })}><Trash2 size={13} /> Delete</button>
                   </div>
                 </div>
               ))}
@@ -1019,7 +1273,7 @@ export default function AdminDashboard() {
                   <div className={styles.ordinanceActions}>
                     <a href={r.extracted_text ? `http://localhost:5000/api/resolutions/${r.id}/print` : `http://localhost:5000/uploads/${r.filename}`} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
                     <button className={styles.editBtn} onClick={() => handleOpenEditResolution(r)}><Pencil size={13} /> Edit</button>
-                    <button className={styles.deleteBtn} onClick={() => handleDeleteResolution(r.id)}><Trash2 size={13} /> Delete</button>
+                    <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: r.id, type: "resolution", name: r.title })}><Trash2 size={13} /> Delete</button>
                   </div>
                 </div>
               ))}
@@ -1060,7 +1314,7 @@ export default function AdminDashboard() {
                     <div className={styles.officialTerm}><CalendarDays size={12} strokeWidth={1.5} /> {o.term_period}</div>
                     <div className={styles.ordinanceCount}><ClipboardList size={12} strokeWidth={1.5} /> {getOfficialOrdinances(o.id).length} ordinance{getOfficialOrdinances(o.id).length !== 1 ? "s" : ""} passed</div>
                   </button>
-                  <button className={styles.deleteBtn} onClick={() => handleDeleteOfficial(o.id)}><Trash2 size={13} /> Delete</button>
+                  <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: o.id, type: "official", name: o.full_name })}><Trash2 size={13} /> Delete</button>
                 </div>
               ))}
               {filteredOfficials.length === 0 && (
@@ -1135,7 +1389,7 @@ export default function AdminDashboard() {
                       <a href={`http://localhost:5000/api/session-minutes/${s.id}/print`} target="_blank" rel="noreferrer" className={styles.printBtn}><Printer size={13} /> Print</a>
                       <a href={`http://localhost:5000/api/session-minutes/${s.id}/print`} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
                       <button className={styles.editBtn} onClick={() => handleOpenEditSession(s)}><Pencil size={13} /> Edit</button>
-                      <button className={styles.deleteBtn} onClick={() => handleDeleteSession(s.id)}><Trash2 size={13} /> Delete</button>
+                      <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: s.id, type: "session", name: s.session_number || "this session" })}><Trash2 size={13} /> Delete</button>
                     </div>
                   </div>
                 );
@@ -1159,7 +1413,6 @@ export default function AdminDashboard() {
               <div className={`${styles.statCard} ${styles.statCardOrange}`}><div className={styles.statNumber}>{announcements.filter(a => a.priority === "urgent").length}</div><div className={styles.statLabel}>Urgent</div></div>
               <div className={`${styles.statCard} ${styles.statCardGreen}`}><div className={styles.statNumber}>{announcements.filter(a => !a.expires_at || new Date(a.expires_at) >= new Date()).length}</div><div className={styles.statLabel}>Active</div></div>
             </div>
-
             <div className={styles.searchFilterBar}>
               <div className={styles.searchInputWrapper}>
                 <Search size={16} className={styles.searchIcon} />
@@ -1176,7 +1429,6 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className={styles.searchResultCount}>Showing {filteredAnnouncements.length} of {announcements.length} announcements</div>
-
             <div className={styles.announcementList}>
               {filteredAnnouncements.map((a) => {
                 const cfg = priorityConfig[a.priority] || priorityConfig.normal;
@@ -1211,7 +1463,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className={styles.announcementActions}>
                       <button className={styles.editBtn} onClick={() => handleOpenEditAnnouncement(a)}><Pencil size={13} /> Edit</button>
-                      <button className={styles.deleteBtn} onClick={() => handleDeleteAnnouncement(a.id)}><Trash2 size={13} /> Delete</button>
+                      <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: a.id, type: "announcement", name: a.title })}><Trash2 size={13} /> Delete</button>
                     </div>
                   </div>
                 );
@@ -1240,9 +1492,26 @@ export default function AdminDashboard() {
           <input className={styles.input} placeholder="Username" value={newAdmin.username} onChange={(e) => setNewAdmin({ ...newAdmin, username: e.target.value })} />
           <input className={styles.input} type="email" placeholder="Email Address" value={newAdmin.email} onChange={(e) => setNewAdmin({ ...newAdmin, email: e.target.value })} />
           <input className={styles.input} type="password" placeholder="Password" value={newAdmin.password} onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })} />
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => setShowAddAdminModal(false)}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowAddAdminModal(false); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleAddAdmin} disabled={submitting}>{submitting ? "Adding..." : "Add Admin"}</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* Add User */}
+      {showAddUserModal && (
+        <div className={styles.modalOverlay}><div className={styles.modal}>
+          <h2 className={styles.modalTitle}>Add New User</h2>
+          <input className={styles.input} placeholder="Full Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+          <input className={styles.input} placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
+          <input className={styles.input} type="email" placeholder="Email Address" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+          <input className={styles.input} type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+          <ModalAlert />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowAddUserModal(false); setModalMessage(""); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleAddUser} disabled={submitting}>{submitting ? "Adding..." : "Add User"}</button>
           </div>
         </div></div>
       )}
@@ -1278,8 +1547,9 @@ export default function AdminDashboard() {
             <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this ordinance:</p>
             <OfficialsCheckList selected={selectedOfficials} onToggle={toggleOfficial} />
           </div>
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowOrdinanceModal(false); setOrdinanceFile(null); setOrdinanceNumber(""); setOrdinanceTitle(""); setOrdinanceYear(""); setSelectedOfficials([]); setUploadType(""); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowOrdinanceModal(false); setOrdinanceFile(null); setOrdinanceNumber(""); setOrdinanceTitle(""); setOrdinanceYear(""); setSelectedOfficials([]); setUploadType(""); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUploadOrdinance} disabled={submitting || !uploadType}>
               {submitting ? (uploadType === "image-to-text" ? "Extracting text..." : "Uploading...") : "Upload"}
             </button>
@@ -1318,8 +1588,9 @@ export default function AdminDashboard() {
             <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this resolution:</p>
             <OfficialsCheckList selected={selectedResolutionOfficials} onToggle={toggleResolutionOfficial} />
           </div>
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowResolutionModal(false); setResolutionFile(null); setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setSelectedResolutionOfficials([]); setResolutionUploadType(""); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowResolutionModal(false); setResolutionFile(null); setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUploadResolution} disabled={submitting || !resolutionUploadType}>
               {submitting ? (resolutionUploadType === "image-to-text" ? "Extracting text..." : "Uploading...") : "Upload"}
             </button>
@@ -1346,8 +1617,9 @@ export default function AdminDashboard() {
             <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this ordinance:</p>
             <OfficialsCheckList selected={editSelectedOfficials} onToggle={toggleEditOfficial} />
           </div>
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowEditOrdinanceModal(false); setEditingOrdinance(null); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditOrdinanceModal(false); setEditingOrdinance(null); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUpdateOrdinance} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
           </div>
         </div></div>
@@ -1372,8 +1644,9 @@ export default function AdminDashboard() {
             <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this resolution:</p>
             <OfficialsCheckList selected={editResolutionSelectedOfficials} onToggle={toggleEditResolutionOfficial} />
           </div>
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowEditResolutionModal(false); setEditingResolution(null); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditResolutionModal(false); setEditingResolution(null); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUpdateResolution} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
           </div>
         </div></div>
@@ -1392,8 +1665,9 @@ export default function AdminDashboard() {
               {officialPhoto ? <><CheckSquare size={14} strokeWidth={1.5} /> {officialPhoto.name}</> : <><Upload size={14} strokeWidth={1.5} /> Click to upload photo (optional)</>}
             </label>
           </div>
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => setShowOfficialModal(false)}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowOfficialModal(false); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleAddOfficial} disabled={submitting}>{submitting ? "Adding..." : "Add Official"}</button>
           </div>
         </div></div>
@@ -1519,8 +1793,9 @@ export default function AdminDashboard() {
               )}
             </>
           )}
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowSessionModal(false); resetSessionForm(); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowSessionModal(false); resetSessionForm(); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleAddSession} disabled={submitting}>
               {submitting ? (sessionInputMode === "ocr" ? "Extracting & Saving..." : "Saving...") : "Save Session"}
             </button>
@@ -1557,8 +1832,9 @@ export default function AdminDashboard() {
           <textarea className={styles.textArea} value={editSessionForm.agenda} onChange={(e) => setEditSessionForm({ ...editSessionForm, agenda: e.target.value })} rows={5} />
           <label className={styles.fieldLabel} style={{ marginTop: "10px" }}>Minutes of the Session</label>
           <textarea className={styles.textArea} value={editSessionForm.minutes_text} onChange={(e) => setEditSessionForm({ ...editSessionForm, minutes_text: e.target.value })} rows={8} />
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowEditSessionModal(false); setEditingSession(null); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditSessionModal(false); setEditingSession(null); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUpdateSession} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
           </div>
         </div></div>
@@ -1575,12 +1851,9 @@ export default function AdminDashboard() {
             {["urgent", "high", "normal", "low"].map((p) => {
               const cfg = priorityConfig[p];
               return (
-                <button
-                  key={p}
-                  className={`${styles.priorityBtn} ${announcementForm.priority === p ? styles.priorityBtnActive : ""}`}
+                <button key={p} className={`${styles.priorityBtn} ${announcementForm.priority === p ? styles.priorityBtnActive : ""}`}
                   style={announcementForm.priority === p ? { background: cfg.bg, borderColor: cfg.border, color: cfg.color } : {}}
-                  onClick={() => setAnnouncementForm({ ...announcementForm, priority: p })}
-                >
+                  onClick={() => setAnnouncementForm({ ...announcementForm, priority: p })}>
                   {cfg.label}
                 </button>
               );
@@ -1590,8 +1863,9 @@ export default function AdminDashboard() {
           <textarea className={styles.textArea} placeholder="Write your announcement here..." value={announcementForm.body} onChange={(e) => setAnnouncementForm({ ...announcementForm, body: e.target.value })} rows={7} style={{ height: "auto" }} />
           <label className={styles.fieldLabel}>Expiry Date <span className={styles.fieldHint}>(optional — leave blank for no expiry)</span></label>
           <input className={styles.input} type="date" value={announcementForm.expires_at} onChange={(e) => setAnnouncementForm({ ...announcementForm, expires_at: e.target.value })} />
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowAnnouncementModal(false); resetAnnouncementForm(); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowAnnouncementModal(false); resetAnnouncementForm(); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleAddAnnouncement} disabled={submitting}>{submitting ? "Posting..." : "Post Announcement"}</button>
           </div>
         </div></div>
@@ -1608,12 +1882,9 @@ export default function AdminDashboard() {
             {["urgent", "high", "normal", "low"].map((p) => {
               const cfg = priorityConfig[p];
               return (
-                <button
-                  key={p}
-                  className={`${styles.priorityBtn} ${editAnnouncementForm.priority === p ? styles.priorityBtnActive : ""}`}
+                <button key={p} className={`${styles.priorityBtn} ${editAnnouncementForm.priority === p ? styles.priorityBtnActive : ""}`}
                   style={editAnnouncementForm.priority === p ? { background: cfg.bg, borderColor: cfg.border, color: cfg.color } : {}}
-                  onClick={() => setEditAnnouncementForm({ ...editAnnouncementForm, priority: p })}
-                >
+                  onClick={() => setEditAnnouncementForm({ ...editAnnouncementForm, priority: p })}>
                   {cfg.label}
                 </button>
               );
@@ -1623,41 +1894,95 @@ export default function AdminDashboard() {
           <textarea className={styles.textArea} value={editAnnouncementForm.body} onChange={(e) => setEditAnnouncementForm({ ...editAnnouncementForm, body: e.target.value })} rows={7} style={{ height: "auto" }} />
           <label className={styles.fieldLabel}>Expiry Date <span className={styles.fieldHint}>(optional)</span></label>
           <input className={styles.input} type="date" value={editAnnouncementForm.expires_at} onChange={(e) => setEditAnnouncementForm({ ...editAnnouncementForm, expires_at: e.target.value })} />
+          <ModalAlert />
           <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowEditAnnouncementModal(false); setEditingAnnouncement(null); }}>Cancel</button>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditAnnouncementModal(false); setEditingAnnouncement(null); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUpdateAnnouncement} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
           </div>
         </div></div>
       )}
 
-   
-      {showAddUserModal && (
-    <div className={styles.modalOverlay}><div className={styles.modal}>
-    <h2 className={styles.modalTitle}>Add New User</h2>
-    <input className={styles.input} placeholder="Full Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-    <input className={styles.input} placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} />
-    <input className={styles.input} type="email" placeholder="Email Address" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-    <input className={styles.input} type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
-    <div className={styles.modalBtns}>
-      <button className={styles.cancelBtn} onClick={() => setShowAddUserModal(false)}>Cancel</button>
-      <button className={styles.confirmBtn} onClick={handleAddUser} disabled={submitting}>{submitting ? "Adding..." : "Add User"}</button>
-    </div>
-  </div></div>
-)}
-
-{/* DELETE CONFIRM MODAL — ADD THIS */}
+      {/* DELETE CONFIRM MODAL */}
       {deleteTarget && (
         <ConfirmModal
           type="delete"
-          title="Delete this user?"
+          title={`Delete this ${deleteTarget.type}?`}
           message={`"${deleteTarget.name}" will be permanently removed. This cannot be undone.`}
           confirmLabel="Delete"
-          onConfirm={() => { handleDeleteUser(deleteTarget.id); setDeleteTarget(null); }}
+          onConfirm={() => {
+            if (deleteTarget.type === "user") handleDeleteUser(deleteTarget.id);
+            else if (deleteTarget.type === "ordinance") handleDeleteOrdinance(deleteTarget.id);
+            else if (deleteTarget.type === "resolution") handleDeleteResolution(deleteTarget.id);
+            else if (deleteTarget.type === "official") handleDeleteOfficial(deleteTarget.id);
+            else if (deleteTarget.type === "session") handleDeleteSession(deleteTarget.id);
+            else if (deleteTarget.type === "announcement") handleDeleteAnnouncement(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
 
+      {/* CALENDAR SETUP MODAL */}
+      {showCalendarSetup && (
+        <div className={styles.modalOverlay}><div className={styles.modal}>
+          <h2 className={styles.modalTitle}><Calendar size={18}/> Connect Google Calendar</h2>
+          <p className={styles.fileHint} style={{marginBottom:8}}>Steps: Google Cloud Console → New Project → Enable Calendar API → Credentials → Create API Key → Copy it here. Also share your Google Calendar to anyone (read) and copy its Calendar ID.</p>
+          <label className={styles.fieldLabel}>API Key</label>
+          <input className={styles.input} placeholder="AIza..." value={calendarApiKeyInput} onChange={e => setCalendarApiKeyInput(e.target.value)} />
+          <label className={styles.fieldLabel}>Calendar ID</label>
+          <input className={styles.input} placeholder="your-calendar-id@group.calendar.google.com" value={calendarIdInput} onChange={e => setCalendarIdInput(e.target.value)} />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => setShowCalendarSetup(false)}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleSaveCalendarConfig}>Save & Connect</button>
+          </div>
+        </div></div>
+      )}
 
+      {/* ADD EVENT MODAL */}
+      {showAddEventModal && (
+        <div className={styles.modalOverlay}><div className={styles.modal}>
+          <h2 className={styles.modalTitle}><PlusCircle size={16}/> Add Calendar Event</h2>
+          <input className={styles.input} placeholder="Event title *" value={eventForm.summary} onChange={e => setEventForm({...eventForm, summary: e.target.value})} />
+          <label className={styles.fieldLabel}>
+            <input type="checkbox" checked={eventForm.allDay} onChange={e => setEventForm({...eventForm, allDay: e.target.checked})} style={{marginRight:6}}/>
+            All-day event
+          </label>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><label className={styles.fieldLabel}>Start Date *</label><input className={styles.input} type="date" value={eventForm.startDate} onChange={e => setEventForm({...eventForm, startDate: e.target.value})}/></div>
+            {!eventForm.allDay && <div style={{flex:1}}><label className={styles.fieldLabel}>Start Time</label><input className={styles.input} type="time" value={eventForm.startTime} onChange={e => setEventForm({...eventForm, startTime: e.target.value})}/></div>}
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><label className={styles.fieldLabel}>End Date</label><input className={styles.input} type="date" value={eventForm.endDate} onChange={e => setEventForm({...eventForm, endDate: e.target.value})}/></div>
+            {!eventForm.allDay && <div style={{flex:1}}><label className={styles.fieldLabel}>End Time</label><input className={styles.input} type="time" value={eventForm.endTime} onChange={e => setEventForm({...eventForm, endTime: e.target.value})}/></div>}
+          </div>
+          <input className={styles.input} placeholder="Location (optional)" value={eventForm.location} onChange={e => setEventForm({...eventForm, location: e.target.value})} />
+          <textarea className={styles.textArea} placeholder="Description (optional)" value={eventForm.description} onChange={e => setEventForm({...eventForm, description: e.target.value})} rows={3}/>
+          {calendarModalMsg && <div style={{color:"#c53030",fontSize:13,marginBottom:8}}><AlertCircle size={13}/> {calendarModalMsg}</div>}
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowAddEventModal(false); resetEventForm(); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleAddEvent} disabled={addingEvent}>{addingEvent ? "Adding..." : "Add Event"}</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* EVENT DETAIL MODAL */}
+      {showEventDetailModal && selectedEvent && (() => {
+        const ev = selectedEvent;
+        const start = ev.start?.dateTime ? new Date(ev.start.dateTime) : ev.start?.date ? new Date(ev.start.date) : null;
+        const end   = ev.end?.dateTime   ? new Date(ev.end.dateTime)   : ev.end?.date   ? new Date(ev.end.date)   : null;
+        return (
+          <div className={styles.modalOverlay}><div className={styles.modal}>
+            <h2 className={styles.modalTitle}>{ev.summary}</h2>
+            {start && <div style={{fontSize:13,color:"#4a5568",marginBottom:6}}><Clock size={13}/> {start.toLocaleDateString("en-PH",{weekday:"long",year:"numeric",month:"long",day:"numeric"})} {ev.start?.dateTime && `• ${start.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})} – ${end?.toLocaleTimeString("en-PH",{hour:"2-digit",minute:"2-digit"})}`}</div>}
+            {ev.location && <div style={{fontSize:13,color:"#4a5568",marginBottom:6}}><MapPin size={13}/> <span>{ev.location}</span></div>}
+            {ev.description && <div className={styles.calEventDetailDesc}>{ev.description}</div>}
+            {ev.htmlLink && <a href={ev.htmlLink} target="_blank" rel="noreferrer" className={styles.calOpenGcal}><ExternalLink size={13}/> Open in Google Calendar</a>}
+            <div className={styles.modalBtns}>
+              <button className={styles.confirmBtn} onClick={() => setShowEventDetailModal(false)}>Close</button>
+            </div>
+          </div></div>
+        );
+      })()}
 
     </div>
   );
