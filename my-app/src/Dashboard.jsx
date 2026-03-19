@@ -4,11 +4,18 @@ export default function Dashboard() {
   const [user, setUser] = useState(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('user')
-    if (!stored) { window.location.replace('/'); return; }
-    const parsed = JSON.parse(stored)
-    if (parsed.role !== 'user') { window.location.replace('/'); return; }
-    setUser(parsed)
+    try {
+      const stored = localStorage.getItem('user')
+      const token = localStorage.getItem('token')
+      if (!stored || !token) { window.location.replace('/'); return; }
+      const parsed = JSON.parse(stored)
+      if (parsed.role !== 'user') { window.location.replace('/'); return; }
+      setUser(parsed)
+    } catch {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      window.location.replace('/')
+    }
   }, [])
 
   const handleLogout = () => {

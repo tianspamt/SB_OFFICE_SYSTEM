@@ -1,33 +1,40 @@
 import { useState } from 'react'
-import './LogIn.css' // reuse your existing styles or create Register.css
+import './LogIn.css'
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 export default function Register() {
-  const [form, setForm] = useState({ name: '', username: '', email: '', password: '', confirmPassword: '' })
+  const [form, setForm] = useState({
+    name: '',
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: ''
+  })
   const [errors, setErrors] = useState({})
   const [serverError, setServerError] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
 
   const validate = () => {
-    const newErrors = {}
-    if (!form.name.trim()) newErrors.name = 'Full name is required.'
-    if (!form.username.trim()) newErrors.username = 'Username is required.'
-    if (!form.email.trim()) {
-      newErrors.email = 'Email is required.'
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      newErrors.email = 'Enter a valid email address.'
-    }
-    if (!form.password) {
-      newErrors.password = 'Password is required.'
-    } else if (form.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters.'
-    }
-    if (!form.confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password.'
-    } else if (form.password !== form.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match.'
-    }
-    return newErrors
+    const e = {}
+    if (!form.name.trim())
+      e.name = 'Full name is required.'
+    if (!form.username.trim())
+      e.username = 'Username is required.'
+    if (!form.email.trim())
+      e.email = 'Email is required.'
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+      e.email = 'Enter a valid email address.'
+    if (!form.password)
+      e.password = 'Password is required.'
+    else if (form.password.length < 6)
+      e.password = 'Password must be at least 6 characters.'
+    if (!form.confirmPassword)
+      e.confirmPassword = 'Please confirm your password.'
+    else if (form.password !== form.confirmPassword)
+      e.confirmPassword = 'Passwords do not match.'
+    return e
   }
 
   const handleChange = (e) => {
@@ -48,7 +55,7 @@ export default function Register() {
 
     try {
       setLoading(true)
-      const response = await fetch('http://localhost:5000/api/register', {
+      const response = await fetch(`${API}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -77,15 +84,36 @@ export default function Register() {
     return (
       <div className="wrapper">
         <div style={{ textAlign: 'center', padding: '40px' }}>
-          <h2 style={{ color: '#1a365d' }}>✅ Registration Successful!</h2>
-          <p style={{ marginTop: '12px' }}>Your account has been created.</p>
-          <a href="/" style={{ display: 'inline-block', marginTop: '20px', color: '#1a365d', fontWeight: 'bold' }}>
+          <div style={{
+            width: 70, height: 70, borderRadius: '50%',
+            background: '#d1fae5', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            margin: '0 auto 20px'
+          }}>
+            <i className='bx bx-check' style={{ fontSize: 36, color: '#10b981' }}></i>
+          </div>
+          <h2 style={{ color: '#1a365d', marginBottom: 10 }}>Registration Successful!</h2>
+          <p style={{ color: '#718096', fontSize: 14 }}>Your account has been created.</p>
+          <a href="/" style={{
+            display: 'inline-block', marginTop: 24,
+            padding: '10px 28px', background: '#1a365d',
+            color: '#fff', borderRadius: 8, textDecoration: 'none',
+            fontWeight: 600, fontSize: 14
+          }}>
             ← Back to Login
           </a>
         </div>
       </div>
     )
   }
+
+  const fields = [
+    { name: 'name',            type: 'text',     placeholder: 'Full Name',       icon: 'bxs-user-detail' },
+    { name: 'username',        type: 'text',     placeholder: 'Username',         icon: 'bxs-user'        },
+    { name: 'email',           type: 'email',    placeholder: 'Email Address',    icon: 'bxs-envelope'    },
+    { name: 'password',        type: 'password', placeholder: 'Password',         icon: 'bxs-lock-alt'    },
+    { name: 'confirmPassword', type: 'password', placeholder: 'Confirm Password', icon: 'bxs-lock'        },
+  ]
 
   return (
     <div className="wrapper">
@@ -94,68 +122,23 @@ export default function Register() {
         <img src="src/assets/image/logo.png" alt="logo" />
         <h2>Create your account</h2>
 
-        {/* Full Name */}
-        <div className={`input-box ${errors.name ? 'input-error' : ''}`}>
-          <input
-            type="text"
-            name="name"
-            placeholder={errors.name || 'Full Name'}
-            value={form.name}
-            onChange={handleChange}
-          />
-          <i className='bx bxs-user-detail'></i>
-        </div>
-
-        {/* Username */}
-        <div className={`input-box ${errors.username ? 'input-error' : ''}`}>
-          <input
-            type="text"
-            name="username"
-            placeholder={errors.username || 'Username'}
-            value={form.username}
-            onChange={handleChange}
-          />
-          <i className='bx bxs-user'></i>
-        </div>
-
-        {/* Email */}
-        <div className={`input-box ${errors.email ? 'input-error' : ''}`}>
-          <input
-            type="email"
-            name="email"
-            placeholder={errors.email || 'Email Address'}
-            value={form.email}
-            onChange={handleChange}
-          />
-          <i className='bx bxs-envelope'></i>
-        </div>
-
-        {/* Password */}
-        <div className={`input-box ${errors.password ? 'input-error' : ''}`}>
-          <input
-            type="password"
-            name="password"
-            placeholder={errors.password || 'Password'}
-            value={form.password}
-            onChange={handleChange}
-          />
-          <i className='bx bxs-lock-alt'></i>
-        </div>
-
-        {/* Confirm Password */}
-        <div className={`input-box ${errors.confirmPassword ? 'input-error' : ''}`}>
-          <input
-            type="password"
-            name="confirmPassword"
-            placeholder={errors.confirmPassword || 'Confirm Password'}
-            value={form.confirmPassword}
-            onChange={handleChange}
-          />
-          <i className='bx bxs-lock'></i>
-        </div>
+        {fields.map(({ name, type, placeholder, icon }) => (
+          <div key={name} className={`input-box ${errors[name] ? 'input-error' : ''}`}>
+            <input
+              type={type}
+              name={name}
+              placeholder={errors[name] || placeholder}
+              value={form[name]}
+              onChange={handleChange}
+            />
+            <i className={`bx ${icon}`}></i>
+          </div>
+        ))}
 
         {serverError && (
-          <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>{serverError}</p>
+          <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>
+            {serverError}
+          </p>
         )}
 
         <button type="submit" className="btn" disabled={loading}>

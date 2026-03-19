@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import './LogIn.css'
 
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
 export default function Login() {
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -11,28 +13,23 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
     let hasError = false
-
-    if (!identifier) { setIdentifierError(true); hasError = true }
-    else setIdentifierError(false)
-
-    if (!password) { setPasswordError(true); hasError = true }
-    else setPasswordError(false)
-
+    if (!identifier) { setIdentifierError(true); hasError = true } else setIdentifierError(false)
+    if (!password)   { setPasswordError(true);   hasError = true } else setPasswordError(false)
     if (hasError) return
 
     try {
       setLoading(true)
       setLoginError('')
 
-      const response = await fetch('http://localhost:5000/api/login', {
+      const response = await fetch(`${API}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, password })
       })
 
       const data = await response.json()
-      console.log("Response from backend:", data)
 
       if (data.success) {
         localStorage.setItem('token', data.token)
@@ -45,8 +42,8 @@ export default function Login() {
       } else {
         setLoginError(data.message || 'Invalid credentials.')
       }
-    } catch (error) {
-      console.error('Error:', error)
+    } catch (err) {
+      console.error('Error:', err)
       setLoginError('Could not connect to server. Please try again.')
     } finally {
       setLoading(false)
@@ -55,7 +52,7 @@ export default function Login() {
 
   return (
     <div className="wrapper">
-      <form id="loginForm" onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
         <h1>OFFICE OF SANGGUNIANG BAYAN</h1>
         <img src="src/assets/image/logo.png" alt="logo" />
         <h2>Log in with your username or email</h2>
@@ -87,7 +84,9 @@ export default function Login() {
         </div>
 
         {loginError && (
-          <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>{loginError}</p>
+          <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>
+            {loginError}
+          </p>
         )}
 
         <button type="submit" className="btn" disabled={loading}>
