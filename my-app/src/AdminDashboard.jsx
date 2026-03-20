@@ -7,6 +7,7 @@ import {
   ClipboardList, Copy, Upload, CheckSquare, AlertCircle, BookOpen,
   Printer, FileEdit, Camera, Gavel, Megaphone, ChevronDown,
   ChevronRight, Calendar, ChevronLeft, Clock, MapPin, PlusCircle,
+  Activity, RefreshCw,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 
@@ -49,6 +50,17 @@ const getLocalHolidays = (year) => [
 ];
 
 const COLOR_SWATCHES = ["#009439","#3b82f6","#eab308","#ec4899","#8b5cf6","#f97316","#14b8a6","#ef4444"];
+
+// ─── Action colors for logs ───────────────────────────────────────────────────
+const ACTION_COLORS = {
+  LOGIN:    { bg: "#d1fae5", color: "#065f46" },
+  LOGOUT:   { bg: "#f3f4f6", color: "#374151" },
+  REGISTER: { bg: "#dbeafe", color: "#1e40af" },
+  UPLOAD:   { bg: "#ede9fe", color: "#5b21b6" },
+  CREATE:   { bg: "#fef9c3", color: "#854d0e" },
+  UPDATE:   { bg: "#ffedd5", color: "#9a3412" },
+  DELETE:   { bg: "#fee2e2", color: "#991b1b" },
+}
 
 // ─── EventFormFields ──────────────────────────────────────────────────────────
 function EventFormFields({ form, setForm }) {
@@ -135,6 +147,13 @@ export default function AdminDashboard() {
   const [fetchingMinutes, setFetchingMinutes] = useState(false);
   const [fetchingResolutions, setFetchingResolutions] = useState(false);
   const [fetchingAnnouncements, setFetchingAnnouncements] = useState(false);
+
+  // ── activity logs ──
+  const [logs, setLogs] = useState([]);
+  const [logStats, setLogStats] = useState(null);
+  const [fetchingLogs, setFetchingLogs] = useState(false);
+  const [logModuleFilter, setLogModuleFilter] = useState("all");
+  const [logActionFilter, setLogActionFilter] = useState("all");
 
   // ── modals ──
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -271,11 +290,19 @@ export default function AdminDashboard() {
       fetchPHHolidays(year);
       fetchPHHolidays(year + 1);
     }
+    if (activeTab === "logs") {
+      fetchLogs();
+      fetchLogStats();
+    }
   }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "calendar") fetchPHHolidays(calendarViewDate.getFullYear());
   }, [calendarViewDate]);
+
+  useEffect(() => {
+    if (activeTab === "logs") fetchLogs();
+  }, [logModuleFilter, logActionFilter]);
 
   // ─── Message helpers ──────────────────────────────────────────────────────────
   const showMsg = (msg, type = "success") => {
@@ -357,6 +384,26 @@ export default function AdminDashboard() {
     finally { setFetchingCalendar(false); }
   };
 
+  // ─── Fetch Logs ───────────────────────────────────────────────────────────────
+  const fetchLogs = async () => {
+    setFetchingLogs(true);
+    try {
+      let url = `${API}/api/activity-logs?limit=100`;
+      if (logModuleFilter !== "all") url += `&module=${logModuleFilter}`;
+      if (logActionFilter !== "all") url += `&action=${logActionFilter}`;
+      const d = await (await authFetch(url)).json();
+      setLogs(Array.isArray(d) ? d : []);
+    } catch { setLogs([]); }
+    finally { setFetchingLogs(false); }
+  };
+
+  const fetchLogStats = async () => {
+    try {
+      const d = await (await authFetch(`${API}/api/activity-logs/stats`)).json();
+      setLogStats(d);
+    } catch {}
+  };
+
   // ─── PH Holidays ─────────────────────────────────────────────────────────────
   const fetchPHHolidays = async (year) => {
     if (phHolidays[year]) return;
@@ -367,8 +414,7 @@ export default function AdminDashboard() {
       setPhHolidays((prev) => ({
         ...prev,
         [year]: data.map((h) => ({
-          date: h.date,
-          name: h.localName || h.name,
+          date: h.date, name: h.localName || h.name,
           type: h.types?.includes("Public") ? "national" : "special",
         })),
       }));
@@ -469,9 +515,7 @@ export default function AdminDashboard() {
     }
     setSavingLocalEvent(true);
     try {
-      const res = await authFetch(`${API}/api/calendar-events`, {
-        method: "POST", body: JSON.stringify(localEventForm),
-      });
+      const res = await authFetch(`${API}/api/calendar-events`, { method: "POST", body: JSON.stringify(localEventForm) });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("Event saved!"); setShowLocalEventModal(false);
@@ -499,8 +543,7 @@ export default function AdminDashboard() {
     }
     setSavingLocalEvent(true);
     try {
-      const res = await authFetch(`${API}/api/calendar-events/${editingEvent.dbId}`,
-        { method: "PUT", body: JSON.stringify(editEventForm) });
+      const res = await authFetch(`${API}/api/calendar-events/${editingEvent.dbId}`, { method: "PUT", body: JSON.stringify(editEventForm) });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("Event updated!"); setShowEditEventModal(false);
@@ -543,8 +586,7 @@ export default function AdminDashboard() {
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/api/register`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newUser),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newUser),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -571,16 +613,11 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("ordinance_number", ordinanceNumber);
-    fd.append("title", ordinanceTitle);
-    fd.append("year", ordinanceYear);
-    fd.append("file", ordinanceFile);
-    fd.append("officials", JSON.stringify(selectedOfficials));
-    fd.append("uploadType", uploadType);
+    fd.append("ordinance_number", ordinanceNumber); fd.append("title", ordinanceTitle);
+    fd.append("year", ordinanceYear); fd.append("file", ordinanceFile);
+    fd.append("officials", JSON.stringify(selectedOfficials)); fd.append("uploadType", uploadType);
     try {
-      const ep = uploadType === "image-to-text"
-        ? `${API}/api/ordinances/upload-image-text`
-        : `${API}/api/ordinances/upload`;
+      const ep = uploadType === "image-to-text" ? `${API}/api/ordinances/upload-image-text` : `${API}/api/ordinances/upload`;
       const res = await authFetch(ep, { method: "POST", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -595,10 +632,8 @@ export default function AdminDashboard() {
   };
 
   const handleOpenEditOrdinance = (o) => {
-    setEditingOrdinance(o);
-    setEditOrdinanceNumber(o.ordinance_number || "");
-    setEditOrdinanceTitle(o.title);
-    setEditOrdinanceYear(o.year || "");
+    setEditingOrdinance(o); setEditOrdinanceNumber(o.ordinance_number || "");
+    setEditOrdinanceTitle(o.title); setEditOrdinanceYear(o.year || "");
     setEditSelectedOfficials(o.officials ? o.officials.map((x) => x.id) : []);
     setEditOrdinanceFile(null); setModalMessage(""); setShowEditOrdinanceModal(true);
   };
@@ -611,17 +646,14 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("ordinance_number", editOrdinanceNumber);
-    fd.append("title", editOrdinanceTitle);
-    fd.append("year", editOrdinanceYear);
-    fd.append("officials", JSON.stringify(editSelectedOfficials));
+    fd.append("ordinance_number", editOrdinanceNumber); fd.append("title", editOrdinanceTitle);
+    fd.append("year", editOrdinanceYear); fd.append("officials", JSON.stringify(editSelectedOfficials));
     if (editOrdinanceFile) fd.append("file", editOrdinanceFile);
     try {
       const res = await authFetch(`${API}/api/ordinances/${editingOrdinance.id}`, { method: "PUT", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Ordinance updated!"); setShowEditOrdinanceModal(false);
-        setEditingOrdinance(null); fetchOrdinances();
+        showMsg("Ordinance updated!"); setShowEditOrdinanceModal(false); setEditingOrdinance(null); fetchOrdinances();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
@@ -643,16 +675,11 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("resolution_number", resolutionNumber);
-    fd.append("title", resolutionTitle);
-    fd.append("year", resolutionYear);
-    fd.append("file", resolutionFile);
-    fd.append("officials", JSON.stringify(selectedResolutionOfficials));
-    fd.append("uploadType", resolutionUploadType);
+    fd.append("resolution_number", resolutionNumber); fd.append("title", resolutionTitle);
+    fd.append("year", resolutionYear); fd.append("file", resolutionFile);
+    fd.append("officials", JSON.stringify(selectedResolutionOfficials)); fd.append("uploadType", resolutionUploadType);
     try {
-      const ep = resolutionUploadType === "image-to-text"
-        ? `${API}/api/resolutions/upload-image-text`
-        : `${API}/api/resolutions/upload`;
+      const ep = resolutionUploadType === "image-to-text" ? `${API}/api/resolutions/upload-image-text` : `${API}/api/resolutions/upload`;
       const res = await authFetch(ep, { method: "POST", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -667,10 +694,8 @@ export default function AdminDashboard() {
   };
 
   const handleOpenEditResolution = (r) => {
-    setEditingResolution(r);
-    setEditResolutionNumber(r.resolution_number || "");
-    setEditResolutionTitle(r.title);
-    setEditResolutionYear(r.year || "");
+    setEditingResolution(r); setEditResolutionNumber(r.resolution_number || "");
+    setEditResolutionTitle(r.title); setEditResolutionYear(r.year || "");
     setEditResolutionSelectedOfficials(r.officials ? r.officials.map((x) => x.id) : []);
     setEditResolutionFile(null); setModalMessage(""); setShowEditResolutionModal(true);
   };
@@ -683,17 +708,14 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("resolution_number", editResolutionNumber);
-    fd.append("title", editResolutionTitle);
-    fd.append("year", editResolutionYear);
-    fd.append("officials", JSON.stringify(editResolutionSelectedOfficials));
+    fd.append("resolution_number", editResolutionNumber); fd.append("title", editResolutionTitle);
+    fd.append("year", editResolutionYear); fd.append("officials", JSON.stringify(editResolutionSelectedOfficials));
     if (editResolutionFile) fd.append("file", editResolutionFile);
     try {
       const res = await authFetch(`${API}/api/resolutions/${editingResolution.id}`, { method: "PUT", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Resolution updated!"); setShowEditResolutionModal(false);
-        setEditingResolution(null); fetchResolutions();
+        showMsg("Resolution updated!"); setShowEditResolutionModal(false); setEditingResolution(null); fetchResolutions();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
@@ -717,8 +739,7 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("full_name", newOfficial.full_name);
-    fd.append("position", newOfficial.position);
+    fd.append("full_name", newOfficial.full_name); fd.append("position", newOfficial.position);
     fd.append("term_period", newOfficial.term_period);
     if (officialPhoto) fd.append("photo", officialPhoto);
     try {
@@ -792,12 +813,10 @@ export default function AdminDashboard() {
     if (!editSessionForm.session_date) { showModalMsg("Session date is required!", "error"); return; }
     setSubmitting(true);
     try {
-      const res = await authFetch(`${API}/api/session-minutes/${editingSession.id}`,
-        { method: "PUT", body: JSON.stringify(editSessionForm) });
+      const res = await authFetch(`${API}/api/session-minutes/${editingSession.id}`, { method: "PUT", body: JSON.stringify(editSessionForm) });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Session minutes updated!"); setShowEditSessionModal(false);
-        setEditingSession(null); fetchSessionMinutes();
+        showMsg("Session minutes updated!"); setShowEditSessionModal(false); setEditingSession(null); fetchSessionMinutes();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
@@ -822,12 +841,10 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     try {
-      const res = await authFetch(`${API}/api/announcements`,
-        { method: "POST", body: JSON.stringify(announcementForm) });
+      const res = await authFetch(`${API}/api/announcements`, { method: "POST", body: JSON.stringify(announcementForm) });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Announcement posted!"); resetAnnouncementForm();
-        setShowAnnouncementModal(false); fetchAnnouncements();
+        showMsg("Announcement posted!"); resetAnnouncementForm(); setShowAnnouncementModal(false); fetchAnnouncements();
       } else showModalMsg(data.error || "Failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
@@ -836,8 +853,7 @@ export default function AdminDashboard() {
   const handleOpenEditAnnouncement = (a) => {
     setEditingAnnouncement(a);
     setEditAnnouncementForm({
-      title: a.title || "", body: a.body || "",
-      priority: a.priority || "normal",
+      title: a.title || "", body: a.body || "", priority: a.priority || "normal",
       expires_at: a.expires_at ? a.expires_at.split("T")[0] : "",
     });
     setModalMessage(""); setShowEditAnnouncementModal(true);
@@ -849,12 +865,10 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     try {
-      const res = await authFetch(`${API}/api/announcements/${editingAnnouncement.id}`,
-        { method: "PUT", body: JSON.stringify(editAnnouncementForm) });
+      const res = await authFetch(`${API}/api/announcements/${editingAnnouncement.id}`, { method: "PUT", body: JSON.stringify(editAnnouncementForm) });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Announcement updated!"); setShowEditAnnouncementModal(false);
-        setEditingAnnouncement(null); fetchAnnouncements();
+        showMsg("Announcement updated!"); setShowEditAnnouncementModal(false); setEditingAnnouncement(null); fetchAnnouncements();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
@@ -928,6 +942,7 @@ export default function AdminDashboard() {
     announcements: "Announcements", sessions: "Session Minutes & Agenda",
     ordinances: "Ordinances", resolutions: "Resolutions",
     officials: "Sangguniang Bayan Officials",
+    logs: "Activity Logs",
   };
 
   // ─── Reusable sub-components ──────────────────────────────────────────────────
@@ -1026,6 +1041,8 @@ export default function AdminDashboard() {
             { key: "ordinances",    icon: <ScrollText size={18} strokeWidth={1.5} />, label: "Ordinances" },
             { key: "resolutions",   icon: <Gavel size={18} strokeWidth={1.5} />,      label: "Resolutions" },
             { key: "officials",     icon: <Landmark size={18} strokeWidth={1.5} />,   label: "SB Officials" },
+            // ── Activity Logs below SB Officials ──
+            { key: "logs",          icon: <Activity size={18} strokeWidth={1.5} />,   label: "Activity Logs" },
           ].map((t) => (
             <button key={t.key}
               className={`${styles.navBtn} ${activeTab === t.key ? styles.navBtnActive : ""}`}
@@ -1065,6 +1082,12 @@ export default function AdminDashboard() {
             {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOfficialModal(true); }}>+ Add Official</button>}
             {activeTab === "sessions"      && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
             {activeTab === "announcements" && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetAnnouncementForm(); setShowAnnouncementModal(true); }}>+ New Announcement</button>}
+            {activeTab === "logs"          && (
+              <button className={styles.addBtn} onClick={() => { fetchLogs(); fetchLogStats(); }}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            )}
           </div>
         </div>
 
@@ -1435,6 +1458,100 @@ export default function AdminDashboard() {
               ))}
               {filteredOfficials.length === 0 && <div className={styles.empty}>{officialSearch || officialPositionFilter !== "all" ? "No officials match your search." : "No SB Officials added yet."}</div>}
             </div>
+          </>
+        )}
+
+        {/* ── ACTIVITY LOGS ── */}
+        {activeTab === "logs" && (
+          <>
+            {/* Stats */}
+            {logStats && (
+              <div className={styles.statsRow}>
+                {[
+                  { label: "Total Logs",  value: logStats.total,   color: "#1a365d", cls: styles.statCard },
+                  { label: "Logins",      value: logStats.logins,  color: "#065f46", cls: `${styles.statCard} ${styles.statCardGreen}` },
+                  { label: "Uploads",     value: logStats.uploads, color: "#5b21b6", cls: styles.statCard },
+                  { label: "Creates",     value: logStats.creates, color: "#854d0e", cls: `${styles.statCard} ${styles.statCardOrange}` },
+                  { label: "Deletes",     value: logStats.deletes, color: "#991b1b", cls: styles.statCard },
+                  { label: "Failed",      value: logStats.failed,  color: "#c53030", cls: styles.statCard },
+                ].map((s) => (
+                  <div key={s.label} className={s.cls}>
+                    <div className={styles.statNumber} style={{ color: s.color }}>{s.value}</div>
+                    <div className={styles.statLabel}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Filters */}
+            <div className={styles.searchFilterBar}>
+              <div className={styles.filterGroup}>
+                <Filter size={15} className={styles.filterIcon} />
+                <select className={styles.filterSelect} value={logModuleFilter} onChange={(e) => setLogModuleFilter(e.target.value)}>
+                  {["all","Auth","Ordinances","Resolutions","Officials","Announcements","Sessions","Users","Calendar"].map((m) => (
+                    <option key={m} value={m}>{m === "all" ? "All Modules" : m}</option>
+                  ))}
+                </select>
+                <select className={styles.filterSelect} value={logActionFilter} onChange={(e) => setLogActionFilter(e.target.value)}>
+                  {["all","LOGIN","LOGOUT","REGISTER","UPLOAD","CREATE","UPDATE","DELETE"].map((a) => (
+                    <option key={a} value={a}>{a === "all" ? "All Actions" : a}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className={styles.searchResultCount}>Showing {logs.length} logs</div>
+
+            {/* Table */}
+            {fetchingLogs ? (
+              <div className={styles.loadingBar}>Loading logs...</div>
+            ) : (
+              <div className={styles.tableCard}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      {["Date & Time","User","Role","Action","Module","Description","IP","Status"].map((h) => (
+                        <th key={h} className={styles.th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.length === 0 && (
+                      <tr><td colSpan={8} className={styles.empty}>No logs found.</td></tr>
+                    )}
+                    {logs.map((log, i) => {
+                      const ac = ACTION_COLORS[log.action] || { bg: "#f3f4f6", color: "#374151" };
+                      return (
+                        <tr key={log.id} className={i % 2 === 0 ? styles.rowEven : styles.rowOdd}>
+                          <td className={styles.td} style={{ whiteSpace: "nowrap", color: "#64748b", fontSize: 12 }}>
+                            {new Date(log.created_at).toLocaleString("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                          <td className={styles.td} style={{ fontWeight: 600 }}>{log.user_name || "—"}</td>
+                          <td className={styles.td}>
+                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: log.user_role === "admin" ? "#dbeafe" : "#f0fdf4", color: log.user_role === "admin" ? "#1e40af" : "#166534" }}>
+                              {log.user_role || "—"}
+                            </span>
+                          </td>
+                          <td className={styles.td}>
+                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: ac.bg, color: ac.color }}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className={styles.td} style={{ color: "#64748b" }}>{log.module || "—"}</td>
+                          <td className={styles.td} style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{log.description || "—"}</td>
+                          <td className={styles.td} style={{ color: "#94a3b8", fontSize: 11 }}>{log.ip_address || "—"}</td>
+                          <td className={styles.td}>
+                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: log.status === "success" ? "#d1fae5" : "#fee2e2", color: log.status === "success" ? "#065f46" : "#991b1b" }}>
+                              {log.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </>
         )}
 

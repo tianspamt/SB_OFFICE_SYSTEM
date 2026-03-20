@@ -9,6 +9,9 @@ const fs = require('fs')
 const Tesseract = require('tesseract.js')
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
+const rateLimit = require('express-rate-limit')
+const { body, validationResult } = require('express-validator')
+const helmet = require('helmet')
 
 const app = express()
 const JWT_SECRET = process.env.JWT_SECRET
@@ -20,12 +23,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// ---- SECURITY: Helmet (HTTP headers protection) ----
+app.use(helmet())
+
 // ---- CORS ----
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'https://your-app-name.vercel.app', // 🔴 Replace with your actual Vercel URL
-    /\.vercel\.app$/,                   // covers all Vercel preview URLs
+    /\.vercel\.app$/,
   ],
   methods: ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS'],
   credentials: true
@@ -35,9 +41,28 @@ app.use(bodyParser.json())
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
-// ---- MULTER (memory storage — no local disk needed on Render) ----
+// ---- SECURITY: Global Rate Limit ----
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,                  // max 100 requests per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' }
+}))
+
+// ---- SECURITY: Strict Login Rate Limit ----
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                   // only 10 login attempts per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again after 15 minutes.' }
+})
+
+// ---- MULTER (memory storage) ----
 const upload = multer({
   storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
     if (allowed.includes(file.mimetype)) cb(null, true)
@@ -63,8 +88,28 @@ const deleteFromStorage = async (filePath) => {
   if (error) console.error('Storage delete error:', error.message)
 }
 
+// ---- ACTIVITY LOGGER ----
+const logActivity = async (req, action, module, description, status = 'success') => {
+  try {
+    await supabase.from('activity_logs').insert({
+      user_id:    req.user?.id || null,
+      user_name:  req.user?.name || 'Unknown',
+      user_role:  req.user?.role || 'unknown',
+      action,
+      module,
+      description,
+      ip_address: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      status
+    })
+  } catch (err) {
+    console.error('Log error:', err.message)
+  }
+}
+
 // ---- HELPERS ----
 const isValidEmail = (str) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
+
+const getIP = (req) => req.headers['x-forwarded-for'] || req.socket.remoteAddress
 
 // ---- MIDDLEWARE: Verify JWT Token ----
 const verifyToken = (req, res, next) => {
@@ -72,10 +117,15 @@ const verifyToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1]
   if (!token) return res.status(401).json({ error: 'Access denied. No token provided.' })
   try {
-    req.user = jwt.verify(token, JWT_SECRET)
+    req.user = jwt.verify(token, JWT_SECRET, {
+      issuer: 'sangguniang-bayan-system',
+      audience: 'sb-client'
+    })
     next()
   } catch (err) {
-    return res.status(403).json({ error: 'Invalid or expired token.' })
+    if (err.name === 'TokenExpiredError')
+      return res.status(401).json({ error: 'Session expired. Please login again.' })
+    return res.status(403).json({ error: 'Invalid token.' })
   }
 }
 
@@ -85,16 +135,28 @@ const adminOnly = (req, res, next) => {
   next()
 }
 
+// ---- MIDDLEWARE: Validation error handler ----
+const validate = (req, res, next) => {
+  const errors = validationResult(req)
+  if (!errors.isEmpty())
+    return res.status(400).json({ error: errors.array()[0].msg })
+  next()
+}
+
 // ==================================================
 // ---- USER ROUTES ----
 // ==================================================
 
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", [
+  body('name').trim().escape().notEmpty().withMessage('Full name is required.'),
+  body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
+  body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
+  body('password')
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
+    .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
+    .matches(/\d/).withMessage('Password must contain at least 1 number.'),
+], validate, async (req, res) => {
   const { name, username, email, password } = req.body
-  if (!name || !username || !email || !password)
-    return res.status(400).json({ error: 'All fields are required.' })
-  if (!isValidEmail(email))
-    return res.status(400).json({ error: 'Invalid email format.' })
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
     const { data, error } = await supabase
@@ -106,32 +168,79 @@ app.post("/api/register", async (req, res) => {
         return res.status(400).json({ error: 'Username or email already exists.' })
       return res.status(500).json({ error: error.message })
     }
+    // Log registration
+    await supabase.from('activity_logs').insert({
+      user_id: data.id, user_name: name, user_role: 'user',
+      action: 'REGISTER', module: 'Auth',
+      description: `New user registered: ${username}`,
+      ip_address: getIP(req), status: 'success'
+    })
     res.json({ success: true, userId: data.id })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", loginLimiter, [
+  body('identifier').trim().notEmpty().withMessage('Username or email is required.'),
+  body('password').notEmpty().withMessage('Password is required.'),
+], validate, async (req, res) => {
   const { identifier, password } = req.body
-  if (!identifier || !password)
-    return res.status(400).json({ success: false, message: 'Username/email and password are required.' })
+  console.log('1. LOGIN ATTEMPT:', identifier)
   try {
     const isEmail = isValidEmail(identifier)
+    console.log('2. IS EMAIL:', isEmail)
+
     const { data: users, error } = await supabase
       .from('users').select('*')
       .eq(isEmail ? 'email' : 'username', identifier).limit(1)
+
+    console.log('3. USERS FOUND:', users?.length)
+    console.log('4. DB ERROR:', error)
+
     if (error) return res.status(500).json({ error: error.message })
-    if (!users || users.length === 0)
+
+    if (!users || users.length === 0) {
+      console.log('5. NO USER FOUND')
+      await supabase.from('activity_logs').insert({
+        user_name: identifier, user_role: 'unknown',
+        action: 'LOGIN', module: 'Auth',
+        description: `Failed login attempt: ${identifier}`,
+        ip_address: getIP(req), status: 'failed'
+      })
       return res.json({ success: false, message: 'Invalid username/email or password.' })
+    }
+
     const user = users[0]
+    console.log('6. USER FOUND:', user.username, user.role)
+
     const isMatch = await bcrypt.compare(password, user.password)
-    if (!isMatch)
+    console.log('7. PASSWORD MATCH:', isMatch)
+
+    if (!isMatch) {
+      await supabase.from('activity_logs').insert({
+        user_id: user.id, user_name: user.name, user_role: user.role,
+        action: 'LOGIN', module: 'Auth',
+        description: `Wrong password for: ${identifier}`,
+        ip_address: getIP(req), status: 'failed'
+      })
       return res.json({ success: false, message: 'Invalid username/email or password.' })
+    }
+
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, role: user.role, name: user.name },
-      JWT_SECRET, { expiresIn: '8h' }
+      JWT_SECRET,
+      { expiresIn: '8h', issuer: 'sangguniang-bayan-system', audience: 'sb-client' }
     )
+
+    await supabase.from('activity_logs').insert({
+      user_id: user.id, user_name: user.name, user_role: user.role,
+      action: 'LOGIN', module: 'Auth',
+      description: `${user.name} logged in`,
+      ip_address: getIP(req), status: 'success'
+    })
+
+    console.log('8. LOGIN SUCCESS:', user.username)
     res.json({
       success: true, token,
       user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role }
@@ -142,12 +251,22 @@ app.post("/api/login", async (req, res) => {
   }
 })
 
-app.post("/api/admin/add", verifyToken, adminOnly, async (req, res) => {
+// ---- LOGOUT ----
+app.post("/api/logout", verifyToken, async (req, res) => {
+  await logActivity(req, 'LOGOUT', 'Auth', `${req.user.name} logged out`)
+  res.json({ success: true })
+})
+
+app.post("/api/admin/add", verifyToken, adminOnly, [
+  body('name').trim().escape().notEmpty().withMessage('Name is required.'),
+  body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
+  body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
+  body('password')
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
+    .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
+    .matches(/\d/).withMessage('Password must contain at least 1 number.'),
+], validate, async (req, res) => {
   const { name, username, email, password } = req.body
-  if (!name || !username || !email || !password)
-    return res.status(400).json({ error: 'All fields are required.' })
-  if (!isValidEmail(email))
-    return res.status(400).json({ error: 'Invalid email format.' })
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
     const { data, error } = await supabase
@@ -159,6 +278,7 @@ app.post("/api/admin/add", verifyToken, adminOnly, async (req, res) => {
         return res.status(400).json({ error: 'Username or email already exists.' })
       return res.status(500).json({ error: error.message })
     }
+    await logActivity(req, 'CREATE', 'Users', `Added new admin: ${username}`)
     res.json({ success: true, userId: data.id })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -174,22 +294,55 @@ app.get("/api/users", verifyToken, adminOnly, async (req, res) => {
 app.delete("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
   const { error } = await supabase.from('users').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Users', `Deleted user ID: ${req.params.id}`)
   res.json({ success: true })
 })
 
-app.put("/api/users/:id/email", verifyToken, async (req, res) => {
+app.put("/api/users/:id/email", verifyToken, [
+  body('email').trim().normalizeEmail().isEmail().withMessage('Valid email is required.'),
+], validate, async (req, res) => {
   const { id } = req.params
   const { email } = req.body
   if (req.user.id !== parseInt(id) && req.user.role !== 'admin')
     return res.status(403).json({ error: 'Forbidden.' })
-  if (!email || !isValidEmail(email))
-    return res.status(400).json({ error: 'Valid email is required.' })
   const { error } = await supabase.from('users').update({ email }).eq('id', id)
   if (error) {
     if (error.code === '23505') return res.status(400).json({ error: 'Email already in use.' })
     return res.status(500).json({ error: error.message })
   }
+  await logActivity(req, 'UPDATE', 'Users', `Updated email for user ID: ${id}`)
   res.json({ success: true })
+})
+
+// ==================================================
+// ---- ACTIVITY LOGS ROUTES ----
+// ==================================================
+
+app.get('/api/activity-logs', verifyToken, adminOnly, async (req, res) => {
+  const { module, action, limit = 100, page = 1 } = req.query
+  let query = supabase
+    .from('activity_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .range((page - 1) * limit, page * limit - 1)
+  if (module && module !== 'all') query = query.eq('module', module)
+  if (action && action !== 'all') query = query.eq('action', action)
+  const { data, error } = await query
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+app.get('/api/activity-logs/stats', verifyToken, adminOnly, async (req, res) => {
+  const { data, error } = await supabase.from('activity_logs').select('action, module, status')
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({
+    total:    data.length,
+    logins:   data.filter(l => l.action === 'LOGIN').length,
+    uploads:  data.filter(l => l.action === 'UPLOAD').length,
+    deletes:  data.filter(l => l.action === 'DELETE').length,
+    creates:  data.filter(l => l.action === 'CREATE').length,
+    failed:   data.filter(l => l.status === 'failed').length,
+  })
 })
 
 // ==================================================
@@ -206,8 +359,7 @@ app.get('/api/sb-officials', async (req, res) => {
 app.post('/api/sb-officials/add', verifyToken, adminOnly, upload.single('photo'), async (req, res) => {
   const { full_name, position, term_period } = req.body
   try {
-    let photo = null
-    let photo_path = null
+    let photo = null, photo_path = null
     if (req.file) {
       const { fileName, publicUrl } = await uploadToStorage(req.file, 'officials')
       photo = publicUrl
@@ -218,6 +370,7 @@ app.post('/api/sb-officials/add', verifyToken, adminOnly, upload.single('photo')
       .insert({ full_name, position, term_period, photo, photo_path })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'CREATE', 'Officials', `Added official: ${full_name}`)
     res.json({ success: true, id: data.id })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -226,10 +379,11 @@ app.post('/api/sb-officials/add', verifyToken, adminOnly, upload.single('photo')
 
 app.delete('/api/sb-officials/:id', verifyToken, adminOnly, async (req, res) => {
   const { data: official } = await supabase
-    .from('sb_officials').select('photo_path').eq('id', req.params.id).single()
+    .from('sb_officials').select('photo_path, full_name').eq('id', req.params.id).single()
   if (official?.photo_path) await deleteFromStorage(official.photo_path)
   const { error } = await supabase.from('sb_officials').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Officials', `Deleted official: ${official?.full_name || req.params.id}`)
   res.json({ success: true })
 })
 
@@ -258,6 +412,7 @@ app.post('/api/ordinances/upload', verifyToken, adminOnly, upload.single('file')
         officialIds.map(oid => ({ ordinance_id: ordinance.id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance: ${title}`)
     res.json({ success: true, id: ordinance.id })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -268,12 +423,10 @@ app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.sin
   const { ordinance_number, title, year, officials } = req.body
   const officialIds = JSON.parse(officials || '[]')
   try {
-    // Write buffer to /tmp for Tesseract
     const tempPath = path.join('/tmp', `${Date.now()}-${req.file.originalname}`)
     fs.writeFileSync(tempPath, req.file.buffer)
     const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
     fs.unlinkSync(tempPath)
-
     const { fileName, publicUrl } = await uploadToStorage(req.file, 'ordinances')
     const { data: ordinance, error } = await supabase
       .from('ordinances')
@@ -292,6 +445,7 @@ app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.sin
         officialIds.map(oid => ({ ordinance_id: ordinance.id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance (OCR): ${title}`)
     res.json({ success: true, id: ordinance.id, text: text.trim() })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -335,6 +489,7 @@ app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), as
         officialIds.map(oid => ({ ordinance_id: id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPDATE', 'Ordinances', `Updated ordinance: ${title}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -342,10 +497,11 @@ app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), as
 })
 
 app.delete('/api/ordinances/:id', verifyToken, adminOnly, async (req, res) => {
-  const { data: old } = await supabase.from('ordinances').select('file_path').eq('id', req.params.id).single()
+  const { data: old } = await supabase.from('ordinances').select('file_path, title').eq('id', req.params.id).single()
   if (old?.file_path) await deleteFromStorage(old.file_path)
   const { error } = await supabase.from('ordinances').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Ordinances', `Deleted ordinance: ${old?.title || req.params.id}`)
   res.json({ success: true })
 })
 
@@ -412,6 +568,7 @@ app.post('/api/resolutions/upload', verifyToken, adminOnly, upload.single('file'
         officialIds.map(oid => ({ resolution_id: resolution.id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution: ${title}`)
     res.json({ success: true, id: resolution.id })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -426,7 +583,6 @@ app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.si
     fs.writeFileSync(tempPath, req.file.buffer)
     const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
     fs.unlinkSync(tempPath)
-
     const { fileName, publicUrl } = await uploadToStorage(req.file, 'resolutions')
     const { data: resolution, error } = await supabase
       .from('resolutions')
@@ -445,6 +601,7 @@ app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.si
         officialIds.map(oid => ({ resolution_id: resolution.id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution (OCR): ${title}`)
     res.json({ success: true, id: resolution.id, text: text.trim() })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -474,6 +631,7 @@ app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), a
         officialIds.map(oid => ({ resolution_id: id, official_id: oid }))
       )
     }
+    await logActivity(req, 'UPDATE', 'Resolutions', `Updated resolution: ${title}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -481,10 +639,11 @@ app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), a
 })
 
 app.delete('/api/resolutions/:id', verifyToken, adminOnly, async (req, res) => {
-  const { data: old } = await supabase.from('resolutions').select('file_path').eq('id', req.params.id).single()
+  const { data: old } = await supabase.from('resolutions').select('file_path, title').eq('id', req.params.id).single()
   if (old?.file_path) await deleteFromStorage(old.file_path)
   const { error } = await supabase.from('resolutions').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Resolutions', `Deleted resolution: ${old?.title || req.params.id}`)
   res.json({ success: true })
 })
 
@@ -649,6 +808,7 @@ app.post('/api/session-minutes', verifyToken, adminOnly, async (req, res) => {
     })
     .select().single()
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'CREATE', 'Sessions', `Added session: ${session_number || session_date}`)
   res.json({ success: true, id: data.id })
 })
 
@@ -674,6 +834,7 @@ app.post('/api/session-minutes/upload-image', verifyToken, adminOnly, upload.sin
       })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session (OCR): ${session_number || session_date}`)
     res.json({ success: true, id: data.id, extracted_text: extractedText, ocr_target })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -693,12 +854,14 @@ app.put('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) => 
     })
     .eq('id', id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'UPDATE', 'Sessions', `Updated session ID: ${id}`)
   res.json({ success: true })
 })
 
 app.delete('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) => {
   const { error } = await supabase.from('session_minutes').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Sessions', `Deleted session ID: ${req.params.id}`)
   res.json({ success: true })
 })
 
@@ -729,6 +892,7 @@ app.post('/api/announcements', verifyToken, adminOnly, async (req, res) => {
     .insert({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
     .select().single()
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'CREATE', 'Announcements', `Posted announcement: ${title}`)
   res.json({ success: true, id: data.id })
 })
 
@@ -740,12 +904,15 @@ app.put('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
     .update({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
     .eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'UPDATE', 'Announcements', `Updated announcement: ${title}`)
   res.json({ success: true })
 })
 
 app.delete('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
+  const { data: old } = await supabase.from('announcements').select('title').eq('id', req.params.id).single()
   const { error } = await supabase.from('announcements').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Announcements', `Deleted announcement: ${old?.title || req.params.id}`)
   res.json({ success: true })
 })
 
@@ -775,6 +942,7 @@ app.post('/api/calendar-events', verifyToken, adminOnly, async (req, res) => {
     })
     .select().single()
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'CREATE', 'Calendar', `Added event: ${title}`)
   res.json({ success: true, id: data.id })
 })
 
@@ -793,12 +961,14 @@ app.put('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) => 
     })
     .eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'UPDATE', 'Calendar', `Updated event: ${title}`)
   res.json({ success: true })
 })
 
 app.delete('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) => {
   const { error } = await supabase.from('calendar_events').delete().eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'DELETE', 'Calendar', `Deleted event ID: ${req.params.id}`)
   res.json({ success: true })
 })
 
