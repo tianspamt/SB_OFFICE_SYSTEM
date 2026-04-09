@@ -12,10 +12,20 @@ const jwt = require('jsonwebtoken')
 const rateLimit = require('express-rate-limit')
 const { body, validationResult } = require('express-validator')
 const helmet = require('helmet')
+const crypto = require('crypto')
 
 const app = express()
 const JWT_SECRET = process.env.JWT_SECRET
 const SALT_ROUNDS = 10
+
+// ---- BREVO CLIENT ----
+const SibApiV3Sdk = require('sib-api-v3-sdk')
+const brevoClient = SibApiV3Sdk.ApiClient.instance
+brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY
+const emailApi = new SibApiV3Sdk.TransactionalEmailsApi()
+
+// ---- OTP STORE (in-memory) ----
+const otpStore = new Map()
 
 // ---- SUPABASE CLIENT ----
 const supabase = createClient(
@@ -23,14 +33,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-// ---- SECURITY: Helmet (HTTP headers protection) ----
+// ---- SECURITY: Helmet ----
 app.use(helmet())
 
 // ---- CORS ----
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://your-app-name.vercel.app', // 🔴 Replace with your actual Vercel URL
+    'https://your-app-name.vercel.app',
     /\.vercel\.app$/,
   ],
   methods: ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS'],
@@ -43,8 +53,8 @@ app.use(express.urlencoded({ extended: true }))
 
 // ---- SECURITY: Global Rate Limit ----
 app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                  // max 100 requests per IP
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please try again later.' }
@@ -52,17 +62,26 @@ app.use(rateLimit({
 
 // ---- SECURITY: Strict Login Rate Limit ----
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,                   // only 10 login attempts per IP
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts. Please try again after 15 minutes.' }
 })
 
-// ---- MULTER (memory storage) ----
+// ---- OTP Rate Limit ----
+const otpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP requests. Please wait 10 minutes.' }
+})
+
+// ---- MULTER ----
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
     if (allowed.includes(file.mimetype)) cb(null, true)
@@ -108,10 +127,9 @@ const logActivity = async (req, action, module, description, status = 'success')
 
 // ---- HELPERS ----
 const isValidEmail = (str) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
-
 const getIP = (req) => req.headers['x-forwarded-for'] || req.socket.remoteAddress
 
-// ---- MIDDLEWARE: Verify JWT Token ----
+// ---- MIDDLEWARE: Verify JWT ----
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization']
   const token = authHeader && authHeader.split(' ')[1]
@@ -144,6 +162,80 @@ const validate = (req, res, next) => {
 }
 
 // ==================================================
+// ---- OTP ROUTES ----
+// ==================================================
+
+// POST /api/send-otp
+app.post('/api/send-otp', otpLimiter, async (req, res) => {
+  const { email } = req.body
+
+  if (!email || !/^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email.trim())) {
+    return res.status(400).json({ error: 'A valid Gmail address (@gmail.com) is required.' })
+  }
+
+  const otp = crypto.randomInt(100000, 999999).toString()
+  const expiresAt = Date.now() + 10 * 60 * 1000
+
+  otpStore.set(email.trim().toLowerCase(), { otp, expiresAt })
+
+  try {
+    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail()
+    sendSmtpEmail.sender = {
+      name: 'Sangguniang Bayan Balilihan',
+      email: process.env.BREVO_SENDER_EMAIL
+    }
+    sendSmtpEmail.to = [{ email: email.trim() }]
+    sendSmtpEmail.subject = 'Your Registration Verification Code'
+    sendSmtpEmail.htmlContent = `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:12px;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <h2 style="color:#2e7d32;margin:0 0 4px;">Office of Sangguniang Bayan</h2>
+          <p style="color:#888;font-size:13px;margin:0;">Municipality of Balilihan, Bohol</p>
+        </div>
+        <p style="color:#555;text-align:center;font-size:15px;margin-bottom:8px;">Your verification code is:</p>
+        <div style="font-size:42px;font-weight:bold;letter-spacing:14px;color:#2e7d32;text-align:center;margin:16px 0;padding:16px;background:#f0faf0;border-radius:8px;">
+          ${otp}
+        </div>
+        <p style="color:#888;font-size:13px;text-align:center;margin-top:16px;">
+          This code expires in <strong>10 minutes</strong>.<br/>Do not share this code with anyone.
+        </p>
+        <hr style="border:none;border-top:1px solid #eee;margin:24px 0;"/>
+        <p style="color:#aaa;font-size:11px;text-align:center;">
+          If you did not request this, please ignore this email.
+        </p>
+      </div>
+    `
+
+    await emailApi.sendTransacEmail(sendSmtpEmail)
+    res.json({ success: true, message: 'OTP sent successfully.' })
+  } catch (err) {
+    console.error('Brevo error:', JSON.stringify(err, null, 2))
+    res.status(500).json({ error: 'Failed to send verification email. Please try again.' })
+  }
+})
+
+// POST /api/verify-otp
+app.post('/api/verify-otp', async (req, res) => {
+  const { email, otp } = req.body
+  const key = email?.trim().toLowerCase()
+  const record = otpStore.get(key)
+
+  if (!record)
+    return res.status(400).json({ error: 'No verification code found. Please request a new one.' })
+
+  if (Date.now() > record.expiresAt) {
+    otpStore.delete(key)
+    return res.status(400).json({ error: 'Code has expired. Please request a new one.' })
+  }
+
+  if (record.otp !== otp)
+    return res.status(400).json({ error: 'Incorrect code. Please try again.' })
+
+  otpStore.delete(key)
+  res.json({ success: true, message: 'Email verified successfully.' })
+})
+
+// ==================================================
 // ---- USER ROUTES ----
 // ==================================================
 
@@ -168,7 +260,6 @@ app.post("/api/register", [
         return res.status(400).json({ error: 'Username or email already exists.' })
       return res.status(500).json({ error: error.message })
     }
-    // Log registration
     await supabase.from('activity_logs').insert({
       user_id: data.id, user_name: name, user_role: 'user',
       action: 'REGISTER', module: 'Auth',
@@ -190,16 +281,12 @@ app.post("/api/login", loginLimiter, [
   try {
     const isEmail = isValidEmail(identifier)
     console.log('2. IS EMAIL:', isEmail)
-
     const { data: users, error } = await supabase
       .from('users').select('*')
       .eq(isEmail ? 'email' : 'username', identifier).limit(1)
-
     console.log('3. USERS FOUND:', users?.length)
     console.log('4. DB ERROR:', error)
-
     if (error) return res.status(500).json({ error: error.message })
-
     if (!users || users.length === 0) {
       console.log('5. NO USER FOUND')
       await supabase.from('activity_logs').insert({
@@ -210,13 +297,10 @@ app.post("/api/login", loginLimiter, [
       })
       return res.json({ success: false, message: 'Invalid username/email or password.' })
     }
-
     const user = users[0]
     console.log('6. USER FOUND:', user.username, user.role)
-
     const isMatch = await bcrypt.compare(password, user.password)
     console.log('7. PASSWORD MATCH:', isMatch)
-
     if (!isMatch) {
       await supabase.from('activity_logs').insert({
         user_id: user.id, user_name: user.name, user_role: user.role,
@@ -226,20 +310,17 @@ app.post("/api/login", loginLimiter, [
       })
       return res.json({ success: false, message: 'Invalid username/email or password.' })
     }
-
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, role: user.role, name: user.name },
       JWT_SECRET,
       { expiresIn: '8h', issuer: 'sangguniang-bayan-system', audience: 'sb-client' }
     )
-
     await supabase.from('activity_logs').insert({
       user_id: user.id, user_name: user.name, user_role: user.role,
       action: 'LOGIN', module: 'Auth',
       description: `${user.name} logged in`,
       ip_address: getIP(req), status: 'success'
     })
-
     console.log('8. LOGIN SUCCESS:', user.username)
     res.json({
       success: true, token,
@@ -336,12 +417,12 @@ app.get('/api/activity-logs/stats', verifyToken, adminOnly, async (req, res) => 
   const { data, error } = await supabase.from('activity_logs').select('action, module, status')
   if (error) return res.status(500).json({ error: error.message })
   res.json({
-    total:    data.length,
-    logins:   data.filter(l => l.action === 'LOGIN').length,
-    uploads:  data.filter(l => l.action === 'UPLOAD').length,
-    deletes:  data.filter(l => l.action === 'DELETE').length,
-    creates:  data.filter(l => l.action === 'CREATE').length,
-    failed:   data.filter(l => l.status === 'failed').length,
+    total:   data.length,
+    logins:  data.filter(l => l.action === 'LOGIN').length,
+    uploads: data.filter(l => l.action === 'UPLOAD').length,
+    deletes: data.filter(l => l.action === 'DELETE').length,
+    creates: data.filter(l => l.action === 'CREATE').length,
+    failed:  data.filter(l => l.status === 'failed').length,
   })
 })
 
@@ -971,6 +1052,7 @@ app.delete('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) 
   await logActivity(req, 'DELETE', 'Calendar', `Deleted event ID: ${req.params.id}`)
   res.json({ success: true })
 })
+
 
 // ==================================================
 const PORT = process.env.PORT || 5000
