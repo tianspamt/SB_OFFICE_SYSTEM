@@ -22,11 +22,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-<<<<<<< HEAD
-    "mysql2": "^3.18.2",
-=======
     "nodemailer": "^8.0.5",
->>>>>>> 721b5466ff4543314d0b40489b54e4521ac3f38d
     "sib-api-v3-sdk": "^8.5.0",
     "tesseract.js": "^7.0.0"
   }
