@@ -1,9 +1,20 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from './LogIn'
 import Register from './Register'
-import Dashboard from './Dashboard'
 import AdminDashboard from './AdminDashboard'
+
 import UserDashboard from './UserDashboard/UserDashboard'
+import HomePage from './UserDashboard/HomePage'
+import CouncilPage from './UserDashboard/CouncilPage'
+import AnnouncementsPage from './UserDashboard/AnnouncementsPage'
+import SearchPage from './UserDashboard/SearchPage'
+import {
+  OrdinancesPage,
+  ResolutionsPage,
+  SessionsPage,
+  LocalCodePage,
+  RulesPage,
+} from './UserDashboard/LegislativePage'
 
 // ─── Auth Guards ───────────────────────────────────────────────────────────────
 const getUser = () => {
@@ -19,7 +30,6 @@ const ProtectedRoute = ({ children, requiredRole }) => {
   const user = getUser()
   if (!user) return <Navigate to="/" replace />
   if (requiredRole && user.role !== requiredRole) {
-    // UPDATED REDIRECT: Ensure user is sent to the base dashboard path if they have the wrong role
     return <Navigate to={user.role === 'admin' ? '/admin/dashboard' : '/dashboard'} replace />
   }
   return children
@@ -37,32 +47,44 @@ const GuestRoute = ({ children }) => {
 export default function App() {
   return (
     <Routes>
-      {/* Guest only routes — redirect to dashboard if already logged in */}
-      <Route path="/" element={
-        <GuestRoute><Login /></GuestRoute>
-      } />
-      <Route path="/register" element={
-        <GuestRoute><Register /></GuestRoute>
-      } />
+      {/* Guest only routes */}
+      <Route path="/" element={<GuestRoute><Login /></GuestRoute>} />
+      <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
 
-      {/* MODIFIED ROUTE: Added "/*" to "/dashboard"
-          This tells React Router that UserDashboard will handle its own internal 
-          sub-routes (like /dashboard/home, /dashboard/ordinances, etc.) 
-      */}
-      <Route path="/dashboard/*" element={
-        <ProtectedRoute requiredRole="user">
-          <UserDashboard /> 
-        </ProtectedRoute>
-      } />
+      {/* User dashboard — UserDashboard is the layout shell with <Outlet /> */}
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute requiredRole="user">
+            <UserDashboard />
+          </ProtectedRoute>
+        }
+      >
+        {/* Default: redirect /dashboard → /dashboard/home */}
+        <Route index element={<Navigate to="home" replace />} />
 
-      {/* Admin dashboard — must be logged in as admin */}
+        <Route path="home"          element={<HomePage />} />
+        <Route path="ordinances"    element={<OrdinancesPage />} />
+        <Route path="resolutions"   element={<ResolutionsPage />} />
+        <Route path="sessions"      element={<SessionsPage />} />
+        <Route path="localcode"     element={<LocalCodePage />} />
+        <Route path="rules"         element={<RulesPage />} />
+        <Route path="council"       element={<CouncilPage />} />
+        <Route path="announcements" element={<AnnouncementsPage />} />
+        <Route path="search"        element={<SearchPage />} />
+
+        {/* Catch any unknown sub-path → home */}
+        <Route path="*" element={<Navigate to="home" replace />} />
+      </Route>
+
+      {/* Admin dashboard */}
       <Route path="/admin/dashboard" element={
         <ProtectedRoute requiredRole="admin">
           <AdminDashboard />
         </ProtectedRoute>
       } />
 
-      {/* Catch-all — redirect to home */}
+      {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
