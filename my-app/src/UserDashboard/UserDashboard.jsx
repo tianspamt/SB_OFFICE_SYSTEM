@@ -116,6 +116,13 @@ function DashboardLayout() {
               Announcements
               {activeAnn.length > 0 && <span className={styles.navBadge}>{activeAnn.length}</span>}
             </button>
+
+            {/* About */}
+            <button
+              className={`${styles.navLink} ${path === '/dashboard/about' ? styles.navLinkActive : ''}`}
+              onClick={() => go('/dashboard/about')}>
+              About
+            </button>
           </nav>
 
           {/* Right side */}
@@ -148,6 +155,7 @@ function DashboardLayout() {
               { path: '/dashboard/rules',         label: 'Internal Rules' },
               { path: '/dashboard/council',       label: 'Council Members' },
               { path: '/dashboard/announcements', label: `Announcements${activeAnn.length > 0 ? ` (${activeAnn.length})` : ''}` },
+              { path: '/dashboard/about',         label: 'About' },
               { path: '/dashboard/search',        label: 'Search' },
             ].map(item => (
               <button

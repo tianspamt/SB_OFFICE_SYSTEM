@@ -7,6 +7,7 @@ import UserDashboard from './UserDashboard/UserDashboard'
 import HomePage from './UserDashboard/HomePage'
 import CouncilPage from './UserDashboard/CouncilPage'
 import AnnouncementsPage from './UserDashboard/AnnouncementsPage'
+import AboutPage from './UserDashboard/AboutPage'
 import SearchPage from './UserDashboard/SearchPage'
 import {
   OrdinancesPage,
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="rules"         element={<RulesPage />} />
         <Route path="council"       element={<CouncilPage />} />
         <Route path="announcements" element={<AnnouncementsPage />} />
+        <Route path="about"         element={<AboutPage />} />
         <Route path="search"        element={<SearchPage />} />
 
         {/* Catch any unknown sub-path → home */}
