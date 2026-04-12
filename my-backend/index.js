@@ -144,6 +144,22 @@ const logActivity = async (req, action, module, description, status = 'success')
   }
 }
 
+// ---- AUTO END TERMS HELPER ----
+const autoEndTerms = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    const { error } = await supabase
+      .from('sb_council_member_terms')
+      .update({ status: 'terms_ended' })
+      .eq('status', 'active')
+      .not('term_end', 'is', null)
+      .lt('term_end', today)
+    if (error) console.error('autoEndTerms error:', error.message)
+  } catch (err) {
+    console.error('autoEndTerms exception:', err.message)
+  }
+}
+
 // ---- HELPERS ----
 const isValidEmail = (str) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
 const getIP = (req) => req.headers['x-forwarded-for'] || req.socket.remoteAddress
@@ -184,25 +200,17 @@ const validate = (req, res, next) => {
 // ---- OTP ROUTES ----
 // ==================================================
 
-// POST /api/send-otp
 app.post('/api/send-otp', otpLimiter, async (req, res) => {
   const { email } = req.body
-
   if (!email || !/^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email.trim())) {
     return res.status(400).json({ error: 'A valid Gmail address (@gmail.com) is required.' })
   }
-
   const otp = crypto.randomInt(100000, 999999).toString()
   const expiresAt = Date.now() + 10 * 60 * 1000
-
   otpStore.set(email.trim().toLowerCase(), { otp, expiresAt })
-
   try {
     const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail()
-    sendSmtpEmail.sender = {
-      name: 'Sangguniang Bayan Balilihan',
-      email: process.env.BREVO_SENDER_EMAIL
-    }
+    sendSmtpEmail.sender = { name: 'Sangguniang Bayan Balilihan', email: process.env.BREVO_SENDER_EMAIL }
     sendSmtpEmail.to = [{ email: email.trim() }]
     sendSmtpEmail.subject = 'Your Registration Verification Code'
     sendSmtpEmail.htmlContent = `
@@ -212,16 +220,12 @@ app.post('/api/send-otp', otpLimiter, async (req, res) => {
           <p style="color:#888;font-size:13px;margin:0;">Municipality of Balilihan, Bohol</p>
         </div>
         <p style="color:#555;text-align:center;font-size:15px;margin-bottom:8px;">Your verification code is:</p>
-        <div style="font-size:42px;font-weight:bold;letter-spacing:14px;color:#2e7d32;text-align:center;margin:16px 0;padding:16px;background:#f0faf0;border-radius:8px;">
-          ${otp}
-        </div>
+        <div style="font-size:42px;font-weight:bold;letter-spacing:14px;color:#2e7d32;text-align:center;margin:16px 0;padding:16px;background:#f0faf0;border-radius:8px;">${otp}</div>
         <p style="color:#888;font-size:13px;text-align:center;margin-top:16px;">
           This code expires in <strong>10 minutes</strong>.<br/>Do not share this code with anyone.
         </p>
         <hr style="border:none;border-top:1px solid #eee;margin:24px 0;"/>
-        <p style="color:#aaa;font-size:11px;text-align:center;">
-          If you did not request this, please ignore this email.
-        </p>
+        <p style="color:#aaa;font-size:11px;text-align:center;">If you did not request this, please ignore this email.</p>
       </div>
     `
     await emailApi.sendTransacEmail(sendSmtpEmail)
@@ -232,23 +236,18 @@ app.post('/api/send-otp', otpLimiter, async (req, res) => {
   }
 })
 
-// POST /api/verify-otp
 app.post('/api/verify-otp', async (req, res) => {
   const { email, otp } = req.body
   const key = email?.trim().toLowerCase()
   const record = otpStore.get(key)
-
   if (!record)
     return res.status(400).json({ error: 'No verification code found. Please request a new one.' })
-
   if (Date.now() > record.expiresAt) {
     otpStore.delete(key)
     return res.status(400).json({ error: 'Code has expired. Please request a new one.' })
   }
-
   if (record.otp !== otp)
     return res.status(400).json({ error: 'Incorrect code. Please try again.' })
-
   otpStore.delete(key)
   res.json({ success: true, message: 'Email verified successfully.' })
 })
@@ -257,7 +256,6 @@ app.post('/api/verify-otp', async (req, res) => {
 // ---- USER ROUTES ----
 // ==================================================
 
-// POST /api/register
 app.post("/api/register", [
   body('name').trim().escape().notEmpty().withMessage('Full name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
@@ -291,7 +289,6 @@ app.post("/api/register", [
   }
 })
 
-// POST /api/login
 app.post("/api/login", loginLimiter, [
   body('identifier').trim().notEmpty().withMessage('Username or email is required.'),
   body('password').notEmpty().withMessage('Password is required.'),
@@ -344,13 +341,11 @@ app.post("/api/login", loginLimiter, [
   }
 })
 
-// POST /api/logout
 app.post("/api/logout", verifyToken, async (req, res) => {
   await logActivity(req, 'LOGOUT', 'Auth', `${req.user.name} logged out`)
   res.json({ success: true })
 })
 
-// POST /api/admin/add
 app.post("/api/admin/add", verifyToken, adminOnly, [
   body('name').trim().escape().notEmpty().withMessage('Name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
@@ -379,7 +374,6 @@ app.post("/api/admin/add", verifyToken, adminOnly, [
   }
 })
 
-// GET /api/users
 app.get("/api/users", verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
     .from('users').select('id, name, username, email, role')
@@ -388,7 +382,6 @@ app.get("/api/users", verifyToken, adminOnly, async (req, res) => {
   res.json(data)
 })
 
-// GET /api/users/:id
 app.get("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
     .from('users').select('id, name, username, email, role').eq('id', req.params.id).single()
@@ -397,7 +390,6 @@ app.get("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
   res.json(data)
 })
 
-// PUT /api/users/:id — full update (admin only)
 app.put("/api/users/:id", verifyToken, adminOnly, [
   body('name').trim().escape().notEmpty().withMessage('Name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
@@ -423,7 +415,6 @@ app.put("/api/users/:id", verifyToken, adminOnly, [
   }
 })
 
-// PUT /api/users/:id/email — email-only update (self or admin)
 app.put("/api/users/:id/email", verifyToken, [
   body('email').trim().normalizeEmail().isEmail().withMessage('Valid email is required.'),
 ], validate, async (req, res) => {
@@ -440,7 +431,6 @@ app.put("/api/users/:id/email", verifyToken, [
   res.json({ success: true })
 })
 
-// PUT /api/users/:id/password — password change (self or admin)
 app.put("/api/users/:id/password", verifyToken, [
   body('newPassword')
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
@@ -452,7 +442,6 @@ app.put("/api/users/:id/password", verifyToken, [
   if (req.user.id !== parseInt(id) && req.user.role !== 'admin')
     return res.status(403).json({ error: 'Forbidden.' })
   try {
-    // If self (not admin), verify current password first
     if (req.user.id === parseInt(id) && req.user.role !== 'admin') {
       if (!currentPassword)
         return res.status(400).json({ error: 'Current password is required.' })
@@ -473,14 +462,12 @@ app.put("/api/users/:id/password", verifyToken, [
   }
 })
 
-// DELETE /api/users/:id
 app.delete("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing } = await supabase
       .from('users').select('id, username').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'User not found.' })
-    // Prevent self-deletion
     if (req.user.id === parseInt(id))
       return res.status(400).json({ error: 'You cannot delete your own account.' })
     const { error } = await supabase.from('users').delete().eq('id', id)
@@ -496,7 +483,6 @@ app.delete("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
 // ---- ACTIVITY LOGS ROUTES ----
 // ==================================================
 
-// GET /api/activity-logs
 app.get('/api/activity-logs', verifyToken, adminOnly, async (req, res) => {
   const { module, action, limit = 100, page = 1 } = req.query
   const limitNum = Math.min(parseInt(limit) || 100, 500)
@@ -513,7 +499,6 @@ app.get('/api/activity-logs', verifyToken, adminOnly, async (req, res) => {
   res.json(data)
 })
 
-// GET /api/activity-logs/stats
 app.get('/api/activity-logs/stats', verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
     .from('activity_logs').select('action, module, status')
@@ -529,93 +514,285 @@ app.get('/api/activity-logs/stats', verifyToken, adminOnly, async (req, res) => 
 })
 
 // ==================================================
-// ---- SB OFFICIALS ROUTES ----
+// ---- SB COUNCIL MEMBERS ROUTES ----
 // ==================================================
 
-// GET /api/sb-officials
-app.get('/api/sb-officials', async (req, res) => {
-  const { data, error } = await supabase
-    .from('sb_officials').select('*').order('created_at', { ascending: false })
-  if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
-})
-
-// GET /api/sb-officials/:id
-app.get('/api/sb-officials/:id', async (req, res) => {
-  const { data, error } = await supabase
-    .from('sb_officials').select('*').eq('id', req.params.id).single()
-  if (error) return res.status(500).json({ error: error.message })
-  if (!data) return res.status(404).json({ error: 'Official not found.' })
-  res.json(data)
-})
-
-// POST /api/sb-officials/add
-app.post('/api/sb-officials/add', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
-  const { full_name, position, term_period } = req.body
-  if (!full_name || !position)
-    return res.status(400).json({ error: 'Full name and position are required.' })
+// GET /api/sb-council-members
+app.get('/api/sb-council-members', async (req, res) => {
   try {
-    let photo = null, photo_path = null
-    if (req.file) {
-      const { fileName, publicUrl } = await uploadToStorage(req.file, 'officials')
-      photo = publicUrl
-      photo_path = fileName
-    }
+    await autoEndTerms()
     const { data, error } = await supabase
-      .from('sb_officials')
-      .insert({ full_name, position, term_period: term_period || null, photo, photo_path })
-      .select().single()
+      .from('sb_council_members')
+      .select(`
+        *,
+        sb_council_member_terms (
+          id, term_period, term_start, term_end, status, is_reelected, notes, created_at
+        )
+      `)
+      .order('created_at', { ascending: false })
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'CREATE', 'Officials', `Added official: ${full_name}`)
-    res.json({ success: true, id: data.id, data })
+
+    const enriched = data.map(member => {
+      const terms = member.sb_council_member_terms || []
+      const sorted = [...terms].sort((a, b) => new Date(b.term_start) - new Date(a.term_start))
+      const activeTerm = sorted.find(t => t.status === 'active') || sorted[0] || null
+      return {
+        ...member,
+        sb_council_member_terms: undefined,
+        terms: sorted,
+        active_term: activeTerm,
+        term_period: activeTerm?.term_period || null,
+        term_status: activeTerm?.status || null,
+      }
+    })
+
+    res.json(enriched)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-// PUT /api/sb-officials/:id
-app.put('/api/sb-officials/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
+// GET /api/sb-council-members/:id
+app.get('/api/sb-council-members/:id', async (req, res) => {
+  try {
+    await autoEndTerms()
+    const { data, error } = await supabase
+      .from('sb_council_members')
+      .select(`
+        *,
+        sb_council_member_terms (
+          id, term_period, term_start, term_end, status, is_reelected, notes, created_at
+        )
+      `)
+      .eq('id', req.params.id)
+      .single()
+    if (error) return res.status(500).json({ error: error.message })
+    if (!data) return res.status(404).json({ error: 'Council member not found.' })
+
+    const terms = data.sb_council_member_terms || []
+    const sorted = [...terms].sort((a, b) => new Date(b.term_start) - new Date(a.term_start))
+    const activeTerm = sorted.find(t => t.status === 'active') || sorted[0] || null
+
+    res.json({
+      ...data,
+      sb_council_member_terms: undefined,
+      terms: sorted,
+      active_term: activeTerm,
+      term_period: activeTerm?.term_period || null,
+      term_status: activeTerm?.status || null,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/sb-council-members/add
+app.post('/api/sb-council-members/add', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
+  const { full_name, position, term_period, term_start, term_end, is_reelected, notes } = req.body
+  if (!full_name || !position)
+    return res.status(400).json({ error: 'Full name and position are required.' })
+  try {
+    // ── FIX: store both photo (public URL) and photo_path (storage key for deletion) ──
+    let photo = null
+    let photo_path = null
+    if (req.file) {
+      const { fileName, publicUrl } = await uploadToStorage(req.file, 'council-members')
+      photo = publicUrl       // public URL stored in DB column "photo"
+      photo_path = fileName   // storage path stored in DB column "photo_path"
+    }
+
+    const { data: member, error: memberErr } = await supabase
+      .from('sb_council_members')
+      .insert({ full_name, position, photo, photo_path })  // both columns written
+      .select().single()
+    if (memberErr) return res.status(500).json({ error: memberErr.message })
+
+    // Insert initial term record if provided
+    if (term_period && term_start) {
+      const { error: termErr } = await supabase
+        .from('sb_council_member_terms')
+        .insert({
+          council_member_id: member.id,
+          term_period,
+          term_start,
+          term_end: term_end || null,
+          status: 'active',
+          is_reelected: is_reelected === 'true' || is_reelected === true,
+          notes: notes || null,
+        })
+      if (termErr) console.error('Term insert error:', termErr.message)
+    }
+
+    await logActivity(req, 'CREATE', 'Officials', `Added council member: ${full_name}`)
+    res.json({ success: true, id: member.id, data: member })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/sb-council-members/:id
+app.put('/api/sb-council-members/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
   const { id } = req.params
-  const { full_name, position, term_period } = req.body
+  const { full_name, position } = req.body
   if (!full_name || !position)
     return res.status(400).json({ error: 'Full name and position are required.' })
   try {
     const { data: existing, error: fetchErr } = await supabase
-      .from('sb_officials').select('*').eq('id', id).single()
-    if (fetchErr || !existing) return res.status(404).json({ error: 'Official not found.' })
-    const updateData = {
-      full_name,
-      position,
-      term_period: term_period || null
-    }
+      .from('sb_council_members').select('*').eq('id', id).single()
+    if (fetchErr || !existing) return res.status(404).json({ error: 'Council member not found.' })
+
+    const updateData = { full_name, position }
     if (req.file) {
-      // Delete old photo if exists
+      // Delete old file from storage using photo_path
       if (existing.photo_path) await deleteFromStorage(existing.photo_path)
-      const { fileName, publicUrl } = await uploadToStorage(req.file, 'officials')
+      const { fileName, publicUrl } = await uploadToStorage(req.file, 'council-members')
       updateData.photo = publicUrl
       updateData.photo_path = fileName
     }
+
     const { data, error } = await supabase
-      .from('sb_officials').update(updateData).eq('id', id).select().single()
+      .from('sb_council_members').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'UPDATE', 'Officials', `Updated official: ${full_name}`)
+
+    await logActivity(req, 'UPDATE', 'Officials', `Updated council member: ${full_name}`)
     res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-// DELETE /api/sb-officials/:id
-app.delete('/api/sb-officials/:id', verifyToken, adminOnly, async (req, res) => {
+// DELETE /api/sb-council-members/:id
+app.delete('/api/sb-council-members/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const { data: official } = await supabase
-      .from('sb_officials').select('photo_path, full_name').eq('id', req.params.id).single()
-    if (!official) return res.status(404).json({ error: 'Official not found.' })
-    if (official.photo_path) await deleteFromStorage(official.photo_path)
-    const { error } = await supabase.from('sb_officials').delete().eq('id', req.params.id)
+    const { data: member } = await supabase
+      .from('sb_council_members')
+      .select('photo_path, full_name')
+      .eq('id', req.params.id).single()
+    if (!member) return res.status(404).json({ error: 'Council member not found.' })
+    // Use photo_path to delete from storage
+    if (member.photo_path) await deleteFromStorage(member.photo_path)
+    const { error } = await supabase.from('sb_council_members').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'DELETE', 'Officials', `Deleted official: ${official.full_name}`)
+    await logActivity(req, 'DELETE', 'Officials', `Deleted council member: ${member.full_name}`)
     res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ==================================================
+// ---- SB COUNCIL MEMBER TERMS ROUTES ----
+// ==================================================
+
+// GET /api/sb-council-members/:id/terms
+app.get('/api/sb-council-members/:id/terms', async (req, res) => {
+  try {
+    await autoEndTerms()
+    const { data, error } = await supabase
+      .from('sb_council_member_terms')
+      .select('*')
+      .eq('council_member_id', req.params.id)
+      .order('term_start', { ascending: false })
+    if (error) return res.status(500).json({ error: error.message })
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/sb-council-members/:id/terms
+app.post('/api/sb-council-members/:id/terms', verifyToken, adminOnly, async (req, res) => {
+  const { id } = req.params
+  const { term_period, term_start, term_end, is_reelected, notes } = req.body
+  if (!term_period || !term_start)
+    return res.status(400).json({ error: 'term_period and term_start are required.' })
+  try {
+    const { data: member, error: mErr } = await supabase
+      .from('sb_council_members').select('id, full_name').eq('id', id).single()
+    if (mErr || !member) return res.status(404).json({ error: 'Council member not found.' })
+
+    const { data, error } = await supabase
+      .from('sb_council_member_terms')
+      .insert({
+        council_member_id: id,
+        term_period,
+        term_start,
+        term_end: term_end || null,
+        status: 'active',
+        is_reelected: is_reelected === true || is_reelected === 'true',
+        notes: notes || null,
+      })
+      .select().single()
+    if (error) return res.status(500).json({ error: error.message })
+
+    await logActivity(req, 'CREATE', 'Officials', `Added term for: ${member.full_name} (${term_period})`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/sb-council-members/:memberId/terms/:termId
+app.put('/api/sb-council-members/:memberId/terms/:termId', verifyToken, adminOnly, async (req, res) => {
+  const { memberId, termId } = req.params
+  const { term_period, term_start, term_end, status, is_reelected, notes } = req.body
+  if (!term_period || !term_start)
+    return res.status(400).json({ error: 'term_period and term_start are required.' })
+  if (status && !['active', 'terms_ended'].includes(status))
+    return res.status(400).json({ error: 'status must be active or terms_ended.' })
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('sb_council_member_terms')
+      .select('id').eq('id', termId).eq('council_member_id', memberId).single()
+    if (fetchErr || !existing) return res.status(404).json({ error: 'Term not found.' })
+
+    const { data, error } = await supabase
+      .from('sb_council_member_terms')
+      .update({
+        term_period,
+        term_start,
+        term_end: term_end || null,
+        status: status || 'active',
+        is_reelected: is_reelected === true || is_reelected === 'true',
+        notes: notes || null,
+      })
+      .eq('id', termId)
+      .select().single()
+    if (error) return res.status(500).json({ error: error.message })
+
+    await logActivity(req, 'UPDATE', 'Officials', `Updated term ID ${termId} for member ID ${memberId}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/sb-council-members/:memberId/terms/:termId
+app.delete('/api/sb-council-members/:memberId/terms/:termId', verifyToken, adminOnly, async (req, res) => {
+  const { memberId, termId } = req.params
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('sb_council_member_terms')
+      .select('id, term_period').eq('id', termId).eq('council_member_id', memberId).single()
+    if (fetchErr || !existing) return res.status(404).json({ error: 'Term not found.' })
+
+    const { error } = await supabase
+      .from('sb_council_member_terms').delete().eq('id', termId)
+    if (error) return res.status(500).json({ error: error.message })
+
+    await logActivity(req, 'DELETE', 'Officials', `Deleted term "${existing.term_period}" for member ID ${memberId}`)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/sb-council-members/run-auto-end-terms
+app.post('/api/sb-council-members/run-auto-end-terms', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await autoEndTerms()
+    await logActivity(req, 'UPDATE', 'Officials', 'Manually ran auto_end_terms')
+    res.json({ success: true, message: 'auto_end_terms executed.' })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -625,13 +802,12 @@ app.delete('/api/sb-officials/:id', verifyToken, adminOnly, async (req, res) => 
 // ---- ORDINANCE ROUTES ----
 // ==================================================
 
-// GET /api/ordinances
 app.get('/api/ordinances', async (req, res) => {
   try {
     const { year, search } = req.query
     let query = supabase
       .from('ordinances')
-      .select(`*, ordinance_officials ( sb_officials ( id, full_name, position, photo ) )`)
+      .select(`*, ordinance_officials ( sb_council_members ( id, full_name, position, photo ) )`)
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
     if (search) query = query.ilike('title', `%${search}%`)
@@ -639,7 +815,7 @@ app.get('/api/ordinances', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(o => ({
       ...o,
-      officials: o.ordinance_officials?.map(oo => oo.sb_officials).filter(Boolean) || [],
+      officials: o.ordinance_officials?.map(oo => oo.sb_council_members).filter(Boolean) || [],
       ordinance_officials: undefined
     }))
     res.json(parsed)
@@ -648,18 +824,17 @@ app.get('/api/ordinances', async (req, res) => {
   }
 })
 
-// GET /api/ordinances/:id
 app.get('/api/ordinances/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('ordinances')
-      .select(`*, ordinance_officials ( sb_officials ( id, full_name, position, photo ) )`)
+      .select(`*, ordinance_officials ( sb_council_members ( id, full_name, position, photo ) )`)
       .eq('id', req.params.id).single()
     if (error) return res.status(500).json({ error: error.message })
     if (!data) return res.status(404).json({ error: 'Ordinance not found.' })
     const parsed = {
       ...data,
-      officials: data.ordinance_officials?.map(oo => oo.sb_officials).filter(Boolean) || [],
+      officials: data.ordinance_officials?.map(oo => oo.sb_council_members).filter(Boolean) || [],
       ordinance_officials: undefined
     }
     res.json(parsed)
@@ -668,15 +843,13 @@ app.get('/api/ordinances/:id', async (req, res) => {
   }
 })
 
-// POST /api/ordinances/upload
 app.post('/api/ordinances/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file)
-    return res.status(400).json({ error: 'A file is required.' })
+  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
   try {
-    const { fileName, publicUrl } = await uploadToStorage(req.file, 'ordinances')
+    const { fileName } = await uploadToStorage(req.file, 'ordinances')
     const { data: ordinance, error } = await supabase
       .from('ordinances')
       .insert({
@@ -685,7 +858,6 @@ app.post('/api/ordinances/upload', verifyToken, adminOnly, upload.single('file')
         year: year ? parseInt(year) : null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
-        filepath: publicUrl,
         filepath: fileName
       })
       .select().single()
@@ -706,10 +878,8 @@ app.post('/api/ordinances/upload', verifyToken, adminOnly, upload.single('file')
   }
 })
 
-// POST /api/ordinances/upload-image-text (OCR)
 app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file)
-    return res.status(400).json({ error: 'A file is required.' })
+  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
@@ -720,16 +890,15 @@ app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.sin
     const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
     fs.unlinkSync(tempPath)
     tempPath = null
-    const { fileName, publicUrl } = await uploadToStorage(req.file, 'ordinances')
+    const { fileName } = await uploadToStorage(req.file, 'ordinances')
     const { data: ordinance, error } = await supabase
       .from('ordinances')
       .insert({
         ordinance_number: ordinance_number || null,
         title,
-       year: year ? parseInt(year) : null ,
+        year: year ? parseInt(year) : null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
-        filepath: publicUrl,
         filepath: fileName,
         extracted_text: text.trim()
       })
@@ -751,7 +920,6 @@ app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.sin
   }
 })
 
-// PUT /api/ordinances/:id
 app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { ordinance_number, title, year, officials } = req.body
@@ -760,23 +928,17 @@ app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), ha
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
-    const updateData = {
-      ordinance_number: ordinance_number || null,
-      title,
-      year: year ? parseInt(year) : null
-    }
+    const updateData = { ordinance_number: ordinance_number || null, title, year: year ? parseInt(year) : null }
     if (req.file) {
       if (existing.filepath) await deleteFromStorage(existing.filepath)
-      const { fileName, publicUrl } = await uploadToStorage(req.file, 'ordinances')
+      const { fileName } = await uploadToStorage(req.file, 'ordinances')
       updateData.filename = req.file.originalname
       updateData.filetype = req.file.mimetype
-      updateData.filepath = publicUrl
       updateData.filepath = fileName
     }
     const { data: updated, error } = await supabase
       .from('ordinances').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    // Sync officials
     await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
     const officialIds = safeParseJSON(officials, [])
     if (officialIds.length > 0) {
@@ -791,14 +953,12 @@ app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), ha
   }
 })
 
-// DELETE /api/ordinances/:id
 app.delete('/api/ordinances/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
       .from('ordinances').select('filepath, title').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Ordinance not found.' })
     if (existing.filepath) await deleteFromStorage(existing.filepath)
-    // Delete related officials first to avoid FK constraint issues
     await supabase.from('ordinance_officials').delete().eq('ordinance_id', req.params.id)
     const { error } = await supabase.from('ordinances').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
@@ -809,7 +969,6 @@ app.delete('/api/ordinances/:id', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// GET /api/ordinances/:id/print
 app.get('/api/ordinances/:id/print', async (req, res) => {
   try {
     const { data: o, error } = await supabase
@@ -842,13 +1001,12 @@ app.get('/api/ordinances/:id/print', async (req, res) => {
 // ---- RESOLUTION ROUTES ----
 // ==================================================
 
-// GET /api/resolutions
 app.get('/api/resolutions', async (req, res) => {
   try {
     const { year, search } = req.query
     let query = supabase
       .from('resolutions')
-      .select(`*, resolution_officials ( sb_officials ( id, full_name, position, photo ) )`)
+      .select(`*, resolution_officials ( sb_council_members ( id, full_name, position, photo ) )`)
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
     if (search) query = query.ilike('title', `%${search}%`)
@@ -856,7 +1014,7 @@ app.get('/api/resolutions', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(r => ({
       ...r,
-      officials: r.resolution_officials?.map(ro => ro.sb_officials).filter(Boolean) || [],
+      officials: r.resolution_officials?.map(ro => ro.sb_council_members).filter(Boolean) || [],
       resolution_officials: undefined
     }))
     res.json(parsed)
@@ -865,18 +1023,17 @@ app.get('/api/resolutions', async (req, res) => {
   }
 })
 
-// GET /api/resolutions/:id
 app.get('/api/resolutions/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('resolutions')
-      .select(`*, resolution_officials ( sb_officials ( id, full_name, position, photo ) )`)
+      .select(`*, resolution_officials ( sb_council_members ( id, full_name, position, photo ) )`)
       .eq('id', req.params.id).single()
     if (error) return res.status(500).json({ error: error.message })
     if (!data) return res.status(404).json({ error: 'Resolution not found.' })
     const parsed = {
       ...data,
-      officials: data.resolution_officials?.map(ro => ro.sb_officials).filter(Boolean) || [],
+      officials: data.resolution_officials?.map(ro => ro.sb_council_members).filter(Boolean) || [],
       resolution_officials: undefined
     }
     res.json(parsed)
@@ -885,15 +1042,13 @@ app.get('/api/resolutions/:id', async (req, res) => {
   }
 })
 
-// POST /api/resolutions/upload
 app.post('/api/resolutions/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file)
-    return res.status(400).json({ error: 'A file is required.' })
+  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { resolution_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
   try {
-    const { fileName, publicUrl } = await uploadToStorage(req.file, 'resolutions')
+    const { fileName } = await uploadToStorage(req.file, 'resolutions')
     const { data: resolution, error } = await supabase
       .from('resolutions')
       .insert({
@@ -902,7 +1057,6 @@ app.post('/api/resolutions/upload', verifyToken, adminOnly, upload.single('file'
         year: year ? parseInt(year) : null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
-        filepath: publicUrl,
         filepath: fileName
       })
       .select().single()
@@ -922,10 +1076,8 @@ app.post('/api/resolutions/upload', verifyToken, adminOnly, upload.single('file'
   }
 })
 
-// POST /api/resolutions/upload-image-text (OCR)
 app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file)
-    return res.status(400).json({ error: 'A file is required.' })
+  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { resolution_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
@@ -936,7 +1088,7 @@ app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.si
     const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
     fs.unlinkSync(tempPath)
     tempPath = null
-    const { fileName, publicUrl } = await uploadToStorage(req.file, 'resolutions')
+    const { fileName } = await uploadToStorage(req.file, 'resolutions')
     const { data: resolution, error } = await supabase
       .from('resolutions')
       .insert({
@@ -945,7 +1097,6 @@ app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.si
         year: year ? parseInt(year) : null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
-        filepath: publicUrl,
         filepath: fileName,
         extracted_text: text.trim()
       })
@@ -967,7 +1118,6 @@ app.post('/api/resolutions/upload-image-text', verifyToken, adminOnly, upload.si
   }
 })
 
-// PUT /api/resolutions/:id
 app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { resolution_number, title, year, officials } = req.body
@@ -976,23 +1126,17 @@ app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), h
     const { data: existing, error: fetchErr } = await supabase
       .from('resolutions').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Resolution not found.' })
-    const updateData = {
-      resolution_number: resolution_number || null,
-      title,
-      year: year ? parseInt(year) : null
-    }
+    const updateData = { resolution_number: resolution_number || null, title, year: year ? parseInt(year) : null }
     if (req.file) {
       if (existing.filepath) await deleteFromStorage(existing.filepath)
-      const { fileName, publicUrl } = await uploadToStorage(req.file, 'resolutions')
+      const { fileName } = await uploadToStorage(req.file, 'resolutions')
       updateData.filename = req.file.originalname
       updateData.filetype = req.file.mimetype
-      updateData.filepath = publicUrl
       updateData.filepath = fileName
     }
     const { data: updated, error } = await supabase
       .from('resolutions').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    // Sync officials
     await supabase.from('resolution_officials').delete().eq('resolution_id', id)
     const officialIds = safeParseJSON(officials, [])
     if (officialIds.length > 0) {
@@ -1007,14 +1151,12 @@ app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), h
   }
 })
 
-// DELETE /api/resolutions/:id
 app.delete('/api/resolutions/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
       .from('resolutions').select('filepath, title').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Resolution not found.' })
     if (existing.filepath) await deleteFromStorage(existing.filepath)
-    // Delete related officials first
     await supabase.from('resolution_officials').delete().eq('resolution_id', req.params.id)
     const { error } = await supabase.from('resolutions').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
@@ -1025,7 +1167,6 @@ app.delete('/api/resolutions/:id', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// GET /api/resolutions/:id/print
 app.get('/api/resolutions/:id/print', async (req, res) => {
   try {
     const { data: r, error } = await supabase
@@ -1080,7 +1221,6 @@ app.get('/api/resolutions/:id/print', async (req, res) => {
 // ---- SESSION MINUTES ROUTES ----
 // ==================================================
 
-// GET /api/session-minutes
 app.get('/api/session-minutes', async (req, res) => {
   try {
     const { month, year, type } = req.query
@@ -1100,7 +1240,6 @@ app.get('/api/session-minutes', async (req, res) => {
   }
 })
 
-// GET /api/session-minutes/:id
 app.get('/api/session-minutes/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1113,7 +1252,6 @@ app.get('/api/session-minutes/:id', async (req, res) => {
   }
 })
 
-// POST /api/session-minutes
 app.post('/api/session-minutes', verifyToken, adminOnly, async (req, res) => {
   try {
     const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
@@ -1137,7 +1275,6 @@ app.post('/api/session-minutes', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// POST /api/session-minutes/upload-image (OCR)
 app.post('/api/session-minutes/upload-image', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' })
   const { session_number, session_date, session_type, venue, agenda, ocr_target, minutes_text } = req.body
@@ -1174,7 +1311,6 @@ app.post('/api/session-minutes/upload-image', verifyToken, adminOnly, upload.sin
   }
 })
 
-// PUT /api/session-minutes/:id
 app.put('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) => {
   const { id } = req.params
   try {
@@ -1202,7 +1338,6 @@ app.put('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) => 
   }
 })
 
-// DELETE /api/session-minutes/:id
 app.delete('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
@@ -1218,7 +1353,6 @@ app.delete('/api/session-minutes/:id', verifyToken, adminOnly, async (req, res) 
   }
 })
 
-// GET /api/session-minutes/:id/print
 app.get('/api/session-minutes/:id/print', async (req, res) => {
   try {
     const { data: s, error } = await supabase
@@ -1303,7 +1437,6 @@ app.get('/api/session-minutes/:id/print', async (req, res) => {
 // ---- ANNOUNCEMENTS ROUTES ----
 // ==================================================
 
-// GET /api/announcements
 app.get('/api/announcements', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1315,7 +1448,6 @@ app.get('/api/announcements', async (req, res) => {
   }
 })
 
-// GET /api/announcements/:id
 app.get('/api/announcements/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1328,7 +1460,6 @@ app.get('/api/announcements/:id', async (req, res) => {
   }
 })
 
-// POST /api/announcements
 app.post('/api/announcements', verifyToken, adminOnly, async (req, res) => {
   try {
     const { title, body, priority, expires_at } = req.body
@@ -1336,12 +1467,7 @@ app.post('/api/announcements', verifyToken, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required.' })
     const { data, error } = await supabase
       .from('announcements')
-      .insert({
-        title,
-        body,
-        priority: priority || 'normal',
-        expires_at: expires_at || null
-      })
+      .insert({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'CREATE', 'Announcements', `Posted announcement: ${title}`)
@@ -1351,7 +1477,6 @@ app.post('/api/announcements', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// PUT /api/announcements/:id
 app.put('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
@@ -1362,12 +1487,7 @@ app.put('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required.' })
     const { data, error } = await supabase
       .from('announcements')
-      .update({
-        title,
-        body,
-        priority: priority || 'normal',
-        expires_at: expires_at || null
-      })
+      .update({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
       .eq('id', req.params.id).select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPDATE', 'Announcements', `Updated announcement: ${title}`)
@@ -1377,7 +1497,6 @@ app.put('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// DELETE /api/announcements/:id
 app.delete('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
@@ -1397,7 +1516,6 @@ app.delete('/api/announcements/:id', verifyToken, adminOnly, async (req, res) =>
 // ---- CALENDAR EVENTS ROUTES ----
 // ==================================================
 
-// GET /api/calendar-events
 app.get('/api/calendar-events', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1409,7 +1527,6 @@ app.get('/api/calendar-events', async (req, res) => {
   }
 })
 
-// GET /api/calendar-events/:id
 app.get('/api/calendar-events/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -1422,7 +1539,6 @@ app.get('/api/calendar-events/:id', async (req, res) => {
   }
 })
 
-// POST /api/calendar-events
 app.post('/api/calendar-events', verifyToken, adminOnly, async (req, res) => {
   try {
     const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body
@@ -1450,7 +1566,6 @@ app.post('/api/calendar-events', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// PUT /api/calendar-events/:id
 app.put('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase
@@ -1481,7 +1596,6 @@ app.put('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) => 
   }
 })
 
-// DELETE /api/calendar-events/:id
 app.delete('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase

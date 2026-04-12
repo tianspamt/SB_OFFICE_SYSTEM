@@ -7,7 +7,7 @@ import {
   ClipboardList, Copy, Upload, CheckSquare, AlertCircle, BookOpen,
   Printer, FileEdit, Camera, Gavel, Megaphone, ChevronDown,
   ChevronRight, Calendar, ChevronLeft, Clock, MapPin, PlusCircle,
-  Activity, RefreshCw,
+  Activity, RefreshCw, History,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 
@@ -38,6 +38,35 @@ const toLocalIso = (dateStr) => {
   return toIsoDate(d);
 };
 
+const formatDate = (dateStr) => {
+  if (!dateStr) return "—";
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-PH", {
+    year: "numeric", month: "short", day: "numeric",
+  });
+};
+
+// ─── Term status badge helper ─────────────────────────────────────────────────
+const TermStatusBadge = ({ status }) => {
+  if (!status) return null;
+  const isActive = status === "active";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+      background: isActive ? "#d1fae5" : "#f3f4f6",
+      color: isActive ? "#065f46" : "#6b7280",
+      border: `1px solid ${isActive ? "#6ee7b7" : "#d1d5db"}`,
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: "50%",
+        background: isActive ? "#10b981" : "#9ca3af",
+        display: "inline-block",
+      }} />
+      {isActive ? "Active" : "Term Ended"}
+    </span>
+  );
+};
+
 // ─── Static Local/Provincial Holidays ────────────────────────────────────────
 const getLocalHolidays = (year) => [
   { date: `${year}-03-16`, name: "Blood Compact Day",                      type: "special-working" },
@@ -60,7 +89,7 @@ const ACTION_COLORS = {
   CREATE:   { bg: "#fef9c3", color: "#854d0e" },
   UPDATE:   { bg: "#ffedd5", color: "#9a3412" },
   DELETE:   { bg: "#fee2e2", color: "#991b1b" },
-}
+};
 
 // ─── EventFormFields ──────────────────────────────────────────────────────────
 function EventFormFields({ form, setForm }) {
@@ -172,6 +201,10 @@ export default function AdminDashboard() {
   const [showLocalEventModal, setShowLocalEventModal] = useState(false);
   const [showEditEventModal, setShowEditEventModal] = useState(false);
   const [showEventDetailModal, setShowEventDetailModal] = useState(false);
+  // ── term modals ──
+  const [showAddTermModal, setShowAddTermModal] = useState(false);
+  const [showEditTermModal, setShowEditTermModal] = useState(false);
+  const [termTarget, setTermTarget] = useState(null); // { memberId, term? }
 
   // ── data ──
   const [newUser, setNewUser] = useState({ name: "", username: "", email: "", password: "" });
@@ -212,13 +245,21 @@ export default function AdminDashboard() {
   const [resolutionSearch, setResolutionSearch] = useState("");
   const [resolutionTypeFilter, setResolutionTypeFilter] = useState("all");
 
-  // officials
+  // officials / council members
   const [officials, setOfficials] = useState([]);
-  const [newOfficial, setNewOfficial] = useState({ full_name: "", position: "", term_period: "" });
+  const [newOfficial, setNewOfficial] = useState({
+    full_name: "", position: "",
+    // initial term fields
+    term_period: "", term_start: "", term_end: "", is_reelected: false, notes: "",
+  });
   const [officialPhoto, setOfficialPhoto] = useState(null);
   const [officialSearch, setOfficialSearch] = useState("");
   const [officialPositionFilter, setOfficialPositionFilter] = useState("all");
   const [selectedOfficialProfile, setSelectedOfficialProfile] = useState(null);
+
+  // term form (shared for add & edit)
+  const emptyTermForm = { term_period: "", term_start: "", term_end: "", status: "active", is_reelected: false, notes: "" };
+  const [termForm, setTermForm] = useState(emptyTermForm);
 
   // sessions
   const [sessionMinutes, setSessionMinutes] = useState([]);
@@ -351,10 +392,11 @@ export default function AdminDashboard() {
     } catch { setResolutions([]); }
     finally { setFetchingResolutions(false); }
   };
+  // ── Council members — now from /api/sb-council-members ──
   const fetchOfficials = async () => {
     setFetchingOfficials(true);
     try {
-      const d = await (await fetch(`${API}/api/sb-officials`)).json();
+      const d = await (await fetch(`${API}/api/sb-council-members`)).json();
       setOfficials(Array.isArray(d) ? d : []);
     } catch { setOfficials([]); }
     finally { setFetchingOfficials(false); }
@@ -396,7 +438,6 @@ export default function AdminDashboard() {
     } catch { setLogs([]); }
     finally { setFetchingLogs(false); }
   };
-
   const fetchLogStats = async () => {
     try {
       const d = await (await authFetch(`${API}/api/activity-logs/stats`)).json();
@@ -732,21 +773,27 @@ export default function AdminDashboard() {
   const toggleResolutionOfficial = (id) =>
     setSelectedResolutionOfficials((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
 
-  // ─── Officials ────────────────────────────────────────────────────────────────
+  // ─── Officials / Council Members ──────────────────────────────────────────────
   const handleAddOfficial = async () => {
-    if (!newOfficial.full_name || !newOfficial.position || !newOfficial.term_period) {
-      showModalMsg("All fields required!", "error"); return;
+    if (!newOfficial.full_name || !newOfficial.position) {
+      showModalMsg("Full name and position are required!", "error"); return;
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("full_name", newOfficial.full_name); fd.append("position", newOfficial.position);
-    fd.append("term_period", newOfficial.term_period);
+    fd.append("full_name", newOfficial.full_name);
+    fd.append("position", newOfficial.position);
+    if (newOfficial.term_period) fd.append("term_period", newOfficial.term_period);
+    if (newOfficial.term_start)  fd.append("term_start",  newOfficial.term_start);
+    if (newOfficial.term_end)    fd.append("term_end",    newOfficial.term_end);
+    fd.append("is_reelected", newOfficial.is_reelected);
+    if (newOfficial.notes)       fd.append("notes",       newOfficial.notes);
     if (officialPhoto) fd.append("photo", officialPhoto);
     try {
-      const res = await authFetch(`${API}/api/sb-officials/add`, { method: "POST", body: fd });
+      const res = await authFetch(`${API}/api/sb-council-members/add`, { method: "POST", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Official added!"); setNewOfficial({ full_name: "", position: "", term_period: "" });
+        showMsg("Council member added!");
+        setNewOfficial({ full_name: "", position: "", term_period: "", term_start: "", term_end: "", is_reelected: false, notes: "" });
         setOfficialPhoto(null); setShowOfficialModal(false); fetchOfficials();
       } else showModalMsg(data.error || "Failed!", "error");
     } catch { showModalMsg("Server error!", "error"); }
@@ -755,9 +802,9 @@ export default function AdminDashboard() {
 
   const handleDeleteOfficial = async (id) => {
     try {
-      const res = await authFetch(`${API}/api/sb-officials/${id}`, { method: "DELETE" });
+      const res = await authFetch(`${API}/api/sb-council-members/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (data.success) { showMsg("Official deleted!"); fetchOfficials(); }
+      if (data.success) { showMsg("Council member deleted!"); fetchOfficials(); }
       else showMsg(data.error || "Error!", "error");
     } catch { showMsg("Error!", "error"); }
   };
@@ -765,6 +812,91 @@ export default function AdminDashboard() {
     setSelectedOfficials((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
   const getOfficialOrdinances = (id) =>
     ordinances.filter((o) => o.officials && o.officials.some((x) => x.id === id));
+
+  // ─── Term CRUD ────────────────────────────────────────────────────────────────
+  const handleOpenAddTerm = (memberId) => {
+    setTermTarget({ memberId });
+    setTermForm(emptyTermForm);
+    setModalMessage("");
+    setShowAddTermModal(true);
+  };
+
+  const handleSaveTerm = async () => {
+    if (!termForm.term_period || !termForm.term_start) {
+      showModalMsg("Term period and start date are required!", "error"); return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`${API}/api/sb-council-members/${termTarget.memberId}/terms`, {
+        method: "POST", body: JSON.stringify(termForm),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Term added!");
+        setShowAddTermModal(false);
+        fetchOfficials();
+        // Refresh profile if open
+        if (selectedOfficialProfile?.id === termTarget.memberId) {
+          const updated = await (await fetch(`${API}/api/sb-council-members/${termTarget.memberId}`)).json();
+          setSelectedOfficialProfile(updated);
+        }
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleOpenEditTerm = (memberId, term) => {
+    setTermTarget({ memberId, term });
+    setTermForm({
+      term_period: term.term_period || "",
+      term_start: term.term_start ? term.term_start.split("T")[0] : "",
+      term_end: term.term_end ? term.term_end.split("T")[0] : "",
+      status: term.status || "active",
+      is_reelected: !!term.is_reelected,
+      notes: term.notes || "",
+    });
+    setModalMessage("");
+    setShowEditTermModal(true);
+  };
+
+  const handleUpdateTerm = async () => {
+    if (!termForm.term_period || !termForm.term_start) {
+      showModalMsg("Term period and start date are required!", "error"); return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authFetch(
+        `${API}/api/sb-council-members/${termTarget.memberId}/terms/${termTarget.term.id}`,
+        { method: "PUT", body: JSON.stringify(termForm) }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Term updated!");
+        setShowEditTermModal(false);
+        fetchOfficials();
+        if (selectedOfficialProfile?.id === termTarget.memberId) {
+          const updated = await (await fetch(`${API}/api/sb-council-members/${termTarget.memberId}`)).json();
+          setSelectedOfficialProfile(updated);
+        }
+      } else showModalMsg(data.error || "Failed!", "error");
+    } catch { showModalMsg("Server error!", "error"); }
+    finally { setSubmitting(false); }
+  };
+
+  const handleDeleteTerm = async (memberId, termId) => {
+    try {
+      const res = await authFetch(`${API}/api/sb-council-members/${memberId}/terms/${termId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        showMsg("Term deleted!");
+        fetchOfficials();
+        if (selectedOfficialProfile?.id === memberId) {
+          const updated = await (await fetch(`${API}/api/sb-council-members/${memberId}`)).json();
+          setSelectedOfficialProfile(updated);
+        }
+      } else showMsg(data.error || "Error!", "error");
+    } catch { showMsg("Error!", "error"); }
+  };
 
   // ─── Sessions ─────────────────────────────────────────────────────────────────
   const resetSessionForm = () => {
@@ -806,7 +938,6 @@ export default function AdminDashboard() {
     });
     setModalMessage(""); setShowEditSessionModal(true);
   };
-
   const handleUpdateSession = async () => {
     if (!editSessionForm.session_date) { showModalMsg("Session date is required!", "error"); return; }
     setSubmitting(true);
@@ -819,7 +950,6 @@ export default function AdminDashboard() {
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
-
   const handleDeleteSession = async (id) => {
     try {
       const res = await authFetch(`${API}/api/session-minutes/${id}`, { method: "DELETE" });
@@ -846,7 +976,6 @@ export default function AdminDashboard() {
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
-
   const handleOpenEditAnnouncement = (a) => {
     setEditingAnnouncement(a);
     setEditAnnouncementForm({
@@ -869,7 +998,6 @@ export default function AdminDashboard() {
     } catch { showModalMsg("Server error!", "error"); }
     finally { setSubmitting(false); }
   };
-
   const handleDeleteAnnouncement = async (id) => {
     try {
       const res = await authFetch(`${API}/api/announcements/${id}`, { method: "DELETE" });
@@ -937,14 +1065,14 @@ export default function AdminDashboard() {
     users: "Manage Users", admins: "Manage Admins", calendar: "Calendar & Schedule",
     announcements: "Announcements", sessions: "Session Minutes & Agenda",
     ordinances: "Ordinances", resolutions: "Resolutions",
-    officials: "Sangguniang Bayan Officials",
+    officials: "Sangguniang Bayan Council Members",
     logs: "Activity Logs",
   };
 
   // ─── Reusable sub-components ──────────────────────────────────────────────────
   const OfficialsCheckList = ({ selected, onToggle }) => (
     <div className={styles.officialsCheckList}>
-      {officials.length === 0 && <p className={styles.fileHint}>No officials yet.</p>}
+      {officials.length === 0 && <p className={styles.fileHint}>No council members yet.</p>}
       {officials.map((o) => (
         <label key={o.id} className={`${styles.checkItem} ${selected.includes(o.id) ? styles.checkItemSelected : ""}`}>
           <input type="checkbox" checked={selected.includes(o.id)} onChange={() => onToggle(o.id)} />
@@ -958,6 +1086,39 @@ export default function AdminDashboard() {
         </label>
       ))}
     </div>
+  );
+
+  // ─── Term form fields (reused in Add + Edit term modals) ──────────────────────
+  const TermFormFields = ({ form, setForm }) => (
+    <>
+      <label className={styles.fieldLabel}>Term Period <span style={{ color: "#e53e3e" }}>*</span></label>
+      <input className={styles.input} placeholder="e.g. 2022–2025" value={form.term_period}
+        onChange={(e) => setForm({ ...form, term_period: e.target.value })} />
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label className={styles.fieldLabel}>Start Date <span style={{ color: "#e53e3e" }}>*</span></label>
+          <input className={styles.input} type="date" value={form.term_start}
+            onChange={(e) => setForm({ ...form, term_start: e.target.value })} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label className={styles.fieldLabel}>End Date <span className={styles.fieldHint}>(leave blank if serving)</span></label>
+          <input className={styles.input} type="date" value={form.term_end}
+            onChange={(e) => setForm({ ...form, term_end: e.target.value })} />
+        </div>
+      </div>
+      <label className={styles.fieldLabel}>Status</label>
+      <select className={styles.input} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+        <option value="active">Active</option>
+        <option value="terms_ended">Term Ended</option>
+      </select>
+      <label className={styles.fieldLabel} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 4 }}>
+        <input type="checkbox" checked={form.is_reelected} onChange={(e) => setForm({ ...form, is_reelected: e.target.checked })} />
+        {" "}Re-elected for this term
+      </label>
+      <label className={styles.fieldLabel} style={{ marginTop: 8 }}>Notes <span className={styles.fieldHint}>(optional)</span></label>
+      <textarea className={styles.textArea} rows={2} placeholder="Optional notes…" value={form.notes}
+        onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+    </>
   );
 
   const ModalAlert = () => modalMessage ? (
@@ -1036,8 +1197,7 @@ export default function AdminDashboard() {
             { key: "announcements", icon: <Megaphone size={18} strokeWidth={1.5} />,  label: "Announcements" },
             { key: "ordinances",    icon: <ScrollText size={18} strokeWidth={1.5} />, label: "Ordinances" },
             { key: "resolutions",   icon: <Gavel size={18} strokeWidth={1.5} />,      label: "Resolutions" },
-            { key: "officials",     icon: <Landmark size={18} strokeWidth={1.5} />,   label: "SB Officials" },
-            // ── Activity Logs below SB Officials ──
+            { key: "officials",     icon: <Landmark size={18} strokeWidth={1.5} />,   label: "Council Members" },
             { key: "logs",          icon: <Activity size={18} strokeWidth={1.5} />,   label: "Activity Logs" },
           ].map((t) => (
             <button key={t.key}
@@ -1075,7 +1235,7 @@ export default function AdminDashboard() {
             {activeTab === "admins"        && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowAddAdminModal(true); }}>+ Add Admin</button>}
             {activeTab === "ordinances"    && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOrdinanceModal(true); }}>+ Upload Ordinance</button>}
             {activeTab === "resolutions"   && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setResolutionNumber(""); setResolutionTitle(""); setResolutionYear(""); setResolutionFile(null); setSelectedResolutionOfficials([]); setResolutionUploadType(""); setShowResolutionModal(true); }}>+ Upload Resolution</button>}
-            {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOfficialModal(true); }}>+ Add Official</button>}
+            {activeTab === "officials"     && <button className={styles.addBtn} onClick={() => { setModalMessage(""); setShowOfficialModal(true); }}>+ Add Member</button>}
             {activeTab === "sessions"      && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetSessionForm(); setShowSessionModal(true); }}>+ Add Session</button>}
             {activeTab === "announcements" && <button className={styles.addBtn} onClick={() => { setModalMessage(""); resetAnnouncementForm(); setShowAnnouncementModal(true); }}>+ New Announcement</button>}
             {activeTab === "logs"          && (
@@ -1333,14 +1493,14 @@ export default function AdminDashboard() {
                       {o.filetype === "application/pdf" ? <><FileText size={12} strokeWidth={1.5} /> PDF</> : <><Image size={12} strokeWidth={1.5} /> Image to Text</>}
                     </div>
                     <div className={styles.ordinanceOfficialsList}>
-                      <span className={styles.officialsPassedLabel}>Officials who passed:</span>
+                      <span className={styles.officialsPassedLabel}>Council Members who passed:</span>
                       <div className={styles.officialAvatarRow}>
                         {o.officials && o.officials.length > 0 ? o.officials.map((off) => (
                           <div key={off.id} className={styles.officialChip}>
                             {off.photo ? <img src={off.photo} alt={off.full_name} className={styles.chipPhoto} /> : <div className={styles.chipAvatar}>{off.full_name.charAt(0)}</div>}
                             <span className={styles.chipName}>{off.full_name}</span>
                           </div>
-                        )) : <span className={styles.noOfficials}>No officials tagged</span>}
+                        )) : <span className={styles.noOfficials}>No members tagged</span>}
                       </div>
                     </div>
                   </div>
@@ -1396,14 +1556,14 @@ export default function AdminDashboard() {
                       {r.filetype === "application/pdf" ? <><FileText size={12} strokeWidth={1.5} /> PDF</> : <><Image size={12} strokeWidth={1.5} /> Image to Text</>}
                     </div>
                     <div className={styles.ordinanceOfficialsList}>
-                      <span className={styles.officialsPassedLabel}>Officials who passed:</span>
+                      <span className={styles.officialsPassedLabel}>Council Members who passed:</span>
                       <div className={styles.officialAvatarRow}>
                         {r.officials && r.officials.length > 0 ? r.officials.map((off) => (
                           <div key={off.id} className={styles.officialChip}>
                             {off.photo ? <img src={off.photo} alt={off.full_name} className={styles.chipPhoto} /> : <div className={styles.chipAvatar}>{off.full_name.charAt(0)}</div>}
                             <span className={styles.chipName}>{off.full_name}</span>
                           </div>
-                        )) : <span className={styles.noOfficials}>No officials tagged</span>}
+                        )) : <span className={styles.noOfficials}>No members tagged</span>}
                       </div>
                     </div>
                   </div>
@@ -1419,11 +1579,13 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {/* ── OFFICIALS ── */}
+        {/* ── COUNCIL MEMBERS (OFFICIALS) ── */}
         {activeTab === "officials" && !fetchingOfficials && (
           <>
             <div className={styles.statsRow}>
-              <div className={styles.statCard}><div className={styles.statNumber}>{officials.length}</div><div className={styles.statLabel}>Total SB Officials</div></div>
+              <div className={styles.statCard}><div className={styles.statNumber}>{officials.length}</div><div className={styles.statLabel}>Total Members</div></div>
+              <div className={`${styles.statCard} ${styles.statCardGreen}`}><div className={styles.statNumber}>{officials.filter((o) => o.term_status === "active").length}</div><div className={styles.statLabel}>Active Terms</div></div>
+              <div className={`${styles.statCard} ${styles.statCardOrange}`}><div className={styles.statNumber}>{officials.filter((o) => o.term_status === "terms_ended").length}</div><div className={styles.statLabel}>Terms Ended</div></div>
             </div>
             <div className={styles.searchFilterBar}>
               <div className={styles.searchInputWrapper}>
@@ -1438,7 +1600,7 @@ export default function AdminDashboard() {
                 </select>
               </div>
             </div>
-            <div className={styles.searchResultCount}>Showing {filteredOfficials.length} of {officials.length} officials</div>
+            <div className={styles.searchResultCount}>Showing {filteredOfficials.length} of {officials.length} council members</div>
             <div className={styles.officialsGrid}>
               {filteredOfficials.map((o) => (
                 <div key={o.id} className={styles.officialCard}>
@@ -1446,13 +1608,23 @@ export default function AdminDashboard() {
                     {o.photo ? <img src={o.photo} alt={o.full_name} className={styles.officialImg} /> : <div className={styles.officialAvatar}>{o.full_name.charAt(0)}</div>}
                     <div className={styles.officialName}>{o.full_name}</div>
                     <div className={styles.officialPosition}>{o.position}</div>
-                    <div className={styles.officialTerm}><CalendarDays size={12} strokeWidth={1.5} /> {o.term_period}</div>
+                    {/* Term status badge */}
+                    <div style={{ margin: "4px 0" }}>
+                      <TermStatusBadge status={o.term_status} />
+                    </div>
+                    {o.term_period && (
+                      <div className={styles.officialTerm}><CalendarDays size={12} strokeWidth={1.5} /> {o.term_period}</div>
+                    )}
                     <div className={styles.ordinanceCount}><ClipboardList size={12} strokeWidth={1.5} /> {getOfficialOrdinances(o.id).length} ordinance{getOfficialOrdinances(o.id).length !== 1 ? "s" : ""} passed</div>
+                    <div style={{ fontSize: 11, color: "#718096", marginTop: 2 }}>
+                      <History size={11} strokeWidth={1.5} style={{ display: "inline", marginRight: 3 }} />
+                      {(o.terms || []).length} term record{(o.terms || []).length !== 1 ? "s" : ""}
+                    </div>
                   </button>
                   <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: o.id, type: "official", name: o.full_name })}><Trash2 size={13} /> Delete</button>
                 </div>
               ))}
-              {filteredOfficials.length === 0 && <div className={styles.empty}>{officialSearch || officialPositionFilter !== "all" ? "No officials match your search." : "No SB Officials added yet."}</div>}
+              {filteredOfficials.length === 0 && <div className={styles.empty}>{officialSearch || officialPositionFilter !== "all" ? "No council members match your search." : "No council members added yet."}</div>}
             </div>
           </>
         )}
@@ -1460,7 +1632,6 @@ export default function AdminDashboard() {
         {/* ── ACTIVITY LOGS ── */}
         {activeTab === "logs" && (
           <>
-            {/* Stats */}
             {logStats && (
               <div className={styles.statsRow}>
                 {[
@@ -1478,8 +1649,6 @@ export default function AdminDashboard() {
                 ))}
               </div>
             )}
-
-            {/* Filters */}
             <div className={styles.searchFilterBar}>
               <div className={styles.filterGroup}>
                 <Filter size={15} className={styles.filterIcon} />
@@ -1495,10 +1664,7 @@ export default function AdminDashboard() {
                 </select>
               </div>
             </div>
-
             <div className={styles.searchResultCount}>Showing {logs.length} logs</div>
-
-            {/* Table */}
             {fetchingLogs ? (
               <div className={styles.loadingBar}>Loading logs...</div>
             ) : (
@@ -1512,9 +1678,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {logs.length === 0 && (
-                      <tr><td colSpan={8} className={styles.empty}>No logs found.</td></tr>
-                    )}
+                    {logs.length === 0 && <tr><td colSpan={8} className={styles.empty}>No logs found.</td></tr>}
                     {logs.map((log, i) => {
                       const ac = ACTION_COLORS[log.action] || { bg: "#f3f4f6", color: "#374151" };
                       return (
@@ -1529,9 +1693,7 @@ export default function AdminDashboard() {
                             </span>
                           </td>
                           <td className={styles.td}>
-                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: ac.bg, color: ac.color }}>
-                              {log.action}
-                            </span>
+                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: ac.bg, color: ac.color }}>{log.action}</span>
                           </td>
                           <td className={styles.td} style={{ color: "#64748b" }}>{log.module || "—"}</td>
                           <td className={styles.td} style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{log.description || "—"}</td>
@@ -1617,7 +1779,7 @@ export default function AdminDashboard() {
                   </div>
                 );
               })}
-              {filteredMinutes.length === 0 && <div className={styles.empty}>{minutesSearch || minutesTypeFilter !== "all" || minutesYearFilter !== "all" ? "No session records match your search." : 'No session minutes recorded yet. Click "+ Add Session" to get started.'}</div>}
+              {filteredMinutes.length === 0 && <div className={styles.empty}>{minutesSearch || minutesTypeFilter !== "all" || minutesYearFilter !== "all" ? "No session records match your search." : 'No session minutes recorded yet.'}</div>}
             </div>
           </>
         )}
@@ -1678,7 +1840,7 @@ export default function AdminDashboard() {
                   </div>
                 );
               })}
-              {filteredAnnouncements.length === 0 && <div className={styles.empty}>{announcementSearch || announcementPriorityFilter !== "all" ? "No announcements match your search." : 'No announcements yet. Click "+ New Announcement" to post one.'}</div>}
+              {filteredAnnouncements.length === 0 && <div className={styles.empty}>{announcementSearch || announcementPriorityFilter !== "all" ? "No announcements match your search." : 'No announcements yet.'}</div>}
             </div>
           </>
         )}
@@ -1718,6 +1880,158 @@ export default function AdminDashboard() {
         </div></div>
       )}
 
+      {/* Add Council Member */}
+      {showOfficialModal && (
+        <div className={styles.modalOverlay}><div className={`${styles.modal} ${styles.sessionModal}`}>
+          <h2 className={styles.modalTitle}>Add Council Member</h2>
+          <label className={styles.fieldLabel}>Full Name <span style={{ color: "#e53e3e" }}>*</span></label>
+          <input className={styles.input} placeholder="Full Name" value={newOfficial.full_name} onChange={(e) => setNewOfficial({ ...newOfficial, full_name: e.target.value })} />
+          <label className={styles.fieldLabel}>Position <span style={{ color: "#e53e3e" }}>*</span></label>
+          <input className={styles.input} placeholder="Position (e.g. Councilor, Vice Mayor)" value={newOfficial.position} onChange={(e) => setNewOfficial({ ...newOfficial, position: e.target.value })} />
+          <div className={styles.fileUploadBox}>
+            <input type="file" accept="image/*" id="photoInput" style={{ display: "none" }} onChange={(e) => setOfficialPhoto(e.target.files[0])} />
+            <label htmlFor="photoInput" className={styles.fileLabel}>
+              {officialPhoto ? <><CheckSquare size={14} strokeWidth={1.5} /> {officialPhoto.name}</> : <><Upload size={14} strokeWidth={1.5} /> Click to upload photo (optional)</>}
+            </label>
+          </div>
+          {/* Initial term section */}
+          <div style={{ marginTop: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#1a365d", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+              <History size={13} /> Initial Term <span style={{ fontWeight: 400, color: "#718096" }}>(optional)</span>
+            </div>
+            <TermFormFields form={newOfficial} setForm={setNewOfficial} />
+          </div>
+          <ModalAlert />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowOfficialModal(false); setModalMessage(""); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleAddOfficial} disabled={submitting}>{submitting ? "Adding..." : "Add Member"}</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* Official / Council Member Profile */}
+      {showOfficialProfile && selectedOfficialProfile && (
+        <div className={styles.modalOverlay}><div className={styles.profileModal}>
+          <div className={styles.profileHeader}>
+            {selectedOfficialProfile.photo
+              ? <img src={selectedOfficialProfile.photo} alt={selectedOfficialProfile.full_name} className={styles.profilePhoto} />
+              : <div className={styles.profileAvatar}>{selectedOfficialProfile.full_name.charAt(0)}</div>}
+            <div>
+              <div className={styles.profileName}>{selectedOfficialProfile.full_name}</div>
+              <div className={styles.profilePosition}>{selectedOfficialProfile.position}</div>
+              {/* Active term summary */}
+              {selectedOfficialProfile.active_term && (
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <TermStatusBadge status={selectedOfficialProfile.active_term.status} />
+                  <span style={{ fontSize: 12, color: "#4a5568" }}>
+                    <CalendarDays size={11} strokeWidth={1.5} style={{ display: "inline", marginRight: 3 }} />
+                    {selectedOfficialProfile.active_term.term_period}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Term History ── */}
+          <div style={{ margin: "16px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: "#1a365d", display: "flex", alignItems: "center", gap: 6 }}>
+                <History size={14} strokeWidth={1.5} /> Term History ({(selectedOfficialProfile.terms || []).length})
+              </h3>
+              <button className={styles.addBtn} style={{ fontSize: 11, padding: "4px 10px" }}
+                onClick={() => handleOpenAddTerm(selectedOfficialProfile.id)}>
+                + Add Term
+              </button>
+            </div>
+            {(selectedOfficialProfile.terms || []).length === 0 ? (
+              <p style={{ fontSize: 13, color: "#a0aec0", textAlign: "center", padding: "12px 0" }}>No term records yet.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(selectedOfficialProfile.terms || []).map((term) => (
+                  <div key={term.id} style={{
+                    padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0",
+                    background: term.status === "active" ? "#f0fff4" : "#f8fafc",
+                    display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8,
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 3 }}>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{term.term_period}</span>
+                        <TermStatusBadge status={term.status} />
+                        {term.is_reelected && (
+                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, background: "#dbeafe", color: "#1e40af", fontWeight: 600 }}>Re-elected</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#718096" }}>
+                        {formatDate(term.term_start)} → {term.term_end ? formatDate(term.term_end) : <em>Present</em>}
+                      </div>
+                      {term.notes && <div style={{ fontSize: 11, color: "#a0aec0", marginTop: 3 }}>{term.notes}</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button className={styles.editBtn} style={{ fontSize: 11, padding: "3px 8px" }}
+                        onClick={() => handleOpenEditTerm(selectedOfficialProfile.id, term)}>
+                        <Pencil size={11} /> Edit
+                      </button>
+                      <button className={styles.deleteBtn} style={{ fontSize: 11, padding: "3px 8px" }}
+                        onClick={() => setDeleteTarget({ id: term.id, type: "term", name: term.term_period, memberId: selectedOfficialProfile.id })}>
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Ordinances Passed ── */}
+          <div className={styles.profileOrdinances}>
+            <h3 className={styles.profileOrdinancesTitle}><ClipboardList size={15} strokeWidth={1.5} /> Ordinances Passed ({getOfficialOrdinances(selectedOfficialProfile.id).length})</h3>
+            {getOfficialOrdinances(selectedOfficialProfile.id).length === 0
+              ? <p className={styles.empty}>No ordinances passed yet.</p>
+              : getOfficialOrdinances(selectedOfficialProfile.id).map((o) => (
+                <div key={o.id} className={styles.profileOrdinanceItem}>
+                  <div className={styles.profileOrdinanceLeft}>
+                    <span className={`${styles.badge} ${o.filetype === "application/pdf" ? styles.badgeAdmin : styles.badgeGray}`}>{o.filetype === "application/pdf" ? "PDF" : "OCR"}</span>
+                    <div>
+                      <div className={styles.profileOrdinanceName}>{o.title}</div>
+                      <div className={styles.profileOrdinanceDate}>{new Date(o.uploaded_at).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" })}</div>
+                    </div>
+                  </div>
+                  <a href={o.filepath} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
+                </div>
+              ))}
+          </div>
+          <div className={styles.modalBtns}>
+            <button className={styles.confirmBtn} onClick={() => setShowOfficialProfile(false)}>Close</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* Add Term Modal */}
+      {showAddTermModal && termTarget && (
+        <div className={styles.modalOverlay}><div className={styles.modal}>
+          <h2 className={styles.modalTitle}><History size={16} /> Add Term Record</h2>
+          <TermFormFields form={termForm} setForm={setTermForm} />
+          <ModalAlert />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowAddTermModal(false); setModalMessage(""); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleSaveTerm} disabled={submitting}>{submitting ? "Saving..." : "Save Term"}</button>
+          </div>
+        </div></div>
+      )}
+
+      {/* Edit Term Modal */}
+      {showEditTermModal && termTarget && (
+        <div className={styles.modalOverlay}><div className={styles.modal}>
+          <h2 className={styles.modalTitle}><Pencil size={16} /> Edit Term Record</h2>
+          <TermFormFields form={termForm} setForm={setTermForm} />
+          <ModalAlert />
+          <div className={styles.modalBtns}>
+            <button className={styles.cancelBtn} onClick={() => { setShowEditTermModal(false); setModalMessage(""); }}>Cancel</button>
+            <button className={styles.confirmBtn} onClick={handleUpdateTerm} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
+          </div>
+        </div></div>
+      )}
+
       {/* Upload Ordinance */}
       {showOrdinanceModal && (
         <div className={styles.modalOverlay}><div className={styles.modal}>
@@ -1744,7 +2058,7 @@ export default function AdminDashboard() {
             </div>
           )}
           <div className={styles.officialsSelectSection}>
-            <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this ordinance:</p>
+            <p className={styles.officialsSelectLabel}>Tag Council Members who passed this ordinance:</p>
             <OfficialsCheckList selected={selectedOfficials} onToggle={toggleOfficial} />
           </div>
           <ModalAlert />
@@ -1771,7 +2085,7 @@ export default function AdminDashboard() {
             <p className={styles.fileHint}>Current file: {editingOrdinance.filename}</p>
           </div>
           <div className={styles.officialsSelectSection}>
-            <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this ordinance:</p>
+            <p className={styles.officialsSelectLabel}>Tag Council Members who passed this ordinance:</p>
             <OfficialsCheckList selected={editSelectedOfficials} onToggle={toggleEditOfficial} />
           </div>
           <ModalAlert />
@@ -1808,7 +2122,7 @@ export default function AdminDashboard() {
             </div>
           )}
           <div className={styles.officialsSelectSection}>
-            <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this resolution:</p>
+            <p className={styles.officialsSelectLabel}>Tag Council Members who passed this resolution:</p>
             <OfficialsCheckList selected={selectedResolutionOfficials} onToggle={toggleResolutionOfficial} />
           </div>
           <ModalAlert />
@@ -1835,70 +2149,13 @@ export default function AdminDashboard() {
             <p className={styles.fileHint}>Current file: {editingResolution.filename}</p>
           </div>
           <div className={styles.officialsSelectSection}>
-            <p className={styles.officialsSelectLabel}>Tag SB Officials who passed this resolution:</p>
+            <p className={styles.officialsSelectLabel}>Tag Council Members who passed this resolution:</p>
             <OfficialsCheckList selected={editResolutionSelectedOfficials} onToggle={toggleEditResolutionOfficial} />
           </div>
           <ModalAlert />
           <div className={styles.modalBtns}>
             <button className={styles.cancelBtn} onClick={() => { setShowEditResolutionModal(false); setEditingResolution(null); setModalMessage(""); }}>Cancel</button>
             <button className={styles.confirmBtn} onClick={handleUpdateResolution} disabled={submitting}>{submitting ? "Saving..." : "Save Changes"}</button>
-          </div>
-        </div></div>
-      )}
-
-      {/* Add Official */}
-      {showOfficialModal && (
-        <div className={styles.modalOverlay}><div className={styles.modal}>
-          <h2 className={styles.modalTitle}>Add SB Official</h2>
-          <input className={styles.input} placeholder="Full Name" value={newOfficial.full_name} onChange={(e) => setNewOfficial({ ...newOfficial, full_name: e.target.value })} />
-          <input className={styles.input} placeholder="Position (e.g. Councilor, Vice Mayor)" value={newOfficial.position} onChange={(e) => setNewOfficial({ ...newOfficial, position: e.target.value })} />
-          <input className={styles.input} placeholder="Term Period (e.g. 2022-2025)" value={newOfficial.term_period} onChange={(e) => setNewOfficial({ ...newOfficial, term_period: e.target.value })} />
-          <div className={styles.fileUploadBox}>
-            <input type="file" accept="image/*" id="photoInput" style={{ display: "none" }} onChange={(e) => setOfficialPhoto(e.target.files[0])} />
-            <label htmlFor="photoInput" className={styles.fileLabel}>
-              {officialPhoto ? <><CheckSquare size={14} strokeWidth={1.5} /> {officialPhoto.name}</> : <><Upload size={14} strokeWidth={1.5} /> Click to upload photo (optional)</>}
-            </label>
-          </div>
-          <ModalAlert />
-          <div className={styles.modalBtns}>
-            <button className={styles.cancelBtn} onClick={() => { setShowOfficialModal(false); setModalMessage(""); }}>Cancel</button>
-            <button className={styles.confirmBtn} onClick={handleAddOfficial} disabled={submitting}>{submitting ? "Adding..." : "Add Official"}</button>
-          </div>
-        </div></div>
-      )}
-
-      {/* Official Profile */}
-      {showOfficialProfile && selectedOfficialProfile && (
-        <div className={styles.modalOverlay}><div className={styles.profileModal}>
-          <div className={styles.profileHeader}>
-            {selectedOfficialProfile.photo
-              ? <img src={selectedOfficialProfile.photo} alt={selectedOfficialProfile.full_name} className={styles.profilePhoto} />
-              : <div className={styles.profileAvatar}>{selectedOfficialProfile.full_name.charAt(0)}</div>}
-            <div>
-              <div className={styles.profileName}>{selectedOfficialProfile.full_name}</div>
-              <div className={styles.profilePosition}>{selectedOfficialProfile.position}</div>
-              <div className={styles.profileTerm}><CalendarDays size={13} strokeWidth={1.5} /> Term: {selectedOfficialProfile.term_period}</div>
-            </div>
-          </div>
-          <div className={styles.profileOrdinances}>
-            <h3 className={styles.profileOrdinancesTitle}><ClipboardList size={15} strokeWidth={1.5} /> Ordinances Passed ({getOfficialOrdinances(selectedOfficialProfile.id).length})</h3>
-            {getOfficialOrdinances(selectedOfficialProfile.id).length === 0
-              ? <p className={styles.empty}>No ordinances passed yet.</p>
-              : getOfficialOrdinances(selectedOfficialProfile.id).map((o) => (
-                <div key={o.id} className={styles.profileOrdinanceItem}>
-                  <div className={styles.profileOrdinanceLeft}>
-                    <span className={`${styles.badge} ${o.filetype === "application/pdf" ? styles.badgeAdmin : styles.badgeGray}`}>{o.filetype === "application/pdf" ? "PDF" : "OCR"}</span>
-                    <div>
-                      <div className={styles.profileOrdinanceName}>{o.title}</div>
-                      <div className={styles.profileOrdinanceDate}>{new Date(o.uploaded_at).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" })}</div>
-                    </div>
-                  </div>
-                  <a href={o.filepath} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
-                </div>
-              ))}
-          </div>
-          <div className={styles.modalBtns}>
-            <button className={styles.confirmBtn} onClick={() => setShowOfficialProfile(false)}>Close</button>
           </div>
         </div></div>
       )}
