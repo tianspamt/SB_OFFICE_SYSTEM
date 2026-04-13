@@ -6,6 +6,8 @@ import AdminDashboard from './AdminDashboard'
 import UserDashboard from './UserDashboard/UserDashboard'
 import HomePage from './UserDashboard/HomePage'
 import CouncilPage from './UserDashboard/CouncilPage'
+import CurrentCouncilPage from './UserDashboard/council/CurrentCouncilPage'
+import PreviousCouncilsPage from './UserDashboard/council/PreviousCouncilsPage'
 import AnnouncementsPage from './UserDashboard/AnnouncementsPage'
 import AboutPage from './UserDashboard/AboutPage'
 import SearchPage from './UserDashboard/SearchPage'
@@ -71,6 +73,8 @@ export default function App() {
         <Route path="localcode"     element={<LocalCodePage />} />
         <Route path="rules"         element={<RulesPage />} />
         <Route path="council"       element={<CouncilPage />} />
+        <Route path="council/current"   element={<CurrentCouncilPage />} />
+        <Route path="council/previous"  element={<PreviousCouncilsPage />} />
         <Route path="announcements" element={<AnnouncementsPage />} />
         <Route path="about"         element={<AboutPage />} />
         <Route path="search"        element={<SearchPage />} />

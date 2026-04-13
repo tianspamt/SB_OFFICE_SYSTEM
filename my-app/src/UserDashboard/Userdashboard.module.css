@@ -328,6 +328,28 @@
    }
    .mobileMenuLogout:hover { background: #fee2e2; }
    
+   .dropBadge {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: #009439;
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 99px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+  
+  .mobileMenuSection {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    padding: 4px 16px;
+  }
+
    @media (max-width: 900px) {
      .navLinks { display: none; }
      .navUserName { display: none; }
@@ -1443,4 +1465,28 @@
      .viewBtn { width: 100%; justify-content: center; }
      .infoBlock { flex-direction: column; }
      .modal { padding: 18px 14px; }
+   }
+
+   /* ── Council dropdown additions ── */
+   .dropBadge {
+     display: inline-block;
+     font-size: 0.62rem;
+     font-weight: 700;
+     letter-spacing: 0.04em;
+     text-transform: uppercase;
+     background: #009439;
+     color: #fff;
+     padding: 1px 6px;
+     border-radius: 99px;
+     margin-left: 6px;
+     vertical-align: middle;
+   }
+
+   .mobileMenuSection {
+     font-size: 0.68rem;
+     font-weight: 700;
+     letter-spacing: 0.08em;
+     text-transform: uppercase;
+     color: #94a3b8;
+     padding: 4px 16px;
    }

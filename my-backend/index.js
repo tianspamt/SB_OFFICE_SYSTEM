@@ -452,7 +452,6 @@ app.put("/api/users/:id/password", verifyToken, [
   if (req.user.id !== parseInt(id) && req.user.role !== 'admin')
     return res.status(403).json({ error: 'Forbidden.' })
   try {
-    // If self (not admin), verify current password first
     if (req.user.id === parseInt(id) && req.user.role !== 'admin') {
       if (!currentPassword)
         return res.status(400).json({ error: 'Current password is required.' })
@@ -480,7 +479,6 @@ app.delete("/api/users/:id", verifyToken, adminOnly, async (req, res) => {
     const { data: existing } = await supabase
       .from('users').select('id, username').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'User not found.' })
-    // Prevent self-deletion
     if (req.user.id === parseInt(id))
       return res.status(400).json({ error: 'You cannot delete your own account.' })
     const { error } = await supabase.from('users').delete().eq('id', id)
@@ -583,13 +581,8 @@ app.put('/api/sb-officials/:id', verifyToken, adminOnly, upload.single('photo'),
     const { data: existing, error: fetchErr } = await supabase
       .from('sb_officials').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Official not found.' })
-    const updateData = {
-      full_name,
-      position,
-      term_period: term_period || null
-    }
+    const updateData = { full_name, position, term_period: term_period || null }
     if (req.file) {
-      // Delete old photo if exists
       if (existing.photo_path) await deleteFromStorage(existing.photo_path)
       const { fileName, publicUrl } = await uploadToStorage(req.file, 'officials')
       updateData.photo = publicUrl
@@ -726,7 +719,7 @@ app.post('/api/ordinances/upload-image-text', verifyToken, adminOnly, upload.sin
       .insert({
         ordinance_number: ordinance_number || null,
         title,
-       year: year ? parseInt(year) : null ,
+        year: year ? parseInt(year) : null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
         filepath: publicUrl,
@@ -776,7 +769,6 @@ app.put('/api/ordinances/:id', verifyToken, adminOnly, upload.single('file'), ha
     const { data: updated, error } = await supabase
       .from('ordinances').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    // Sync officials
     await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
     const officialIds = safeParseJSON(officials, [])
     if (officialIds.length > 0) {
@@ -798,7 +790,6 @@ app.delete('/api/ordinances/:id', verifyToken, adminOnly, async (req, res) => {
       .from('ordinances').select('filepath, title').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Ordinance not found.' })
     if (existing.filepath) await deleteFromStorage(existing.filepath)
-    // Delete related officials first to avoid FK constraint issues
     await supabase.from('ordinance_officials').delete().eq('ordinance_id', req.params.id)
     const { error } = await supabase.from('ordinances').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
@@ -827,7 +818,7 @@ app.get('/api/ordinances/:id/print', async (req, res) => {
         @media print { .print-btn { display:none; } }
       </style>
       </head><body>
-      <button class="print-btn" onclick="window.print()">🖨 Print</button>
+      <button class="print-btn" onclick="window.print()">Print</button>
       ${o.ordinance_number ? `<h2>${o.ordinance_number}</h2>` : ''}
       <h1>${o.title}</h1>
       <div class="meta">${o.year ? `Year: ${o.year} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}</div>
@@ -992,7 +983,6 @@ app.put('/api/resolutions/:id', verifyToken, adminOnly, upload.single('file'), h
     const { data: updated, error } = await supabase
       .from('resolutions').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    // Sync officials
     await supabase.from('resolution_officials').delete().eq('resolution_id', id)
     const officialIds = safeParseJSON(officials, [])
     if (officialIds.length > 0) {
@@ -1014,7 +1004,6 @@ app.delete('/api/resolutions/:id', verifyToken, adminOnly, async (req, res) => {
       .from('resolutions').select('filepath, title').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Resolution not found.' })
     if (existing.filepath) await deleteFromStorage(existing.filepath)
-    // Delete related officials first
     await supabase.from('resolution_officials').delete().eq('resolution_id', req.params.id)
     const { error } = await supabase.from('resolutions').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
@@ -1050,7 +1039,7 @@ app.get('/api/resolutions/:id/print', async (req, res) => {
         .print-btn { position:fixed; top:20px; right:20px; padding:10px 20px; background:#1a365d; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px; }
         @media print { .print-btn { display:none; } }
       </style></head><body>
-      <button class="print-btn" onclick="window.print()">🖨 Print</button>
+      <button class="print-btn" onclick="window.print()">Print</button>
       <div class="letterhead">
         <img src="${process.env.LOGO_URL || ''}" alt="Seal" onerror="this.style.display='none'" />
         <div>
@@ -1257,7 +1246,7 @@ app.get('/api/session-minutes/:id/print', async (req, res) => {
         @media print { .print-btn { display:none; } body { padding:20px 40px 40px; } }
       </style>
       </head><body>
-      <button class="print-btn" onclick="window.print()">🖨&nbsp; Print</button>
+      <button class="print-btn" onclick="window.print()">Print</button>
       <div class="letterhead">
         <img class="letterhead-seal" src="${process.env.LOGO_URL || ''}" alt="Official Seal" onerror="this.style.display='none'"/>
         <div class="letterhead-text">
@@ -1336,12 +1325,7 @@ app.post('/api/announcements', verifyToken, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required.' })
     const { data, error } = await supabase
       .from('announcements')
-      .insert({
-        title,
-        body,
-        priority: priority || 'normal',
-        expires_at: expires_at || null
-      })
+      .insert({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'CREATE', 'Announcements', `Posted announcement: ${title}`)
@@ -1362,12 +1346,7 @@ app.put('/api/announcements/:id', verifyToken, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required.' })
     const { data, error } = await supabase
       .from('announcements')
-      .update({
-        title,
-        body,
-        priority: priority || 'normal',
-        expires_at: expires_at || null
-      })
+      .update({ title, body, priority: priority || 'normal', expires_at: expires_at || null })
       .eq('id', req.params.id).select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPDATE', 'Announcements', `Updated announcement: ${title}`)
@@ -1492,6 +1471,66 @@ app.delete('/api/calendar-events/:id', verifyToken, adminOnly, async (req, res) 
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'DELETE', 'Calendar', `Deleted event: ${existing.title}`)
     res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ==================================================
+// ---- COUNCIL ROUTES ----
+// ==================================================
+
+// GET /api/council/current
+app.get('/api/council/current', async (req, res) => {
+  try {
+    const { data: term, error: tErr } = await supabase
+      .from('council_terms')
+      .select('*')
+      .eq('is_current', true)
+      .single()
+    if (tErr) return res.status(500).json({ error: tErr.message })
+    if (!term) return res.status(404).json({ error: 'No active council term found.' })
+
+    const { data: members, error: mErr } = await supabase
+      .from('council_members')
+      .select('*')
+      .eq('term_id', term.id)
+      .order('position', { ascending: true })
+    if (mErr) return res.status(500).json({ error: mErr.message })
+
+    res.json({ term, members })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/council/previous
+app.get('/api/council/previous', async (req, res) => {
+  try {
+    const { data: terms, error: tErr } = await supabase
+      .from('council_terms')
+      .select('*')
+      .eq('is_current', false)
+      .order('term_number', { ascending: false })
+    if (tErr) return res.status(500).json({ error: tErr.message })
+
+    res.json({ terms })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/council/previous/:termId/members
+app.get('/api/council/previous/:termId/members', async (req, res) => {
+  try {
+    const { data: members, error } = await supabase
+      .from('council_members')
+      .select('*')
+      .eq('term_id', req.params.termId)
+      .order('position', { ascending: true })
+    if (error) return res.status(500).json({ error: error.message })
+
+    res.json({ members })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

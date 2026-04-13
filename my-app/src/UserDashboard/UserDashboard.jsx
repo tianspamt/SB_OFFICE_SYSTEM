@@ -12,13 +12,13 @@ import logo from '../assets/image/balilihan-logo-Large-1.png'
 // ─── Inner layout (has access to context) ────────────────────────────────────
 function DashboardLayout() {
   const { user, activeAnn, handleLogout, ordinances, selectedOfficial, setSelectedOfficial } = useDashboard()
-  const navigate  = useNavigate()
-  const location  = useLocation()
-  const navRef    = useRef(null)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const navRef   = useRef(null)
 
-  const [scrolled,        setScrolled]        = useState(false)
-  const [dropdownOpen,    setDropdownOpen]     = useState(null)  // 'legislative' | null
-  const [mobileMenuOpen,  setMobileMenuOpen]   = useState(false)
+  const [scrolled,       setScrolled]      = useState(false)
+  const [dropdownOpen,   setDropdownOpen]   = useState(null) // 'legislative' | 'council' | null
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const path = location.pathname
 
@@ -43,11 +43,14 @@ function DashboardLayout() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [path])
 
-  const isLegislative = ['/dashboard/ordinances','/dashboard/resolutions','/dashboard/sessions','/dashboard/localcode','/dashboard/rules'].includes(path)
+  const isLegislative = [
+    '/dashboard/ordinances', '/dashboard/resolutions',
+    '/dashboard/sessions', '/dashboard/localcode', '/dashboard/rules',
+  ].includes(path)
 
-  const go = (to) => {
-    navigate(to)
-  }
+  const isCouncil = path.startsWith('/dashboard/council')
+
+  const go = (to) => navigate(to)
 
   return (
     <div className={styles.root}>
@@ -67,6 +70,8 @@ function DashboardLayout() {
 
           {/* Desktop nav */}
           <nav className={styles.navLinks}>
+
+            {/* Home */}
             <button
               className={`${styles.navLink} ${path === '/dashboard/home' || path === '/dashboard' ? styles.navLinkActive : ''}`}
               onClick={() => go('/dashboard/home')}>
@@ -78,17 +83,18 @@ function DashboardLayout() {
               <button
                 className={`${styles.navLink} ${styles.navLinkDrop} ${isLegislative ? styles.navLinkActive : ''}`}
                 onClick={() => setDropdownOpen(v => v === 'legislative' ? null : 'legislative')}>
-                Legislative <ChevronDown size={13} strokeWidth={2}
+                Legislative
+                <ChevronDown size={13} strokeWidth={2}
                   style={{ transform: dropdownOpen === 'legislative' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
               </button>
               {dropdownOpen === 'legislative' && (
                 <div className={styles.dropdown}>
                   {[
-                    { path: '/dashboard/ordinances', icon: <ScrollText size={15} />, label: 'Ordinances',           desc: 'Enacted local laws' },
-                    { path: '/dashboard/resolutions', icon: <Gavel size={15} />,    label: 'Resolutions',           desc: 'Formal expressions of policy' },
-                    { path: '/dashboard/sessions',   icon: <BookOpen size={15} />,  label: 'Session Minutes',       desc: 'Records of proceedings' },
-                    { path: '/dashboard/localcode',  icon: <Scale size={15} />,     label: 'Local Government Code', desc: 'RA 7160 reference' },
-                    { path: '/dashboard/rules',      icon: <ClipboardList size={15} />, label: 'Internal Rules',    desc: 'Rules of procedure' },
+                    { path: '/dashboard/ordinances',  icon: <ScrollText size={15} />,   label: 'Ordinances',            desc: 'Enacted local laws' },
+                    { path: '/dashboard/resolutions', icon: <Gavel size={15} />,         label: 'Resolutions',           desc: 'Formal expressions of policy' },
+                    { path: '/dashboard/sessions',    icon: <BookOpen size={15} />,      label: 'Session Minutes',       desc: 'Records of proceedings' },
+                    { path: '/dashboard/localcode',   icon: <Scale size={15} />,         label: 'Local Government Code', desc: 'RA 7160 reference' },
+                    { path: '/dashboard/rules',       icon: <ClipboardList size={15} />, label: 'Internal Rules',        desc: 'Rules of procedure' },
                   ].map(item => (
                     <button key={item.path} className={styles.dropItem} onClick={() => go(item.path)}>
                       <span className={styles.dropItemIcon}>{item.icon}</span>
@@ -102,12 +108,41 @@ function DashboardLayout() {
               )}
             </div>
 
-            {/* Council Members */}
-            <button
-              className={`${styles.navLink} ${path === '/dashboard/council' ? styles.navLinkActive : ''}`}
-              onClick={() => go('/dashboard/council')}>
-              Council Members
-            </button>
+            {/* Council dropdown */}
+            <div className={styles.navDropWrapper}>
+              <button
+                className={`${styles.navLink} ${styles.navLinkDrop} ${isCouncil ? styles.navLinkActive : ''}`}
+                onClick={() => setDropdownOpen(v => v === 'council' ? null : 'council')}>
+                Council
+                <ChevronDown size={13} strokeWidth={2}
+                  style={{ transform: dropdownOpen === 'council' ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+              </button>
+              {dropdownOpen === 'council' && (
+                <div className={styles.dropdown}>
+                  <button
+                    className={`${styles.dropItem} ${path === '/dashboard/council/current' ? styles.dropItemActive : ''}`}
+                    onClick={() => go('/dashboard/council/current')}>
+                    <span className={styles.dropItemIcon}><Users size={15} /></span>
+                    <span>
+                      <span className={styles.dropItemLabel}>
+                        Current Council
+                        <span className={styles.dropBadge}>Active</span>
+                      </span>
+                      <span className={styles.dropItemDesc}>Present Sangguniang Bayan members</span>
+                    </span>
+                  </button>
+                  <button
+                    className={`${styles.dropItem} ${path === '/dashboard/council/previous' ? styles.dropItemActive : ''}`}
+                    onClick={() => go('/dashboard/council/previous')}>
+                    <span className={styles.dropItemIcon}><ClipboardList size={15} /></span>
+                    <span>
+                      <span className={styles.dropItemLabel}>Previous Councils</span>
+                      <span className={styles.dropItemDesc}>Browse past council terms</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Announcements */}
             <button
@@ -147,13 +182,36 @@ function DashboardLayout() {
         {mobileMenuOpen && (
           <div className={styles.mobileMenu}>
             {[
-              { path: '/dashboard/home',          label: 'Home' },
-              { path: '/dashboard/ordinances',    label: 'Ordinances' },
-              { path: '/dashboard/resolutions',   label: 'Resolutions' },
-              { path: '/dashboard/sessions',      label: 'Session Minutes' },
-              { path: '/dashboard/localcode',     label: 'Local Government Code' },
-              { path: '/dashboard/rules',         label: 'Internal Rules' },
-              { path: '/dashboard/council',       label: 'Council Members' },
+              { path: '/dashboard/home',       label: 'Home' },
+              { path: '/dashboard/ordinances', label: 'Ordinances' },
+              { path: '/dashboard/resolutions',label: 'Resolutions' },
+              { path: '/dashboard/sessions',   label: 'Session Minutes' },
+              { path: '/dashboard/localcode',  label: 'Local Government Code' },
+              { path: '/dashboard/rules',      label: 'Internal Rules' },
+            ].map(item => (
+              <button
+                key={item.path}
+                className={`${styles.mobileMenuItem} ${path === item.path ? styles.mobileMenuActive : ''}`}
+                onClick={() => go(item.path)}>
+                {item.label}
+              </button>
+            ))}
+
+            <div className={styles.mobileMenuDivider} />
+            <div className={styles.mobileMenuSection}>Council</div>
+            <button
+              className={`${styles.mobileMenuItem} ${path === '/dashboard/council/current' ? styles.mobileMenuActive : ''}`}
+              onClick={() => go('/dashboard/council/current')}>
+              Current Council
+            </button>
+            <button
+              className={`${styles.mobileMenuItem} ${path === '/dashboard/council/previous' ? styles.mobileMenuActive : ''}`}
+              onClick={() => go('/dashboard/council/previous')}>
+              Previous Councils
+            </button>
+
+            <div className={styles.mobileMenuDivider} />
+            {[
               { path: '/dashboard/announcements', label: `Announcements${activeAnn.length > 0 ? ` (${activeAnn.length})` : ''}` },
               { path: '/dashboard/about',         label: 'About' },
               { path: '/dashboard/search',        label: 'Search' },
@@ -165,6 +223,7 @@ function DashboardLayout() {
                 {item.label}
               </button>
             ))}
+
             <div className={styles.mobileMenuDivider} />
             <button className={styles.mobileMenuLogout} onClick={handleLogout}>
               <LogOut size={14} /> Log out
@@ -190,11 +249,11 @@ function DashboardLayout() {
           </div>
           <div className={styles.footerLinks}>
             {[
-              { label: 'Ordinances',     path: '/dashboard/ordinances' },
-              { label: 'Resolutions',    path: '/dashboard/resolutions' },
+              { label: 'Ordinances',      path: '/dashboard/ordinances' },
+              { label: 'Resolutions',     path: '/dashboard/resolutions' },
               { label: 'Session Minutes', path: '/dashboard/sessions' },
-              { label: 'Council Members', path: '/dashboard/council' },
-              { label: 'Announcements',  path: '/dashboard/announcements' },
+              { label: 'Current Council', path: '/dashboard/council/current' },
+              { label: 'Announcements',   path: '/dashboard/announcements' },
             ].map(l => (
               <button key={l.path} className={styles.footerLink} onClick={() => go(l.path)}>{l.label}</button>
             ))}
