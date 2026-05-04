@@ -30,6 +30,7 @@ import {
   Eye,
   Pencil,
   Trash2,
+  CalendarDays,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -104,6 +105,7 @@ export default function AdminDashboard() {
   const [showResolutionModal, setShowResolutionModal] = useState(false);
   const [showEditResolutionModal, setShowEditResolutionModal] = useState(false);
   const [showOfficialModal, setShowOfficialModal] = useState(false);
+  const [showEditOfficialModal, setShowEditOfficialModal] = useState(false);
   const [showOfficialProfile, setShowOfficialProfile] = useState(false);
   const [showTextModal, setShowTextModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
@@ -177,6 +179,13 @@ export default function AdminDashboard() {
   });
   const [officialPhoto, setOfficialPhoto] = useState(null);
   const [selectedOfficialProfile, setSelectedOfficialProfile] = useState(null);
+
+  // ── edit official states ──
+  const [editingOfficial, setEditingOfficial] = useState(null);
+  const [editOfficialName, setEditOfficialName] = useState("");
+  const [editOfficialPosition, setEditOfficialPosition] = useState("");
+  const [editOfficialPhoto, setEditOfficialPhoto] = useState(null);
+
   const emptyTermForm = {
     term_period: "",
     term_start: "",
@@ -785,6 +794,46 @@ export default function AdminDashboard() {
       setSubmitting(false);
     }
   };
+
+  // ── Edit Official ──
+  const handleOpenEditOfficial = (o) => {
+    setEditingOfficial(o);
+    setEditOfficialName(o.full_name || "");
+    setEditOfficialPosition(o.position || "");
+    setEditOfficialPhoto(null);
+    setModalMessage("");
+    setShowEditOfficialModal(true);
+  };
+
+  const handleUpdateOfficial = async () => {
+    if (!editOfficialName || !editOfficialPosition) {
+      showModalMsg("Full name and position are required!", "error");
+      return;
+    }
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("full_name", editOfficialName);
+    fd.append("position", editOfficialPosition);
+    if (editOfficialPhoto) fd.append("photo", editOfficialPhoto);
+    try {
+      const res = await authFetch(
+        `${API}/api/sb-council-members/${editingOfficial.id}`,
+        { method: "PUT", body: fd }
+      );
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Council member updated!");
+        setShowEditOfficialModal(false);
+        setEditingOfficial(null);
+        fetchOfficials();
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleDeleteOfficial = async (id) => {
     try {
       const res = await authFetch(`${API}/api/sb-council-members/${id}`, {
@@ -1367,7 +1416,7 @@ export default function AdminDashboard() {
             <span className={styles.navLabel}>Councilor Management</span>
           </button>
 
-          {/* Content Management (placeholder) */}
+          {/* Content Management */}
           <button
             className={`${styles.navBtn} ${
               activeTab === "content" ? styles.navBtnActive : ""
@@ -1499,7 +1548,6 @@ export default function AdminDashboard() {
                 + Upload Ordinance
               </button>
             )}
-
             {activeTab === "resolutions" && (
               <button
                 className={styles.addBtn}
@@ -1517,18 +1565,6 @@ export default function AdminDashboard() {
                 + Upload Resolution
               </button>
             )}
-
-            {activeTab === "officials" && (
-              <button
-                className={styles.addBtn}
-                onClick={() => {
-                  setModalMessage("");
-                  setShowOfficialModal(true);
-                }}
-              >
-                + Add Member
-              </button>
-            )}
             {activeTab === "sessions" && (
               <button
                 className={styles.addBtn}
@@ -1541,7 +1577,6 @@ export default function AdminDashboard() {
                 + Add Session
               </button>
             )}
-
             {activeTab === "announcements" && (
               <button
                 className={styles.addBtn}
@@ -1615,6 +1650,8 @@ export default function AdminDashboard() {
             onEdit={handleOpenEditResolution}
           />
         )}
+
+        {/* ── OFFICIALS PAGE — group-by-council wiring ── */}
         {activeTab === "officials" && !fetchingOfficials && (
           <OfficialsPage
             officials={officials}
@@ -1624,8 +1661,25 @@ export default function AdminDashboard() {
               setSelectedOfficialProfile(o);
               setShowOfficialProfile(true);
             }}
+            onEditMember={handleOpenEditOfficial}
+            onAddMember={(termPeriod) => {
+              // Pre-fill the term_period so the modal shows which council
+              setNewOfficial({
+                full_name: "",
+                position: "",
+                term_period: termPeriod || "",
+                term_start: "",
+                term_end: "",
+                is_reelected: false,
+                notes: "",
+              });
+              setOfficialPhoto(null);
+              setModalMessage("");
+              setShowOfficialModal(true);
+            }}
           />
         )}
+
         {activeTab === "sessions" && !fetchingMinutes && (
           <SessionsPage
             sessionMinutes={sessionMinutes}
@@ -1802,88 +1856,217 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Add Council Member */}
+{/* ── Add Council Member modal ── */}
       {showOfficialModal && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.sessionModal}`}>
-            <h2 className={styles.modalTitle}>Add Council Member</h2>
-            <label className={styles.fieldLabel}>
-              Full Name <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <input
-              className={styles.input}
-              placeholder="Full Name"
-              value={newOfficial.full_name}
-              onChange={(e) =>
-                setNewOfficial({ ...newOfficial, full_name: e.target.value })
-              }
-            />
-            <label className={styles.fieldLabel}>
-              Position <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <input
-              className={styles.input}
-              placeholder="Position (e.g. Councilor, Vice Mayor)"
-              value={newOfficial.position}
-              onChange={(e) =>
-                setNewOfficial({ ...newOfficial, position: e.target.value })
-              }
-            />
-            <div className={styles.fileUploadBox}>
-              <input
-                type="file"
-                accept="image/*"
-                id="photoInput"
-                style={{ display: "none" }}
-                onChange={(e) => setOfficialPhoto(e.target.files[0])}
-              />
-              <label htmlFor="photoInput" className={styles.fileLabel}>
-                {officialPhoto ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {officialPhoto.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} /> Click to upload photo
-                    (optional)
-                  </>
-                )}
-              </label>
-            </div>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowOfficialModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
             <div
               style={{
-                marginTop: 12,
-                padding: "12px 14px",
-                background: "#f8fafc",
-                borderRadius: 8,
-                border: "1px solid #e2e8f0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+                position: "sticky",
+                top: 0,
+                zIndex: 2,
               }}
             >
-              <div
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Add Council Member
+              </h2>
+              <button
+                onClick={() => {
+                  setShowOfficialModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
                 style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "#1a365d",
-                  marginBottom: 8,
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
                   display: "flex",
                   alignItems: "center",
-                  gap: 6,
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  transition: "background 0.15s, color 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#fee2e2";
+                  e.currentTarget.style.color = "#dc2626";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#f1f5f9";
+                  e.currentTarget.style.color = "#64748b";
                 }}
               >
-                <History size={13} /> Initial Term{" "}
-                <span style={{ fontWeight: 400, color: "#718096" }}>
-                  (optional)
-                </span>
-              </div>
-              <TermFormFields
-                form={newOfficial}
-                setForm={setNewOfficial}
-                styles={styles}
-              />
+                <X size={16} />
+              </button>
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              {/* Council banner */}
+              {newOfficial.term_period && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 12px",
+                    background: "#ebf4ff",
+                    border: "1px solid #bee3f8",
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    fontSize: 13,
+                    color: "#1a365d",
+                    fontWeight: 600,
+                  }}
+                >
+                  <CalendarDays size={14} strokeWidth={1.5} />
+                  Adding to council: {newOfficial.term_period}
+                </div>
+              )}
+
+              <label className={styles.fieldLabel}>
+                Full Name <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Full Name"
+                value={newOfficial.full_name}
+                onChange={(e) =>
+                  setNewOfficial({ ...newOfficial, full_name: e.target.value })
+                }
+              />
+
+              <label className={styles.fieldLabel}>
+                Position <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Position (e.g. Councilor, Vice Mayor)"
+                value={newOfficial.position}
+                onChange={(e) =>
+                  setNewOfficial({ ...newOfficial, position: e.target.value })
+                }
+              />
+
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="photoInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setOfficialPhoto(e.target.files[0])}
+                />
+                <label htmlFor="photoInput" className={styles.fileLabel}>
+                  {officialPhoto ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {officialPhoto.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to upload
+                      photo (optional)
+                    </>
+                  )}
+                </label>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: "14px 16px",
+                  background: "#f8fafc",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "#1a365d",
+                    marginBottom: 10,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.4px",
+                  }}
+                >
+                  <History size={13} /> Term Details{" "}
+                  <span
+                    style={{
+                      fontWeight: 500,
+                      color: "#94a3b8",
+                      textTransform: "none",
+                      letterSpacing: 0,
+                    }}
+                  >
+                    (optional)
+                  </span>
+                </div>
+                <TermFormFields
+                  form={newOfficial}
+                  setForm={setNewOfficial}
+                  styles={styles}
+                />
+              </div>
+
+              <MAlert />
+            </div>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+                position: "sticky",
+                bottom: 0,
+                zIndex: 2,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -1899,6 +2082,78 @@ export default function AdminDashboard() {
                 disabled={submitting}
               >
                 {submitting ? "Adding..." : "Add Member"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Council Member */}
+      {showEditOfficialModal && editingOfficial && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal}>
+            <h2 className={styles.modalTitle}>Edit Council Member</h2>
+            <label className={styles.fieldLabel}>
+              Full Name <span style={{ color: "#e53e3e" }}>*</span>
+            </label>
+            <input
+              className={styles.input}
+              placeholder="Full Name"
+              value={editOfficialName}
+              onChange={(e) => setEditOfficialName(e.target.value)}
+            />
+            <label className={styles.fieldLabel}>
+              Position <span style={{ color: "#e53e3e" }}>*</span>
+            </label>
+            <input
+              className={styles.input}
+              placeholder="Position (e.g. Councilor, Vice Mayor)"
+              value={editOfficialPosition}
+              onChange={(e) => setEditOfficialPosition(e.target.value)}
+            />
+            <div className={styles.fileUploadBox}>
+              <input
+                type="file"
+                accept="image/*"
+                id="editPhotoInput"
+                style={{ display: "none" }}
+                onChange={(e) => setEditOfficialPhoto(e.target.files[0])}
+              />
+              <label htmlFor="editPhotoInput" className={styles.fileLabel}>
+                {editOfficialPhoto ? (
+                  <>
+                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                    {editOfficialPhoto.name}
+                  </>
+                ) : (
+                  <>
+                    <Upload size={14} strokeWidth={1.5} /> Click to replace
+                    photo (optional)
+                  </>
+                )}
+              </label>
+              {editingOfficial.photo && !editOfficialPhoto && (
+                <p className={styles.fileHint}>Current photo on file</p>
+              )}
+            </div>
+            <MAlert />
+            <div className={styles.modalBtns}>
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowEditOfficialModal(false);
+                  setEditingOfficial(null);
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleUpdateOfficial}
+                disabled={submitting}
+              >
+                {submitting ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
