@@ -1,94 +1,472 @@
+/**
+ * SessionsPage.jsx — Updated with Review, Approval, and Manual Publishing Workflow
+ * ADMIN ONLY — UI only, no backend logic
+ * Preserves existing props: sessionMinutes, setDeleteTarget, onEdit
+ */
+
 import { useState } from "react";
-import { Search, X, Filter, Eye, Pencil, Trash2, CalendarDays, Printer } from "lucide-react";
+import { Printer, Eye, Pencil, Trash2, CalendarDays } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
+import lStyles from "./LegislativeModule.module.css";
 import { API, MONTHS } from "./AdminContext";
 
-export default function SessionsPage({ sessionMinutes, setDeleteTarget, onEdit }) {
-  const [minutesSearch, setMinutesSearch] = useState("");
+import {
+  TabNavigation,
+  SearchBar,
+  FilterPanel,
+  CommentPanel,
+  UploadModal,
+  EmptyState,
+  StatsRow,
+  StatusBadge,
+  ReadyTag,
+  ActionButtons,
+} from "./LegislativeComponents";
+
+// ─── DUMMY DATA ───────────────────────────────────────────────────────────────
+
+const DUMMY_PENDING = [
+  {
+    id: "pend-1",
+    title: "95th Regular Session — Draft Minutes",
+    author: "Clerk: Ana Villanueva",
+    status: "approved",
+    submitted: "2026-04-14",
+  },
+  {
+    id: "pend-2",
+    title: "96th Regular Session — Draft Minutes",
+    author: "Clerk: Ana Villanueva",
+    status: "pending",
+    submitted: "2026-04-21",
+  },
+  {
+    id: "pend-3",
+    title: "Special Session on Disaster Relief — Draft",
+    author: "Clerk: Jose Santos",
+    status: "pending",
+    submitted: "2026-04-29",
+  },
+];
+
+// ─── SESSION CARD (Published) ─────────────────────────────────────────────────
+
+function SessionPublishedCard({ session, onEdit, onDelete, API, MONTHS }) {
+  const date = session.session_date
+    ? new Date(session.session_date + "T00:00:00")
+    : null;
+  const agendaPreview = session.agenda
+    ? session.agenda.split("\n").filter(Boolean).slice(0, 3)
+    : [];
+
+  return (
+    <div className={lStyles.recordCard}>
+      <div
+        className={lStyles.recordIcon}
+        style={{
+          background: "var(--blue-50)",
+          flexDirection: "column",
+          fontSize: 11,
+          gap: 0,
+        }}
+      >
+        {date && !isNaN(date.getTime()) ? (
+          <>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 500,
+                opacity: 0.7,
+                textTransform: "uppercase",
+              }}
+            >
+              {MONTHS[date.getMonth()]}
+            </span>
+            <span style={{ fontSize: 18, fontWeight: 500, lineHeight: 1 }}>
+              {date.getDate()}
+            </span>
+          </>
+        ) : (
+          "📋"
+        )}
+      </div>
+      <div className={lStyles.recordBody}>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            marginBottom: 4,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 500,
+              padding: "2px 8px",
+              borderRadius: 10,
+              background:
+                session.session_type === "special"
+                  ? "var(--purple-50)"
+                  : "var(--blue-50)",
+              color:
+                session.session_type === "special"
+                  ? "var(--purple-600)"
+                  : "var(--blue-600)",
+              border: "0.5px solid rgba(0,0,0,0.08)",
+            }}
+          >
+            {session.session_type === "special"
+              ? "Special Session"
+              : "Regular Session"}
+          </span>
+          {session.session_number && (
+            <span
+              style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
+            >
+              {session.session_number}
+            </span>
+          )}
+          <StatusBadge status="published" />
+        </div>
+        {session.venue && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 12,
+              color: "var(--color-text-secondary)",
+              marginBottom: 4,
+            }}
+          >
+            <CalendarDays size={12} /> {session.venue}
+          </div>
+        )}
+        {agendaPreview.length > 0 && (
+          <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+            <span style={{ fontWeight: 500 }}>Agenda: </span>
+            {agendaPreview[0]}
+            {agendaPreview.length > 1 && ` +${agendaPreview.length - 1} more`}
+          </div>
+        )}
+      </div>
+      <div className={lStyles.recordActions}>
+        <a
+          href={`${API}/api/session-minutes/${session.id}/print`}
+          target="_blank"
+          rel="noreferrer"
+          className={`${lStyles.btn} ${lStyles.btnSm}`}
+        >
+          <Printer size={13} /> Print
+        </a>
+        <a
+          href={`${API}/api/session-minutes/${session.id}/print`}
+          target="_blank"
+          rel="noreferrer"
+          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
+        >
+          <Eye size={13} /> View
+        </a>
+        <button
+          className={`${lStyles.btn} ${lStyles.btnSm}`}
+          onClick={() => onEdit(session)}
+        >
+          <Pencil size={13} /> Edit
+        </button>
+        <button
+          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+          onClick={() =>
+            onDelete({
+              id: session.id,
+              type: "session",
+              name: session.session_number || "this session",
+            })
+          }
+        >
+          <Trash2 size={13} /> Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── SESSION CARD (Pending) ───────────────────────────────────────────────────
+
+function SessionPendingCard({
+  item,
+  status,
+  onApprove,
+  onReject,
+  onViewDraft,
+  onComment,
+}) {
+  const isApproved = status === "approved";
+  return (
+    <div
+      className={`${lStyles.recordCard} ${
+        isApproved ? lStyles.recordCardHighlight : ""
+      }`}
+    >
+      <div
+        className={lStyles.recordIcon}
+        style={{ background: "var(--gray-50)" }}
+      >
+        {status === "approved" ? "📋" : status === "rejected" ? "📄" : "📝"}
+      </div>
+      <div className={lStyles.recordBody}>
+        <div className={lStyles.recordTitle}>{item.title}</div>
+        <div className={lStyles.recordMeta}>
+          <span>{item.author}</span>
+          <span>Submitted: {item.submitted}</span>
+          <StatusBadge status={status} />
+          {isApproved && <ReadyTag />}
+        </div>
+      </div>
+      <ActionButtons
+        status={status}
+        onApprove={onApprove}
+        onReject={onReject}
+        onViewDraft={onViewDraft}
+        onComment={onComment}
+      />
+    </div>
+  );
+}
+
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+
+export default function SessionsPage({
+  sessionMinutes,
+  setDeleteTarget,
+  onEdit,
+}) {
+  const [activeTab, setActiveTab] = useState("published");
+  const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
+  const [pendingStatuses, setPendingStatuses] = useState(
+    Object.fromEntries(DUMMY_PENDING.map((d) => [d.id, d.status]))
+  );
+  const [comments, setComments] = useState({});
+  const [panelItem, setPanelItem] = useState(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
-  const minutesYears = ["all", ...new Set(
-    sessionMinutes.map((s) => s.session_date ? new Date(s.session_date).getFullYear().toString() : null).filter(Boolean),
-  )].sort((a, b) => b - a);
+  const minutesYears = [
+    "all",
+    ...new Set(
+      sessionMinutes
+        .map((s) =>
+          s.session_date
+            ? new Date(s.session_date).getFullYear().toString()
+            : null
+        )
+        .filter(Boolean)
+    ),
+  ].sort((a, b) => b - a);
 
-  const filteredMinutes = sessionMinutes.filter((s) => {
-    const ms = (s.session_number || "").toLowerCase().includes(minutesSearch.toLowerCase()) ||
-      (s.venue || "").toLowerCase().includes(minutesSearch.toLowerCase()) ||
-      (s.agenda || "").toLowerCase().includes(minutesSearch.toLowerCase());
-    const t = minutesTypeFilter === "all" ? true : s.session_type === minutesTypeFilter;
-    const y = minutesYearFilter === "all" ? true :
-      s.session_date && new Date(s.session_date).getFullYear().toString() === minutesYearFilter;
+  const filteredPublished = sessionMinutes.filter((s) => {
+    const ms =
+      !search ||
+      (s.session_number || "").toLowerCase().includes(search.toLowerCase()) ||
+      (s.venue || "").toLowerCase().includes(search.toLowerCase()) ||
+      (s.agenda || "").toLowerCase().includes(search.toLowerCase());
+    const t =
+      minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
+    const y =
+      minutesYearFilter === "all" ||
+      (s.session_date &&
+        new Date(s.session_date).getFullYear().toString() ===
+          minutesYearFilter);
     return ms && t && y;
   });
 
+  const filteredPending = DUMMY_PENDING.filter(
+    (s) =>
+      !search ||
+      s.title.toLowerCase().includes(search.toLowerCase()) ||
+      s.author.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const pendingCount = DUMMY_PENDING.filter(
+    (d) => pendingStatuses[d.id] !== "published"
+  ).length;
+
+  const handleApprove = (id) =>
+    setPendingStatuses((prev) => ({ ...prev, [id]: "approved" }));
+  const handleReject = (id) =>
+    setPendingStatuses((prev) => ({ ...prev, [id]: "rejected" }));
+
+  const handleAddComment = (itemId, text) => {
+    const now = new Date();
+    const time = now.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    setComments((prev) => ({
+      ...prev,
+      [itemId]: [...(prev[itemId] || []), { author: "Admin", text, time }],
+    }));
+  };
+
   return (
     <>
-      <div className={styles.statsRow}>
-        <div className={styles.statCard}><div className={styles.statNumber}>{sessionMinutes.length}</div><div className={styles.statLabel}>Total Sessions</div></div>
-        <div className={`${styles.statCard} ${styles.statCardGreen}`}><div className={styles.statNumber}>{sessionMinutes.filter((s) => s.session_type === "regular").length}</div><div className={styles.statLabel}>Regular Sessions</div></div>
-        <div className={`${styles.statCard} ${styles.statCardOrange}`}><div className={styles.statNumber}>{sessionMinutes.filter((s) => s.session_type === "special").length}</div><div className={styles.statLabel}>Special Sessions</div></div>
-      </div>
-      <div className={styles.searchFilterBar}>
-        <div className={styles.searchInputWrapper}>
-          <Search size={16} className={styles.searchIcon} />
-          <input className={styles.searchInput} placeholder="Search by session number, venue, or agenda..." value={minutesSearch} onChange={(e) => setMinutesSearch(e.target.value)} />
-          {minutesSearch && <button className={styles.clearSearch} onClick={() => setMinutesSearch("")}><X size={14} /></button>}
+      {/* STATS */}
+      <StatsRow
+        stats={[
+          { value: sessionMinutes.length, label: "Total Sessions" },
+          {
+            value: sessionMinutes.filter((s) => s.session_type === "regular")
+              .length,
+            label: "Regular Sessions",
+          },
+          {
+            value: sessionMinutes.filter((s) => s.session_type === "special")
+              .length,
+            label: "Special Sessions",
+            colorClass: lStyles.statCardAmber,
+          },
+        ]}
+      />
+
+      {/* TABS */}
+      <TabNavigation
+        tabs={[
+          { id: "published", label: "Published" },
+          { id: "pending", label: "Pending", badge: pendingCount },
+        ]}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setSearch("");
+        }}
+      />
+
+      {/* SEARCH & FILTER */}
+      <div className={lStyles.searchFilterBar}>
+        <div className={lStyles.searchRow}>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder={
+              activeTab === "published"
+                ? "Search by session number, venue, or agenda..."
+                : "Search by title or clerk..."
+            }
+          />
         </div>
-        <div className={styles.filterGroup}>
-          <Filter size={15} className={styles.filterIcon} />
-          {["all", "regular", "special"].map((t) => (
-            <button key={t} className={`${styles.filterBtn} ${minutesTypeFilter === t ? styles.filterBtnActive : ""}`} onClick={() => setMinutesTypeFilter(t)}>
-              {t === "all" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-          <select className={styles.filterSelect} value={minutesYearFilter} onChange={(e) => setMinutesYearFilter(e.target.value)}>
-            {minutesYears.map((y) => <option key={y} value={y}>{y === "all" ? "All Years" : y}</option>)}
-          </select>
-        </div>
+        {activeTab === "published" && (
+          <FilterPanel
+            categoryValue={
+              minutesTypeFilter === "all" ? "All" : minutesTypeFilter
+            }
+            onCategoryChange={(v) =>
+              setMinutesTypeFilter(v === "All" ? "all" : v)
+            }
+            categories={["All", "regular", "special"]}
+            dateValue=""
+            onDateChange={() => {}}
+            yearValue={minutesYearFilter}
+            onYearChange={setMinutesYearFilter}
+            years={minutesYears.filter((y) => y !== "all")}
+            onReset={() => {
+              setSearch("");
+              setMinutesTypeFilter("all");
+              setMinutesYearFilter("all");
+            }}
+          />
+        )}
       </div>
-      <div className={styles.searchResultCount}>Showing {filteredMinutes.length} of {sessionMinutes.length} sessions</div>
-      <div className={styles.sessionList}>
-        {filteredMinutes.map((s) => {
-          const date = s.session_date ? new Date(s.session_date + "T00:00:00") : null;
-          const agendaPreview = s.agenda ? s.agenda.split("\n").filter(Boolean).slice(0, 3) : [];
-          return (
-            <div key={s.id} className={styles.sessionCard}>
-              <div className={styles.sessionDateBlock}>
-                {date && !isNaN(date.getTime()) ? (
-                  <><div className={styles.sessionMonth}>{MONTHS[date.getMonth()]}</div><div className={styles.sessionDay}>{String(date.getDate())}</div><div className={styles.sessionYear}>{String(date.getFullYear())}</div></>
-                ) : <div className={styles.sessionDay}>—</div>}
-              </div>
-              <div className={styles.sessionInfo}>
-                <div className={styles.sessionTop}>
-                  <span className={`${styles.sessionTypeBadge} ${s.session_type === "special" ? styles.sessionTypeSpecial : styles.sessionTypeRegular}`}>
-                    {s.session_type === "special" ? "Special Session" : "Regular Session"}
-                  </span>
-                  {s.session_number && <span className={styles.sessionNumber}>{s.session_number}</span>}
-                </div>
-                {s.venue && <div className={styles.sessionVenue}><CalendarDays size={12} strokeWidth={1.5} /> {s.venue}</div>}
-                {agendaPreview.length > 0 && (
-                  <div className={styles.sessionAgendaPreview}>
-                    <div className={styles.sessionAgendaLabel}>Agenda:</div>
-                    <ol className={styles.sessionAgendaList}>
-                      {agendaPreview.map((item, i) => <li key={i}>{item}</li>)}
-                      {s.agenda.split("\n").filter(Boolean).length > 3 && <li className={styles.sessionAgendaMore}>+{String(s.agenda.split("\n").filter(Boolean).length - 3)} more items</li>}
-                    </ol>
-                  </div>
-                )}
-                {s.minutes_text && <div className={styles.sessionMinutesPreview}>{s.minutes_text.length > 120 ? s.minutes_text.slice(0, 120) + "…" : s.minutes_text}</div>}
-              </div>
-              <div className={styles.sessionActions}>
-                <a href={`${API}/api/session-minutes/${s.id}/print`} target="_blank" rel="noreferrer" className={styles.printBtn}><Printer size={13} /> Print</a>
-                <a href={`${API}/api/session-minutes/${s.id}/print`} target="_blank" rel="noreferrer" className={styles.viewBtn}><Eye size={13} /> View</a>
-                <button className={styles.editBtn} onClick={() => onEdit(s)}><Pencil size={13} /> Edit</button>
-                <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: s.id, type: "session", name: s.session_number || "this session" })}><Trash2 size={13} /> Delete</button>
-              </div>
-            </div>
-          );
-        })}
-        {filteredMinutes.length === 0 && <div className={styles.empty}>{minutesSearch || minutesTypeFilter !== "all" || minutesYearFilter !== "all" ? "No session records match your search." : "No session minutes recorded yet."}</div>}
-      </div>
+
+      {/* ── PUBLISHED TAB ────────────────────────────────────────────────────── */}
+      {activeTab === "published" && (
+        <>
+          <div className={lStyles.resultCount}>
+            Showing {filteredPublished.length} of {sessionMinutes.length}{" "}
+            sessions
+          </div>
+          <div className={lStyles.recordList}>
+            {filteredPublished.length === 0 ? (
+              <EmptyState
+                title="No session records match your search"
+                text={
+                  !search &&
+                  minutesTypeFilter === "all" &&
+                  minutesYearFilter === "all"
+                    ? "No session minutes recorded yet."
+                    : "Try adjusting your filters."
+                }
+              />
+            ) : (
+              filteredPublished.map((s) => (
+                <SessionPublishedCard
+                  key={s.id}
+                  session={s}
+                  onEdit={onEdit}
+                  onDelete={setDeleteTarget}
+                  API={API}
+                  MONTHS={MONTHS}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── PENDING TAB ──────────────────────────────────────────────────────── */}
+      {activeTab === "pending" && (
+        <>
+          <div className={lStyles.resultCount}>
+            Showing {filteredPending.length} of {DUMMY_PENDING.length} drafts
+          </div>
+          <div className={lStyles.recordList}>
+            {filteredPending.length === 0 ? (
+              <EmptyState
+                title="No pending drafts"
+                text="All session minute drafts have been reviewed."
+              />
+            ) : (
+              filteredPending.map((item) => (
+                <SessionPendingCard
+                  key={item.id}
+                  item={item}
+                  status={pendingStatuses[item.id] || item.status}
+                  onApprove={() => handleApprove(item.id)}
+                  onReject={() => handleReject(item.id)}
+                  onViewDraft={() => setPanelItem(item)}
+                  onComment={() => setPanelItem(item)}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── UPLOAD MODAL ─────────────────────────────────────────────────────── */}
+      {showUploadModal && (
+        <UploadModal
+          title="Add Final Session Minutes"
+          onClose={() => setShowUploadModal(false)}
+          onSubmit={(formData) => {
+            // TODO: connect to backend
+            console.log("Publish session minutes:", formData);
+            setShowUploadModal(false);
+          }}
+        />
+      )}
+
+      {/* ── COMMENT PANEL ────────────────────────────────────────────────────── */}
+      {panelItem && (
+        <CommentPanel
+          item={panelItem}
+          comments={comments[panelItem.id] || []}
+          onClose={() => setPanelItem(null)}
+          onAddComment={(text) => handleAddComment(panelItem.id, text)}
+        />
+      )}
     </>
   );
 }
