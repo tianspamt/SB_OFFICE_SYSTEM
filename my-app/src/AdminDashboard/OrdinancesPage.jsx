@@ -98,6 +98,7 @@ export default function OrdinancesPage({
   ordinances,
   setDeleteTarget,
   onEdit,
+  readOnly = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -216,10 +217,10 @@ export default function OrdinancesPage({
 
       {/* TABS */}
       <TabNavigation
-        tabs={[
-          { id: "published", label: "Published" },
-          { id: "pending", label: "Pending", badge: pendingCount },
-        ]}
+  tabs={[
+    { id: "published", label: "Published" },
+    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+  ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
@@ -320,24 +321,28 @@ export default function OrdinancesPage({
                     >
                       <Eye size={13} /> View
                     </a>
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm}`}
-                      onClick={() => onEdit(o)}
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-                      onClick={() =>
-                        setDeleteTarget({
-                          id: o.id,
-                          type: "ordinance",
-                          name: o.title,
-                        })
-                      }
-                    >
-                      <Trash2 size={13} /> Delete
-                    </button>
+                    {!readOnly && (
+  <>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm}`}
+      onClick={() => onEdit(o)}
+    >
+      <Pencil size={13} /> Edit
+    </button>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+      onClick={() =>
+        setDeleteTarget({
+          id: o.id,
+          type: "ordinance",
+          name: o.title,
+        })
+      }
+    >
+      <Trash2 size={13} /> Delete
+    </button>
+  </>
+)}
                   </div>
                 </div>
               ))

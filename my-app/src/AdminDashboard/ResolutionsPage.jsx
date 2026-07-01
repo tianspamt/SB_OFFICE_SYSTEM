@@ -81,6 +81,7 @@ export default function ResolutionsPage({
   resolutions,
   setDeleteTarget,
   onEdit,
+  readOnly = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -189,10 +190,10 @@ export default function ResolutionsPage({
 
       {/* TABS */}
       <TabNavigation
-        tabs={[
-          { id: "published", label: "Published" },
-          { id: "pending", label: "Pending", badge: pendingCount },
-        ]}
+  tabs={[
+    { id: "published", label: "Published" },
+    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+  ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
@@ -287,24 +288,28 @@ export default function ResolutionsPage({
                     >
                       <Eye size={13} /> View
                     </a>
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm}`}
-                      onClick={() => onEdit(r)}
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-                      onClick={() =>
-                        setDeleteTarget({
-                          id: r.id,
-                          type: "resolution",
-                          name: r.title,
-                        })
-                      }
-                    >
-                      <Trash2 size={13} /> Delete
-                    </button>
+                    {!readOnly && (
+  <>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm}`}
+      onClick={() => onEdit(r)}
+    >
+      <Pencil size={13} /> Edit
+    </button>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+      onClick={() =>
+        setDeleteTarget({
+          id: r.id,
+          type: "resolution",
+          name: r.title,
+        })
+      }
+    >
+      <Trash2 size={13} /> Delete
+    </button>
+  </>
+)}
                   </div>
                 </div>
               ))

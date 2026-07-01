@@ -51,7 +51,7 @@ const DUMMY_PENDING = [
 
 // ─── SESSION CARD (Published) ─────────────────────────────────────────────────
 
-function SessionPublishedCard({ session, onEdit, onDelete, API, MONTHS }) {
+function SessionPublishedCard({ session, onEdit, onDelete, API, MONTHS, readOnly }) {
   const date = session.session_date
     ? new Date(session.session_date + "T00:00:00")
     : null;
@@ -169,24 +169,28 @@ function SessionPublishedCard({ session, onEdit, onDelete, API, MONTHS }) {
         >
           <Eye size={13} /> View
         </a>
-        <button
-          className={`${lStyles.btn} ${lStyles.btnSm}`}
-          onClick={() => onEdit(session)}
-        >
-          <Pencil size={13} /> Edit
-        </button>
-        <button
-          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-          onClick={() =>
-            onDelete({
-              id: session.id,
-              type: "session",
-              name: session.session_number || "this session",
-            })
-          }
-        >
-          <Trash2 size={13} /> Delete
-        </button>
+        {!readOnly && (
+  <>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm}`}
+      onClick={() => onEdit(session)}
+    >
+      <Pencil size={13} /> Edit
+    </button>
+    <button
+      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+      onClick={() =>
+        onDelete({
+          id: session.id,
+          type: "session",
+          name: session.session_number || "this session",
+        })
+      }
+    >
+      <Trash2 size={13} /> Delete
+    </button>
+  </>
+)}
       </div>
     </div>
   );
@@ -241,6 +245,7 @@ export default function SessionsPage({
   sessionMinutes,
   setDeleteTarget,
   onEdit,
+  readOnly = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -334,10 +339,10 @@ export default function SessionsPage({
 
       {/* TABS */}
       <TabNavigation
-        tabs={[
-          { id: "published", label: "Published" },
-          { id: "pending", label: "Pending", badge: pendingCount },
-        ]}
+  tabs={[
+    { id: "published", label: "Published" },
+    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+  ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
@@ -403,13 +408,14 @@ export default function SessionsPage({
             ) : (
               filteredPublished.map((s) => (
                 <SessionPublishedCard
-                  key={s.id}
-                  session={s}
-                  onEdit={onEdit}
-                  onDelete={setDeleteTarget}
-                  API={API}
-                  MONTHS={MONTHS}
-                />
+  key={s.id}
+  session={s}
+  onEdit={onEdit}
+  onDelete={setDeleteTarget}
+  API={API}
+  MONTHS={MONTHS}
+  readOnly={readOnly}
+/>
               ))
             )}
           </div>

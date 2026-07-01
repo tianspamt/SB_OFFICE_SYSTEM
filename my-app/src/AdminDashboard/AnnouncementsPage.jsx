@@ -327,14 +327,14 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
 }
 
 // Feed Post Card
-function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteComment, onEditComment, onEdit, onDelete }) {
+function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteComment, onEditComment, onEdit, onDelete, readOnly = false }) {
   const [showComments, setShowComments] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const cfg = priorityConfig[post.priority] || priorityConfig.normal;
   const isExpired = post.expiresAt && new Date(post.expiresAt) < new Date();
   const totalReactions = REACTIONS_LIST.reduce((sum, e) => sum + (post.reactions[e] || []).length, 0);
-  const isAdmin = currentUser.role === "Admin";
+  const isAdmin = !readOnly;
 
   useEffect(() => {
     function handleClick(e) {
@@ -653,7 +653,7 @@ function CreateAnnouncementBox({ currentUser, onPost }) {
 /* ─────────────────────────────────────────────
    MAIN PAGE COMPONENT
 ───────────────────────────────────────────── */
-export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit }) {
+export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, readOnly = false }) {
 
   // Feed-local state (UI only — wire to Supabase later)
   const [feedPosts, setFeedPosts] = useState(() => announcementsToFeedPosts(announcements));
@@ -767,21 +767,22 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {feedPosts.map((post) => (
             <FeedPostCard
-              key={post.id}
-              post={post}
-              currentUser={MOCK_USER}
-              onReact={handleReact}
-              onAddComment={handleAddComment}
-              onDeleteComment={handleDeleteComment}
-              onEditComment={handleEditComment}
-              onEdit={(p) => {
-                const original = announcements.find((a) => a.id === p.id);
-                if (original) onEdit(original);
-              }}
-              onDelete={(p) =>
-                setDeleteTarget({ id: p.id, type: "announcement", name: p.title })
-              }
-            />
+  key={post.id}
+  post={post}
+  currentUser={MOCK_USER}
+  onReact={handleReact}
+  onAddComment={handleAddComment}
+  onDeleteComment={handleDeleteComment}
+  onEditComment={handleEditComment}
+  onEdit={(p) => {
+    const original = announcements.find((a) => a.id === p.id);
+    if (original) onEdit(original);
+  }}
+  onDelete={(p) =>
+    setDeleteTarget({ id: p.id, type: "announcement", name: p.title })
+  }
+  readOnly={readOnly}
+/>
           ))}
         </div>
       )}

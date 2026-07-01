@@ -1,72 +1,85 @@
-const express = require('express')
-const router = express.Router()
-
-const supabase = require('../config/supabase')
-const { verifyToken, adminOnly } = require('../middleware/auth')
-const { logActivity } = require('../helpers/logger')
+const express = require('express');
+const router = express.Router();
+const supabase = require('../config/supabase'); // adjust if filename differs
+const { verifyToken } = require('../middleware/auth');
 
 // GET /api/calendar-events
-router.get('/', async (req, res) => {
+// GET /api/calendar-events
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('calendar_events').select('*').order('start_date', { ascending: true })
-    if (error) return res.status(500).json({ error: error.message })
-    res.json(data)
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-// GET /api/calendar-events/:id
-router.get('/:id', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('calendar_events').select('*').eq('id', req.params.id).single()
-    if (error) return res.status(500).json({ error: error.message })
-    if (!data) return res.status(404).json({ error: 'Event not found.' })
-    res.json(data)
+    let query = supabase.from('calendar_events').select('*');
+
+    // Both roles: see all official events + their own personal events
+query = query.or(`is_admin_event.eq.true,created_by.eq.${userId}`);
+
+    const { data, error } = await query.order('start_date', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ error: 'Server error' });
   }
-})
+});
 
 // POST /api/calendar-events
-router.post('/', verifyToken, adminOnly, async (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body
-    if (!title || !start_date)
-      return res.status(400).json({ error: 'Title and start date are required.' })
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body;
+
+    if (!title || !start_date) {
+      return res.status(400).json({ error: 'Title and start date are required' });
+    }
+
     const { data, error } = await supabase
       .from('calendar_events')
-      .insert({
+      .insert([{
         title,
         description: description || null,
         location: location || null,
         start_date,
-        start_time: start_time || null,
+        start_time: all_day ? null : (start_time || null),
         end_date: end_date || start_date,
-        end_time: end_time || null,
-        all_day: all_day || false,
-        color: color || '#009439'
-      })
-      .select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'CREATE', 'Calendar', `Added event: ${title}`)
-    res.json({ success: true, id: data.id, data })
+        end_time: all_day ? null : (end_time || null),
+        all_day: !!all_day,
+        color: color || '#009439',
+        is_admin_event: userRole === 'admin',
+        created_by: userId,
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, data });
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ error: 'Server error' });
   }
-})
+});
 
 // PUT /api/calendar-events/:id
-router.put('/:id', verifyToken, adminOnly, async (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { data: existing } = await supabase
-      .from('calendar_events').select('id').eq('id', req.params.id).single()
-    if (!existing) return res.status(404).json({ error: 'Event not found.' })
-    const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body
-    if (!title || !start_date)
-      return res.status(400).json({ error: 'Title and start date are required.' })
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const eventId = req.params.id;
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('id', eventId)
+      .single();
+
+    if (fetchError || !existing) return res.status(404).json({ error: 'Event not found' });
+
+    if (userRole !== 'admin' && (existing.is_admin_event || existing.created_by !== userId)) {
+      return res.status(403).json({ error: 'You cannot edit this event' });
+    }
+
+    const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body;
+
     const { data, error } = await supabase
       .from('calendar_events')
       .update({
@@ -74,35 +87,52 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
         description: description || null,
         location: location || null,
         start_date,
-        start_time: start_time || null,
+        start_time: all_day ? null : (start_time || null),
         end_date: end_date || start_date,
-        end_time: end_time || null,
-        all_day: all_day || false,
-        color: color || '#009439'
+        end_time: all_day ? null : (end_time || null),
+        all_day: !!all_day,
+        color: color || '#009439',
       })
-      .eq('id', req.params.id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'UPDATE', 'Calendar', `Updated event: ${title}`)
-    res.json({ success: true, data })
+      .eq('id', eventId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, data });
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ error: 'Server error' });
   }
-})
+});
 
 // DELETE /api/calendar-events/:id
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const { data: existing } = await supabase
-      .from('calendar_events').select('id, title').eq('id', req.params.id).single()
-    if (!existing) return res.status(404).json({ error: 'Event not found.' })
-    const { error } = await supabase
-      .from('calendar_events').delete().eq('id', req.params.id)
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'DELETE', 'Calendar', `Deleted event: ${existing.title}`)
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const eventId = req.params.id;
 
-module.exports = router
+    const { data: existing, error: fetchError } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('id', eventId)
+      .single();
+
+    if (fetchError || !existing) return res.status(404).json({ error: 'Event not found' });
+
+    if (userRole !== 'admin' && (existing.is_admin_event || existing.created_by !== userId)) {
+      return res.status(403).json({ error: 'You cannot delete this event' });
+    }
+
+    const { error } = await supabase
+      .from('calendar_events')
+      .delete()
+      .eq('id', eventId);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+module.exports = router;

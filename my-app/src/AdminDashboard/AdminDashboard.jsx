@@ -264,18 +264,20 @@ export default function AdminDashboard() {
       window.location.replace("/");
       return;
     }
+    let u;
     try {
-      const u = JSON.parse(storedUser);
-      if (u.role !== "admin") {
-        window.location.replace("/");
-        return;
-      }
-      setAdmin(u);
+      u = JSON.parse(storedUser);
     } catch {
       window.location.replace("/");
       return;
     }
-    fetchUsers();
+    if (u.role !== "admin" && u.role !== "user") {
+      window.location.replace("/");
+      return;
+    }
+    setAdmin(u);
+
+    if (u.role === "admin") fetchUsers();
     fetchOrdinances();
     fetchOfficials();
     fetchSessionMinutes();
@@ -317,6 +319,7 @@ export default function AdminDashboard() {
     window.location.replace("/");
   };
   const handleTabChange = (key) => {
+    if (!isAdmin && ADMIN_ONLY_TABS.includes(key)) return;
     setActiveTab(key);
     setMobileOpen(false);
   };
@@ -327,11 +330,13 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(`${API}/api/users`);
       if (res.status === 401 || res.status === 403) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        window.location.replace("/");
-        return;
-      }
+  if (admin?.role === "admin") {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    window.location.replace("/");
+  }
+  return;
+}
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
     } catch {
@@ -398,7 +403,7 @@ export default function AdminDashboard() {
   const fetchLocalEvents = async () => {
     setFetchingCalendar(true);
     try {
-      const d = await (await fetch(`${API}/api/calendar-events`)).json();
+      const d = await (await authFetch(`${API}/api/calendar-events`)).json();
       setLocalEvents(Array.isArray(d) ? d : []);
     } catch {
       setLocalEvents([]);
@@ -433,7 +438,7 @@ export default function AdminDashboard() {
     setFetchingHolidays(true);
     try {
       const res = await fetch(
-        `https://date.nager.at/api/v3/PublicHolidays/${year}/PH`
+        `https://date.nager.at/api/v3/PublicHolidays/${year}/PH`,
       );
       const data = await res.json();
       setPhHolidays((prev) => ({
@@ -586,7 +591,7 @@ export default function AdminDashboard() {
   };
   const toggleEditOfficial = (id) =>
     setEditSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
     );
   const handleUpdateOrdinance = async () => {
     if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceYear) {
@@ -603,7 +608,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/ordinances/${editingOrdinance.id}`,
-        { method: "PUT", body: fd }
+        { method: "PUT", body: fd },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -634,7 +639,7 @@ export default function AdminDashboard() {
   };
   const toggleOfficial = (id) =>
     setSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
     );
 
   // ─── Resolutions ─────────────────────────────────────────────────────────────
@@ -691,7 +696,7 @@ export default function AdminDashboard() {
     setEditResolutionTitle(r.title);
     setEditResolutionYear(r.year || "");
     setEditResolutionSelectedOfficials(
-      r.officials ? r.officials.map((x) => x.id) : []
+      r.officials ? r.officials.map((x) => x.id) : [],
     );
     setEditResolutionFile(null);
     setModalMessage("");
@@ -699,7 +704,7 @@ export default function AdminDashboard() {
   };
   const toggleEditResolutionOfficial = (id) =>
     setEditResolutionSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
     );
   const handleUpdateResolution = async () => {
     if (!editResolutionNumber || !editResolutionTitle || !editResolutionYear) {
@@ -716,7 +721,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/resolutions/${editingResolution.id}`,
-        { method: "PUT", body: fd }
+        { method: "PUT", body: fd },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -747,7 +752,7 @@ export default function AdminDashboard() {
   };
   const toggleResolutionOfficial = (id) =>
     setSelectedResolutionOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
     );
 
   // ─── Officials ────────────────────────────────────────────────────────────────
@@ -818,7 +823,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${editingOfficial.id}`,
-        { method: "PUT", body: fd }
+        { method: "PUT", body: fd },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -850,7 +855,7 @@ export default function AdminDashboard() {
   };
   const getOfficialOrdinances = (id) =>
     ordinances.filter(
-      (o) => o.officials && o.officials.some((x) => x.id === id)
+      (o) => o.officials && o.officials.some((x) => x.id === id),
     );
 
   // ─── Terms ────────────────────────────────────────────────────────────────────
@@ -869,7 +874,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${termTarget.memberId}/terms`,
-        { method: "POST", body: JSON.stringify(termForm) }
+        { method: "POST", body: JSON.stringify(termForm) },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -911,7 +916,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${termTarget.memberId}/terms/${termTarget.term.id}`,
-        { method: "PUT", body: JSON.stringify(termForm) }
+        { method: "PUT", body: JSON.stringify(termForm) },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -935,7 +940,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${memberId}/terms/${termId}`,
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
       const data = await res.json();
       if (data.success) {
@@ -1036,7 +1041,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/session-minutes/${editingSession.id}`,
-        { method: "PUT", body: JSON.stringify(editSessionForm) }
+        { method: "PUT", body: JSON.stringify(editSessionForm) },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1118,7 +1123,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/announcements/${editingAnnouncement.id}`,
-        { method: "PUT", body: JSON.stringify(editAnnouncementForm) }
+        { method: "PUT", body: JSON.stringify(editAnnouncementForm) },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1198,7 +1203,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/calendar-events/${editingEvent.dbId}`,
-        { method: "PUT", body: JSON.stringify(editEventForm) }
+        { method: "PUT", body: JSON.stringify(editEventForm) },
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1227,7 +1232,8 @@ export default function AdminDashboard() {
       showMsg("Error!", "error");
     }
   };
-
+  const isAdmin = admin?.role === "admin";
+  const ADMIN_ONLY_TABS = ["users", "admins", "logs"];
   const pageLoading =
     fetchingUsers ||
     fetchingOrdinances ||
@@ -1428,73 +1434,82 @@ export default function AdminDashboard() {
             </span>
             <span className={styles.navLabel}>Content Management</span>
           </button>
+          {isAdmin && (
+            <>
+              <div className={styles.navDivider} />
 
-          <div className={styles.navDivider} />
-
-          {/* User Management dropdown */}
-          <div className={styles.navSection}>
-            <button
-              className={styles.navSectionHeader}
-              onClick={() => !sidebarCollapsed && setUserMgmtOpen((v) => !v)}
-            >
-              <span className={styles.navSectionIcon}>
-                <Users size={14} strokeWidth={1.8} />
-              </span>
-              <span className={styles.navSectionLabel}>User Management</span>
-              {!sidebarCollapsed && (
-                <span className={styles.navSectionChevron}>
-                  {userMgmtOpen ? (
-                    <ChevronDown size={13} />
-                  ) : (
-                    <ChevronRight size={13} />
-                  )}
-                </span>
-              )}
-            </button>
-            <div
-              className={`${styles.navSectionItems} ${
-                userMgmtOpen && !sidebarCollapsed
-                  ? styles.navSectionItemsOpen
-                  : ""
-              }`}
-            >
-              {[
-                {
-                  key: "users",
-                  icon: <Users size={17} strokeWidth={1.5} />,
-                  label: "Manage Users",
-                },
-                {
-                  key: "admins",
-                  icon: <ShieldCheck size={17} strokeWidth={1.5} />,
-                  label: "Manage Admins",
-                },
-                {
-                  key: "logs",
-                  icon: <Activity size={17} strokeWidth={1.5} />,
-                  label: "Activity Logs",
-                },
-              ].map((t) => (
+              {/* User Management dropdown */}
+              <div className={styles.navSection}>
                 <button
-                  key={t.key}
-                  className={`${styles.navBtn} ${styles.navBtnIndented} ${
-                    activeTab === t.key ? styles.navBtnActive : ""
-                  }`}
-                  onClick={() => handleTabChange(t.key)}
+                  className={styles.navSectionHeader}
+                  onClick={() =>
+                    !sidebarCollapsed && setUserMgmtOpen((v) => !v)
+                  }
                 >
-                  <span className={styles.navIcon}>{t.icon}</span>
-                  <span className={styles.navLabel}>{t.label}</span>
+                  <span className={styles.navSectionIcon}>
+                    <Users size={14} strokeWidth={1.8} />
+                  </span>
+                  <span className={styles.navSectionLabel}>
+                    User Management
+                  </span>
+                  {!sidebarCollapsed && (
+                    <span className={styles.navSectionChevron}>
+                      {userMgmtOpen ? (
+                        <ChevronDown size={13} />
+                      ) : (
+                        <ChevronRight size={13} />
+                      )}
+                    </span>
+                  )}
                 </button>
-              ))}
-            </div>
-          </div>
+                <div
+                  className={`${styles.navSectionItems} ${
+                    userMgmtOpen && !sidebarCollapsed
+                      ? styles.navSectionItemsOpen
+                      : ""
+                  }`}
+                >
+                  {[
+                    {
+                      key: "users",
+                      icon: <Users size={17} strokeWidth={1.5} />,
+                      label: "Manage Users",
+                    },
+                    {
+                      key: "admins",
+                      icon: <ShieldCheck size={17} strokeWidth={1.5} />,
+                      label: "Manage Admins",
+                    },
+                    {
+                      key: "logs",
+                      icon: <Activity size={17} strokeWidth={1.5} />,
+                      label: "Activity Logs",
+                    },
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      className={`${styles.navBtn} ${styles.navBtnIndented} ${
+                        activeTab === t.key ? styles.navBtnActive : ""
+                      }`}
+                      onClick={() => handleTabChange(t.key)}
+                    >
+                      <span className={styles.navIcon}>{t.icon}</span>
+                      <span className={styles.navLabel}>{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.adminInfo}>
             <div className={styles.adminAvatar}>{admin?.name?.charAt(0)}</div>
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
-              <div className={styles.adminRole}>Administrator</div>
+              <div className={styles.adminRole}>
+                {isAdmin ? "Administrator" : "User"}
+              </div>
             </div>
           </div>
           <button className={styles.logoutBtn} onClick={handleLogout}>
@@ -1515,7 +1530,7 @@ export default function AdminDashboard() {
             <p className={styles.headerSub}>LGU Administration Dashboard</p>
           </div>
           <div className={styles.headerActions}>
-            {activeTab === "users" && (
+            {activeTab === "users" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1526,7 +1541,7 @@ export default function AdminDashboard() {
                 + Add User
               </button>
             )}
-            {activeTab === "admins" && (
+            {activeTab === "admins" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1537,7 +1552,7 @@ export default function AdminDashboard() {
                 + Add Admin
               </button>
             )}
-            {activeTab === "ordinances" && (
+            {activeTab === "ordinances" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1548,7 +1563,7 @@ export default function AdminDashboard() {
                 + Upload Ordinance
               </button>
             )}
-            {activeTab === "resolutions" && (
+            {activeTab === "resolutions" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1565,7 +1580,7 @@ export default function AdminDashboard() {
                 + Upload Resolution
               </button>
             )}
-            {activeTab === "sessions" && (
+            {activeTab === "sessions" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1577,7 +1592,7 @@ export default function AdminDashboard() {
                 + Add Session
               </button>
             )}
-            {activeTab === "announcements" && (
+            {activeTab === "announcements" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1589,7 +1604,7 @@ export default function AdminDashboard() {
                 + New Announcement
               </button>
             )}
-            {activeTab === "logs" && (
+            {activeTab === "logs" && isAdmin && (
               <button
                 className={styles.addBtn}
                 onClick={() => {
@@ -1641,6 +1656,7 @@ export default function AdminDashboard() {
             ordinances={ordinances}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditOrdinance}
+            readOnly={!isAdmin}
           />
         )}
         {activeTab === "resolutions" && !fetchingResolutions && (
@@ -1648,6 +1664,7 @@ export default function AdminDashboard() {
             resolutions={resolutions}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditResolution}
+            readOnly={!isAdmin}
           />
         )}
 
@@ -1663,7 +1680,6 @@ export default function AdminDashboard() {
             }}
             onEditMember={handleOpenEditOfficial}
             onAddMember={(termPeriod) => {
-              // Pre-fill the term_period so the modal shows which council
               setNewOfficial({
                 full_name: "",
                 position: "",
@@ -1677,6 +1693,7 @@ export default function AdminDashboard() {
               setModalMessage("");
               setShowOfficialModal(true);
             }}
+            readOnly={!isAdmin}
           />
         )}
 
@@ -1685,6 +1702,7 @@ export default function AdminDashboard() {
             sessionMinutes={sessionMinutes}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditSession}
+            readOnly={!isAdmin}
           />
         )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
@@ -1692,28 +1710,31 @@ export default function AdminDashboard() {
             announcements={announcements}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditAnnouncement}
+            readOnly={!isAdmin}
           />
         )}
-        {activeTab === "calendar" && (
-          <CalendarPage
-            localEvents={localEvents}
-            phHolidays={phHolidays}
-            fetchingHolidays={fetchingHolidays}
-            showHolidays={showHolidays}
-            setShowHolidays={setShowHolidays}
-            onAddEvent={(dateStr) => {
-              setLocalEventForm({
-                ...emptyEventForm,
-                start_date: dateStr,
-                end_date: dateStr,
-              });
-              setModalMessage("");
-              setShowLocalEventModal(true);
-            }}
-            onEditEvent={handleOpenEditEvent}
-            onDeleteEvent={handleDeleteEvent}
-          />
-        )}
+       {activeTab === "calendar" && (
+  <CalendarPage
+    localEvents={localEvents}
+    phHolidays={phHolidays}
+    fetchingHolidays={fetchingHolidays}
+    showHolidays={showHolidays}
+    setShowHolidays={setShowHolidays}
+    onAddEvent={(dateStr) => {
+      setLocalEventForm({
+        ...emptyEventForm,
+        start_date: dateStr,
+        end_date: dateStr,
+      });
+      setModalMessage("");
+      setShowLocalEventModal(true);
+    }}
+    onEditEvent={handleOpenEditEvent}
+    onDeleteEvent={handleDeleteEvent}
+    isAdmin={isAdmin}
+    currentUser={admin}
+  />
+)}
         {activeTab === "logs" && (
           <LogsPage
             logs={logs}
@@ -1729,7 +1750,9 @@ export default function AdminDashboard() {
             }}
           />
         )}
-        {activeTab === "content" && <ContentManagementPage />}
+        {activeTab === "content" && (
+          <ContentManagementPage isAdmin={isAdmin} currentUser={admin} />
+        )}
       </div>
 
       {/* ══════════════════ MODALS ══════════════════ */}
@@ -1856,7 +1879,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-{/* ── Add Council Member modal ── */}
+      {/* ── Add Council Member modal ── */}
       {showOfficialModal && (
         <div
           className={styles.modalOverlay}

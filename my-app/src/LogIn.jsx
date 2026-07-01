@@ -34,11 +34,7 @@ export default function Login() {
       if (data.success) {
         localStorage.setItem('token', data.token)
         localStorage.setItem('user', JSON.stringify(data.user))
-        if (data.user.role === 'admin') {
-          window.location.href = '/admin/dashboard'
-        } else {
-          window.location.href = '/dashboard'
-        }
+        window.location.href = '/dashboard'
       } else {
         setLoginError(data.message || 'Invalid credentials.')
       }
@@ -94,7 +90,7 @@ export default function Login() {
         </button>
 
         <div className="register-link">
-          <p>Don't have an account? <a href="/register">Register</a></p>
+          <p>Official Legislative Management System of the Sangguniang Bayan ng Balilihan, Bohol</p>
         </div>
       </form>
     </div>

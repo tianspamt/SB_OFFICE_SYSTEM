@@ -7,6 +7,7 @@ export default function CalendarPage({
   localEvents, phHolidays, fetchingHolidays,
   showHolidays, setShowHolidays,
   onAddEvent, onEditEvent, onDeleteEvent,
+  isAdmin = false, currentUser = null,
 }) {
   const [calendarViewDate, setCalendarViewDate] = useState(new Date());
   const [selectedCalDay, setSelectedCalDay] = useState(null);
@@ -69,6 +70,7 @@ export default function CalendarPage({
           start: { date: startIso, dateTime: ev.all_day ? null : `${startIso}T${ev.start_time || "00:00"}` },
           end: { date: endIso, dateTime: ev.all_day ? null : `${endIso}T${ev.end_time || "00:00"}` },
           raw: ev,
+          isAdminEvent: ev.is_admin_event,
         };
       });
     return [...holidays, ...dbEvs];
@@ -100,6 +102,7 @@ export default function CalendarPage({
           start: { date: startIso, dateTime: ev.all_day ? null : `${startIso}T${ev.start_time}` },
           end: { date: endIso, dateTime: ev.all_day ? null : `${endIso}T${ev.end_time}` },
           raw: ev,
+          isAdminEvent: ev.is_admin_event,
         };
       });
     return [...holidays, ...dbEvs]
@@ -173,7 +176,7 @@ export default function CalendarPage({
                     <button key={ev.id} className={styles.calEventChip}
                       style={{ background: c.bg, color: c.color, fontSize: 10 }}
                       onClick={(e) => { e.stopPropagation(); setSelectedEvent(ev); setShowEventDetailModal(true); }}>
-                      {ev.isHoliday ? "🇵🇭 " : ""}{ev.summary}
+                      {ev.isHoliday ? "🇵🇭 " : ""}{ev.isAdminEvent ? " " : ""}{ev.summary}
                     </button>
                   );
                 })}
@@ -235,35 +238,56 @@ export default function CalendarPage({
         const end = ev.end?.dateTime ? new Date(ev.end.dateTime) : ev.end?.date ? new Date(ev.end.date + "T00:00:00") : null;
         const c = chipStyle(ev);
         return (
-          <div className={styles.modalOverlay}><div className={styles.modal}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.dot, flexShrink: 0, display: "inline-block" }} />
-              <h2 className={styles.modalTitle} style={{ margin: 0 }}>{ev.isHoliday ? "🇵🇭 " : ""}{ev.summary}</h2>
-            </div>
-            {ev.isHoliday && (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.dot}`, marginBottom: 10 }}>
-                {ev.holidayType === "national" ? "🇵🇭 National Regular Holiday" : ev.holidayType === "special-working" ? "✅ Special Working Holiday" : ev.holidayType === "local-fiesta" ? "🎉 Local Fiesta / Founding Anniversary" : "📅 Special Non-Working Day"}
+          <div className={styles.modalOverlay}>
+            <div className={styles.modal} style={{ display: "flex", flexDirection: "column", maxHeight: "90vh", overflow: "hidden" }}>
+
+              {/* Fixed header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexShrink: 0 }}>
+                <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.dot, flexShrink: 0, display: "inline-block" }} />
+                <h2 className={styles.modalTitle} style={{ margin: 0 }}>{ev.isHoliday ? "🇵🇭 " : ""}{ev.summary}</h2>
               </div>
-            )}
-            {start && (
-              <div style={{ fontSize: 13, color: "#4a5568", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
-                <Clock size={13} />
-                {start.toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-                {!ev.isHoliday && !ev.all_day && ev.start?.dateTime && ` • ${start.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })} – ${end?.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}`}
+
+              {/* Scrollable body */}
+              <div style={{ overflowY: "auto", flex: 1 }}>
+                {ev.isHoliday && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.dot}`, marginBottom: 10 }}>
+                    {ev.holidayType === "national" ? "🇵🇭 National Regular Holiday" : ev.holidayType === "special-working" ? "✅ Special Working Holiday" : ev.holidayType === "local-fiesta" ? "🎉 Local Fiesta / Founding Anniversary" : "📅 Special Non-Working Day"}
+                  </div>
+                )}
+                {start && (
+                  <div style={{ fontSize: 13, color: "#4a5568", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                    <Clock size={13} />
+                    {start.toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                    {!ev.isHoliday && !ev.all_day && ev.start?.dateTime && ` • ${start.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })} – ${end?.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}`}
+                  </div>
+                )}
+                {ev.location && (
+                  <div style={{ fontSize: 13, color: "#4a5568", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
+                    <MapPin size={13} />{ev.location}
+                  </div>
+                )}
+                {ev.description && (
+                  <div className={styles.calEventDetailDesc}>{ev.description}</div>
+                )}
               </div>
-            )}
-            {ev.location && <div style={{ fontSize: 13, color: "#4a5568", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><MapPin size={13} />{ev.location}</div>}
-            {ev.description && <div className={styles.calEventDetailDesc}>{ev.description}</div>}
-            <div className={styles.modalBtns}>
-              {ev.isLocal && (
-                <>
-                  <button className={styles.editBtn} onClick={() => { setShowEventDetailModal(false); onEditEvent(ev); }}><Pencil size={13} /> Edit</button>
-                  <button className={styles.deleteBtn} onClick={() => { if (window.confirm("Delete this event?")) { onDeleteEvent(ev.dbId); setShowEventDetailModal(false); } }}><Trash2 size={13} /> Delete</button>
-                </>
-              )}
-              <button className={styles.confirmBtn} onClick={() => setShowEventDetailModal(false)}>Close</button>
+
+              {/* Fixed footer */}
+              <div className={styles.modalBtns} style={{ flexShrink: 0, marginTop: 12 }}>
+                {ev.isLocal && (isAdmin || ev.raw?.created_by === currentUser?.id) && (
+  <>
+    <button className={styles.editBtn} onClick={() => { setShowEventDetailModal(false); onEditEvent(ev); }}>
+      <Pencil size={13} /> Edit
+    </button>
+    <button className={styles.deleteBtn} onClick={() => { if (window.confirm("Delete this event?")) { onDeleteEvent(ev.dbId); setShowEventDetailModal(false); } }}>
+      <Trash2 size={13} /> Delete
+    </button>
+  </>
+)}
+                <button className={styles.confirmBtn} onClick={() => setShowEventDetailModal(false)}>Close</button>
+              </div>
+
             </div>
-          </div></div>
+          </div>
         );
       })()}
     </div>

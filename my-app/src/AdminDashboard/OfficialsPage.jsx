@@ -71,7 +71,7 @@ function Avatar({ member }) {
 
 // ── MemberCard ────────────────────────────────────────────────────────────────
 
-function MemberCard({ member, term, onEdit, onDelete, onViewProfile }) {
+function MemberCard({ member, term, onEdit, onDelete, onViewProfile, readOnly = false }) {
   const isActive = term?.status === 'active'
 
   return (
@@ -89,19 +89,23 @@ function MemberCard({ member, term, onEdit, onDelete, onViewProfile }) {
       )}
 
       <div className={styles.cardActions}>
-        <button className={styles.iconBtn} onClick={() => onViewProfile(member)}>
-          <Eye size={13} /> View
-        </button>
-        <button className={styles.iconBtn} onClick={() => onEdit(member)}>
-          <Pencil size={13} /> Edit
-        </button>
-        <button
-          className={`${styles.iconBtn} ${styles.iconBtnDel}`}
-          onClick={() => onDelete(member)}
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
+  <button className={styles.iconBtn} onClick={() => onViewProfile(member)}>
+    <Eye size={13} /> View
+  </button>
+  {!readOnly && (
+    <>
+      <button className={styles.iconBtn} onClick={() => onEdit(member)}>
+        <Pencil size={13} /> Edit
+      </button>
+      <button
+        className={`${styles.iconBtn} ${styles.iconBtnDel}`}
+        onClick={() => onDelete(member)}
+      >
+        <Trash2 size={13} />
+      </button>
+    </>
+  )}
+</div>
     </div>
   )
 }
@@ -163,15 +167,16 @@ function AddCouncilModal({ onClose, onConfirm }) {
 
 function CouncilGroup({
   termPeriod,
-  entries,       // [{ member, term }]
+  entries,
   isOpen,
   onToggle,
   search,
   onSearch,
-  onAddMember,   // (termPeriod) => void
+  onAddMember,
   onEdit,
   onDelete,
   onViewProfile,
+  readOnly = false,
 }) {
   const activeCount = entries.filter(e => e.term?.status === 'active').length
 
@@ -207,13 +212,15 @@ function CouncilGroup({
         </button>
 
         {/* right side: add member — separate from the toggle button */}
-        <button
-          className={styles.addMemberInlineBtn}
-          onClick={() => onAddMember(termPeriod)}
-          title={`Add a member to the ${termPeriod} council`}
-        >
-          <UserPlus size={13} /> Add member
-        </button>
+        {!readOnly && (
+  <button
+    className={styles.addMemberInlineBtn}
+    onClick={() => onAddMember(termPeriod)}
+    title={`Add a member to the ${termPeriod} council`}
+  >
+    <UserPlus size={13} /> Add member
+  </button>
+)}
       </div>
 
       {/* ── expanded body ── */}
@@ -245,13 +252,14 @@ function CouncilGroup({
               <div className={styles.memberGrid}>
                 {filtered.map(({ member, term }) => (
                   <MemberCard
-                    key={`${member.id}-${term?.id ?? 'noterm'}`}
-                    member={member}
-                    term={term}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onViewProfile={onViewProfile}
-                  />
+  key={`${member.id}-${term?.id ?? 'noterm'}`}
+  member={member}
+  term={term}
+  onEdit={onEdit}
+  onDelete={onDelete}
+  onViewProfile={onViewProfile}
+  readOnly={readOnly}
+/>
                 ))}
               </div>
             </>
@@ -271,12 +279,13 @@ function CouncilGroup({
 // ── OfficialsPage ─────────────────────────────────────────────────────────────
 
 export default function OfficialsPage({
-  officials = [],    // [{ id, full_name, position, photo, terms: [...] }]
+  officials = [],
   ordinances = [],
   setDeleteTarget,
-  onViewProfile,     // (member) => void
-  onEditMember,      // (member) => void
-  onAddMember,       // (termPeriod) => void  ← pre-fills term_period in Add modal
+  onViewProfile,
+  onEditMember,
+  onAddMember,
+  readOnly = false,
 }) {
   const [openGroups, setOpenGroups]   = useState({})
   const [groupSearch, setGroupSearch] = useState({})
@@ -345,13 +354,15 @@ export default function OfficialsPage({
 
       {/* ── toolbar ── */}
       <div className={styles.toolbar}>
-        <span className={styles.sectionLabel} style={{ marginBottom: 0 }}>
-          {allGroups.length} council{allGroups.length !== 1 ? 's' : ''}
-        </span>
-        <button className={styles.primaryBtn} onClick={() => setShowAddCouncil(true)}>
-          <Plus size={14} /> Add Council
-        </button>
-      </div>
+  <span className={styles.sectionLabel} style={{ marginBottom: 0 }}>
+    {allGroups.length} council{allGroups.length !== 1 ? 's' : ''}
+  </span>
+  {!readOnly && (
+    <button className={styles.primaryBtn} onClick={() => setShowAddCouncil(true)}>
+      <Plus size={14} /> Add Council
+    </button>
+  )}
+</div>
 
       {/* ── council group list ── */}
       {allGroups.length === 0 ? (
@@ -363,18 +374,19 @@ export default function OfficialsPage({
         <div className={styles.groupList}>
           {allGroups.map(({ termPeriod, entries }) => (
             <CouncilGroup
-              key={termPeriod}
-              termPeriod={termPeriod}
-              entries={entries}
-              isOpen={!!openGroups[termPeriod]}
-              onToggle={() => toggleGroup(termPeriod)}
-              search={groupSearch[termPeriod] || ''}
-              onSearch={val => setGroupSearch(prev => ({ ...prev, [termPeriod]: val }))}
-              onAddMember={tp => onAddMember && onAddMember(tp)}
-              onEdit={onEditMember}
-              onDelete={handleDelete}
-              onViewProfile={onViewProfile}
-            />
+  key={termPeriod}
+  termPeriod={termPeriod}
+  entries={entries}
+  isOpen={!!openGroups[termPeriod]}
+  onToggle={() => toggleGroup(termPeriod)}
+  search={groupSearch[termPeriod] || ''}
+  onSearch={val => setGroupSearch(prev => ({ ...prev, [termPeriod]: val }))}
+  onAddMember={tp => onAddMember && onAddMember(tp)}
+  onEdit={onEditMember}
+  onDelete={handleDelete}
+  onViewProfile={onViewProfile}
+  readOnly={readOnly}
+/>
           ))}
         </div>
       )}
