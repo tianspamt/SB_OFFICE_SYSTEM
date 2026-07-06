@@ -25,29 +25,6 @@ import {
 
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
 
-const DUMMY_PENDING = [
-  {
-    id: "pend-1",
-    title: "95th Regular Session — Draft Minutes",
-    author: "Clerk: Ana Villanueva",
-    status: "approved",
-    submitted: "2026-04-14",
-  },
-  {
-    id: "pend-2",
-    title: "96th Regular Session — Draft Minutes",
-    author: "Clerk: Ana Villanueva",
-    status: "pending",
-    submitted: "2026-04-21",
-  },
-  {
-    id: "pend-3",
-    title: "Special Session on Disaster Relief — Draft",
-    author: "Clerk: Jose Santos",
-    status: "pending",
-    submitted: "2026-04-29",
-  },
-];
 
 // ─── SESSION CARD (Published) ─────────────────────────────────────────────────
 
@@ -246,16 +223,16 @@ export default function SessionsPage({
   setDeleteTarget,
   onEdit,
   readOnly = false,
+  canPublish = false,
+  isViceMayor = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
-  const [pendingStatuses, setPendingStatuses] = useState(
-    Object.fromEntries(DUMMY_PENDING.map((d) => [d.id, d.status]))
-  );
-  const [comments, setComments] = useState({});
-  const [panelItem, setPanelItem] = useState(null);
+  const [pendingStatuses, setPendingStatuses] = useState({});
+const [comments, setComments] = useState({});
+const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const minutesYears = [
@@ -287,21 +264,18 @@ export default function SessionsPage({
     return ms && t && y;
   });
 
-  const filteredPending = DUMMY_PENDING.filter(
-    (s) =>
-      !search ||
-      s.title.toLowerCase().includes(search.toLowerCase()) ||
-      s.author.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredPending = [];
 
-  const pendingCount = DUMMY_PENDING.filter(
-    (d) => pendingStatuses[d.id] !== "published"
-  ).length;
+  const pendingCount = 0;
 
-  const handleApprove = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "approved" }));
-  const handleReject = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "rejected" }));
+const handleApprove = (id) => {
+  const current = pendingStatuses[id];
+  if (isViceMayor && current === "pending") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "ready_to_publish" }));
+  } else if (!isViceMayor && current === "ready_to_publish") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "published" }));
+  }
+};
 
   const handleAddComment = (itemId, text) => {
     const now = new Date();
@@ -321,27 +295,17 @@ export default function SessionsPage({
     <>
       {/* STATS */}
       <StatsRow
-        stats={[
-          { value: sessionMinutes.length, label: "Total Sessions" },
-          {
-            value: sessionMinutes.filter((s) => s.session_type === "regular")
-              .length,
-            label: "Regular Sessions",
-          },
-          {
-            value: sessionMinutes.filter((s) => s.session_type === "special")
-              .length,
-            label: "Special Sessions",
-            colorClass: lStyles.statCardAmber,
-          },
-        ]}
-      />
+  stats={[
+    { value: sessionMinutes.length, label: "Total Sessions" },
+    { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
+  ]}
+/>
 
       {/* TABS */}
       <TabNavigation
   tabs={[
     { id: "published", label: "Published" },
-    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+    ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
   ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
@@ -426,8 +390,8 @@ export default function SessionsPage({
       {activeTab === "pending" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {filteredPending.length} of {DUMMY_PENDING.length} drafts
-          </div>
+  Showing {filteredPending.length} drafts
+</div>
           <div className={lStyles.recordList}>
             {filteredPending.length === 0 ? (
               <EmptyState
@@ -436,16 +400,16 @@ export default function SessionsPage({
               />
             ) : (
               filteredPending.map((item) => (
-                <SessionPendingCard
-                  key={item.id}
-                  item={item}
-                  status={pendingStatuses[item.id] || item.status}
-                  onApprove={() => handleApprove(item.id)}
-                  onReject={() => handleReject(item.id)}
-                  onViewDraft={() => setPanelItem(item)}
-                  onComment={() => setPanelItem(item)}
-                />
-              ))
+  <SessionPendingCard
+    key={item.id}
+    item={item}
+    status={pendingStatuses[item.id] || item.status}
+    onApprove={() => handleApprove(item.id)}
+    onViewDraft={() => setPanelItem(item)}
+    onComment={() => setPanelItem(item)}
+    isViceMayor={isViceMayor}
+  />
+))
             )}
           </div>
         </>

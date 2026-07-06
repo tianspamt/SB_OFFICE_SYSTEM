@@ -31,38 +31,7 @@ import {
 
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
 
-const DUMMY_PENDING = [
-  {
-    id: "pend-1",
-    code: "RES-2026-FIN-001-DRAFT",
-    title: "Authorization for Emergency Fund Release",
-    category: "Finance",
-    author: "Roberto Tan",
-    coauthor: "",
-    status: "approved",
-    submitted: "2026-04-18",
-  },
-  {
-    id: "pend-2",
-    code: "RES-2026-HLT-001-DRAFT",
-    title: "Support for Barangay Health Center Expansion",
-    category: "Health",
-    author: "Lourdes Aquino",
-    coauthor: "",
-    status: "pending",
-    submitted: "2026-04-25",
-  },
-  {
-    id: "pend-3",
-    code: "RES-2026-INF-001-DRAFT",
-    title: "Road Rehabilitation Project in Barangay Sta. Cruz",
-    category: "Infrastructure",
-    author: "Ramon Garcia",
-    coauthor: "Elena Bautista",
-    status: "pending",
-    submitted: "2026-05-01",
-  },
-];
+
 
 const CATEGORIES = [
   "All",
@@ -82,6 +51,8 @@ export default function ResolutionsPage({
   setDeleteTarget,
   onEdit,
   readOnly = false,
+  canPublish = false,
+  isViceMayor = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -89,11 +60,9 @@ export default function ResolutionsPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pendingStatuses, setPendingStatuses] = useState(
-    Object.fromEntries(DUMMY_PENDING.map((d) => [d.id, d.status]))
-  );
-  const [comments, setComments] = useState({});
-  const [panelItem, setPanelItem] = useState(null);
+  const [pendingStatuses, setPendingStatuses] = useState({});
+const [comments, setComments] = useState({});
+const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   // ── Derive available years from published resolutions ──────────────────────
@@ -141,10 +110,14 @@ export default function ResolutionsPage({
     setYearFilter("all");
   };
 
-  const handleApprove = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "approved" }));
-  const handleReject = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "rejected" }));
+  const handleApprove = (id) => {
+  const current = pendingStatuses[id];
+  if (isViceMayor && current === "pending") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "ready_to_publish" }));
+  } else if (!isViceMayor && current === "ready_to_publish") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "published" }));
+  }
+};
 
   const handleAddComment = (itemId, text) => {
     const now = new Date();
@@ -160,39 +133,26 @@ export default function ResolutionsPage({
     }));
   };
 
-  const pendingCount = DUMMY_PENDING.filter(
-    (d) => pendingStatuses[d.id] !== "published"
-  ).length;
+  const pendingCount = 0;
 
-  const publishedFiltered = filterPublished(resolutions);
-  const pendingFiltered = filterPending(DUMMY_PENDING);
+const publishedFiltered = filterPublished(resolutions);
+const pendingFiltered = [];
 
   return (
     <>
       {/* STATS */}
       <StatsRow
-        stats={[
-          { value: resolutions.length, label: "Total Published" },
-          {
-            value: pendingCount,
-            label: "Pending Review",
-            colorClass: lStyles.statCardAmber,
-          },
-          {
-            value: DUMMY_PENDING.filter(
-              (d) => pendingStatuses[d.id] === "approved"
-            ).length,
-            label: "Ready for Upload",
-            colorClass: lStyles.statCardGreen,
-          },
-        ]}
-      />
+  stats={[
+    { value: resolutions.length, label: "Total Published" },
+    { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
+  ]}
+/>
 
       {/* TABS */}
       <TabNavigation
   tabs={[
     { id: "published", label: "Published" },
-    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+    ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
   ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
@@ -322,8 +282,8 @@ export default function ResolutionsPage({
       {activeTab === "pending" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {pendingFiltered.length} of {DUMMY_PENDING.length} drafts
-          </div>
+  Showing {pendingFiltered.length} drafts
+</div>
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -333,18 +293,18 @@ export default function ResolutionsPage({
             ) : (
               pendingFiltered.map((item) => (
                 <PendingRecordCard
-                  key={item.id}
-                  code={item.code}
-                  title={item.title}
-                  category={item.category}
-                  author={item.author}
-                  submitted={item.submitted}
-                  status={pendingStatuses[item.id] || item.status}
-                  onApprove={() => handleApprove(item.id)}
-                  onReject={() => handleReject(item.id)}
-                  onViewDraft={() => setPanelItem(item)}
-                  onComment={() => setPanelItem(item)}
-                />
+  key={item.id}
+  code={item.code}
+  title={item.title}
+  category={item.category}
+  author={item.author}
+  submitted={item.submitted}
+  status={pendingStatuses[item.id] || item.status}
+  onApprove={() => handleApprove(item.id)}
+  onViewDraft={() => setPanelItem(item)}
+  onComment={() => setPanelItem(item)}
+  isViceMayor={isViceMayor}
+/>
               ))
             )}
           </div>

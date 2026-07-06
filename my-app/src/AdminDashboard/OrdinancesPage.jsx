@@ -38,48 +38,7 @@ import {
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
 // Remove when wiring to backend — replace with props or API calls
 
-const DUMMY_PENDING = [
-  {
-    id: "pend-1",
-    code: "ORD-2026-TAX-001-DRAFT",
-    title: "Tax Rate Amendment for Commercial Establishments",
-    category: "Tax",
-    author: "Maria Santos",
-    coauthor: "Jose Reyes",
-    status: "approved",
-    submitted: "2026-04-15",
-  },
-  {
-    id: "pend-2",
-    code: "ORD-2026-EDU-001-DRAFT",
-    title: "Scholarship Program for Indigenous Students",
-    category: "Education",
-    author: "Ana Villanueva",
-    coauthor: "",
-    status: "pending",
-    submitted: "2026-04-20",
-  },
-  {
-    id: "pend-3",
-    code: "ORD-2026-AGR-001-DRAFT",
-    title: "Organic Farming Incentives and Support Act",
-    category: "Agriculture",
-    author: "Carlos Mendoza",
-    coauthor: "Lisa Cruz",
-    status: "rejected",
-    submitted: "2026-04-22",
-  },
-  {
-    id: "pend-4",
-    code: "ORD-2026-ENV-001-DRAFT",
-    title: "Coastal Resource Management Ordinance",
-    category: "Environment",
-    author: "Pedro Lim",
-    coauthor: "",
-    status: "pending",
-    submitted: "2026-04-28",
-  },
-];
+
 
 const CATEGORIES = [
   "All",
@@ -99,6 +58,8 @@ export default function OrdinancesPage({
   setDeleteTarget,
   onEdit,
   readOnly = false,
+  canPublish = false,
+  isViceMayor = false,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -106,11 +67,9 @@ export default function OrdinancesPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pendingStatuses, setPendingStatuses] = useState(
-    Object.fromEntries(DUMMY_PENDING.map((d) => [d.id, d.status]))
-  );
-  const [comments, setComments] = useState({});
-  const [panelItem, setPanelItem] = useState(null);
+  const [pendingStatuses, setPendingStatuses] = useState({});
+const [comments, setComments] = useState({});
+const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -164,10 +123,14 @@ export default function OrdinancesPage({
 
   // ── Pending actions ─────────────────────────────────────────────────────────
 
-  const handleApprove = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "approved" }));
-  const handleReject = (id) =>
-    setPendingStatuses((prev) => ({ ...prev, [id]: "rejected" }));
+  const handleApprove = (id) => {
+  const current = pendingStatuses[id];
+  if (isViceMayor && current === "pending") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "ready_to_publish" }));
+  } else if (!isViceMayor && current === "ready_to_publish") {
+    setPendingStatuses((prev) => ({ ...prev, [id]: "published" }));
+  }
+};
 
   const handleAddComment = (itemId, text) => {
     const now = new Date();
@@ -185,41 +148,24 @@ export default function OrdinancesPage({
 
   // ── Pending count for badge ─────────────────────────────────────────────────
 
-  const pendingCount = DUMMY_PENDING.filter(
-    (d) => pendingStatuses[d.id] !== "published"
-  ).length;
-
-  // ── Published list (existing ordinances) ────────────────────────────────────
-
-  const publishedFiltered = filterPublished(ordinances);
-  const pendingFiltered = filterPending(DUMMY_PENDING);
+  const pendingCount = 0;
+const publishedFiltered = filterPublished(ordinances);
+const pendingFiltered = [];
 
   return (
     <>
-      {/* STATS */}
       <StatsRow
-        stats={[
-          { value: ordinances.length, label: "Total Published" },
-          {
-            value: pendingCount,
-            label: "Pending Review",
-            colorClass: lStyles.statCardAmber,
-          },
-          {
-            value: DUMMY_PENDING.filter(
-              (d) => pendingStatuses[d.id] === "approved"
-            ).length,
-            label: "Ready for Upload",
-            colorClass: lStyles.statCardGreen,
-          },
-        ]}
-      />
+  stats={[
+    { value: ordinances.length, label: "Total Published" },
+    { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
+  ]}
+/>
 
       {/* TABS */}
       <TabNavigation
   tabs={[
     { id: "published", label: "Published" },
-    ...(!readOnly ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+    ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
   ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
@@ -355,8 +301,8 @@ export default function OrdinancesPage({
       {activeTab === "pending" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {pendingFiltered.length} of {DUMMY_PENDING.length} drafts
-          </div>
+  Showing {pendingFiltered.length} drafts
+</div>
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -366,18 +312,18 @@ export default function OrdinancesPage({
             ) : (
               pendingFiltered.map((item) => (
                 <PendingRecordCard
-                  key={item.id}
-                  code={item.code}
-                  title={item.title}
-                  category={item.category}
-                  author={item.author}
-                  submitted={item.submitted}
-                  status={pendingStatuses[item.id] || item.status}
-                  onApprove={() => handleApprove(item.id)}
-                  onReject={() => handleReject(item.id)}
-                  onViewDraft={() => setPanelItem(item)}
-                  onComment={() => setPanelItem(item)}
-                />
+  key={item.id}
+  code={item.code}
+  title={item.title}
+  category={item.category}
+  author={item.author}
+  submitted={item.submitted}
+  status={pendingStatuses[item.id] || item.status}
+  onApprove={() => handleApprove(item.id)}
+  onViewDraft={() => setPanelItem(item)}
+  onComment={() => setPanelItem(item)}
+  isViceMayor={isViceMayor}
+/>
               ))
             )}
           </div>

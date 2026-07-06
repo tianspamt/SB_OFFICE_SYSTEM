@@ -141,35 +141,55 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/ordinances/upload
+// POST /api/ordinances/upload — auto-detects file type
 router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
+  let tempPath = null
   try {
-    const { fileName } = await uploadToStorage(req.file, 'ordinances')
+    const mime = req.file.mimetype
+    const isImage = mime.startsWith('image/')
+    const isPDF = mime === 'application/pdf'
+    const isWord = mime === 'application/msword' || 
+                   mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-    // Extract text from PDF at upload time so View works instantly
     let extracted_text = null
-    if (req.file.mimetype === 'application/pdf') {
+
+    // Extract text from image via OCR
+    if (isImage) {
+      tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
+      fs.writeFileSync(tempPath, req.file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      fs.unlinkSync(tempPath)
+      tempPath = null
+      extracted_text = text.trim() || null
+    }
+
+    // Extract text from PDF
+    if (isPDF) {
       try {
-       extracted_text = await new Promise((resolve) => {
-  const pdfParser = new PDFParser()
-  pdfParser.on('pdfParser_dataReady', (data) => {
-    const text = data.Pages
-      ?.flatMap(p => p.Texts)
-      ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-      ?.join(' ')
-      ?.trim() || ''
-    resolve(text || null)
-  })
-  pdfParser.on('pdfParser_dataError', () => resolve(null))
-  pdfParser.parseBuffer(buffer)
-})
+        extracted_text = await new Promise((resolve) => {
+          const pdfParser = new PDFParser()
+          pdfParser.on('pdfParser_dataReady', (data) => {
+            const text = data.Pages
+              ?.flatMap(p => p.Texts)
+              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
+              ?.join(' ')
+              ?.trim() || ''
+            resolve(text || null)
+          })
+          pdfParser.on('pdfParser_dataError', () => resolve(null))
+          pdfParser.parseBuffer(req.file.buffer)
+        })
       } catch (pdfErr) {
         console.error('PDF parse error on upload:', pdfErr.message)
       }
     }
+
+    // Upload file to storage
+    const { fileName } = await uploadToStorage(req.file, 'ordinances')
 
     const { data: ordinance, error } = await supabase
       .from('ordinances')
@@ -178,24 +198,33 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
         title,
         year: year ? parseInt(year) : null,
         filename: req.file.originalname,
-        filetype: req.file.mimetype,
+        filetype: mime,
         filepath: fileName,
         extracted_text
       })
       .select().single()
+
     if (error) {
       await deleteFromStorage(fileName)
       return res.status(500).json({ error: error.message })
     }
+
     if (officialIds.length > 0) {
       const { error: relErr } = await supabase.from('ordinance_officials').insert(
         officialIds.map(oid => ({ ordinance_id: ordinance.id, official_id: oid }))
       )
       if (relErr) console.error('ordinance_officials insert error:', relErr.message)
     }
+
     await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance: ${title}`)
-    res.json({ success: true, id: ordinance.id, data: ordinance })
+    res.json({ 
+      success: true, 
+      id: ordinance.id, 
+      data: ordinance,
+      ...(isImage && extracted_text ? { text: extracted_text } : {})
+    })
   } catch (err) {
+    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
     res.status(500).json({ error: err.message })
   }
 })
@@ -261,28 +290,45 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
       updateData.filepath = fileName
 
       // Re-extract text if a new PDF file was uploaded
-      if (req.file.mimetype === 'application/pdf') {
-        try {
-          extracted_text = await new Promise((resolve) => {
-  const pdfParser = new PDFParser()
-  pdfParser.on('pdfParser_dataReady', (data) => {
-    const text = data.Pages
-      ?.flatMap(p => p.Texts)
-      ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-      ?.join(' ')
-      ?.trim() || ''
-    resolve(text || null)
-  })
-  pdfParser.on('pdfParser_dataError', () => resolve(null))
-  pdfParser.parseBuffer(buffer)
-})
-        } catch (pdfErr) {
-          console.error('PDF parse error on update:', pdfErr.message)
-        }
-      } else {
-        // If replaced with a non-PDF, clear old extracted text
-        updateData.extracted_text = null
-      }
+     const mime = req.file.mimetype
+const isImage = mime.startsWith('image/')
+const isPDF = mime === 'application/pdf'
+
+let extracted_text = null
+
+if (isPDF) {
+  try {
+    extracted_text = await new Promise((resolve) => {
+      const pdfParser = new PDFParser()
+      pdfParser.on('pdfParser_dataReady', (data) => {
+        const text = data.Pages
+          ?.flatMap(p => p.Texts)
+          ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
+          ?.join(' ')
+          ?.trim() || ''
+        resolve(text || null)
+      })
+      pdfParser.on('pdfParser_dataError', () => resolve(null))
+      pdfParser.parseBuffer(req.file.buffer)
+    })
+  } catch (pdfErr) {
+    console.error('PDF parse error on update:', pdfErr.message)
+  }
+} else if (isImage) {
+  let tempPath = null
+  try {
+    tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
+    fs.writeFileSync(tempPath, req.file.buffer)
+    const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+    fs.unlinkSync(tempPath)
+    extracted_text = text.trim() || null
+  } catch (ocrErr) {
+    console.error('OCR error on update:', ocrErr.message)
+    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+  }
+}
+
+updateData.extracted_text = extracted_text
     }
     const { data: updated, error } = await supabase
       .from('ordinances').update(updateData).eq('id', id).select().single()

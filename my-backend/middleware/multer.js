@@ -3,9 +3,14 @@ const multer = require('multer')
 const upload = multer({
   storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf']
+    const allowed = [
+  'image/jpeg', 'image/png', 'image/jpg',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]
     if (allowed.includes(file.mimetype)) cb(null, true)
-    else cb(new Error('Only images and PDFs are allowed'))
+   else cb(new Error('Only images, PDFs, and Word documents are allowed'))
   }
 })
 

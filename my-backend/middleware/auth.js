@@ -23,6 +23,18 @@ const adminOnly = (req, res, next) => {
   next()
 }
 
+const secretaryOnly = (req, res, next) => {
+  if (req.user?.position !== 'secretary')
+    return res.status(403).json({ error: 'Secretary only.' })
+  next()
+}
+
+const secretaryOrClerk = (req, res, next) => {
+  if (!['secretary', 'clerk'].includes(req.user?.position))
+    return res.status(403).json({ error: 'Secretary or Clerk only.' })
+  next()
+}
+
 const validate = (req, res, next) => {
   const errors = validationResult(req)
   if (!errors.isEmpty())
@@ -30,4 +42,4 @@ const validate = (req, res, next) => {
   next()
 }
 
-module.exports = { verifyToken, adminOnly, validate }
+module.exports = { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, validate }

@@ -87,13 +87,13 @@ router.post('/register', [
     .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
     .matches(/\d/).withMessage('Password must contain at least 1 number.'),
 ], validate, async (req, res) => {
-  const { name, username, email, password } = req.body
+  const { name, username, email, password, position } = req.body
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
     const { data, error } = await supabase
-      .from('users')
-      .insert({ name, username, email, password: hashedPassword, role: 'user' })
-      .select().single()
+  .from('users')
+  .insert({ name, username, email, password: hashedPassword, role: 'user', position: position || 'councilor' })
+  .select().single()
     if (error) {
       if (error.code === '23505')
         return res.status(400).json({ error: 'Username or email already exists.' })
@@ -144,10 +144,10 @@ router.post('/login', loginLimiter, [
       return res.json({ success: false, message: 'Invalid username/email or password.' })
     }
     const token = jwt.sign(
-      { id: user.id, username: user.username, email: user.email, role: user.role, name: user.name },
-      JWT_SECRET,
-      { expiresIn: '8h', issuer: 'sangguniang-bayan-system', audience: 'sb-client' }
-    )
+  { id: user.id, username: user.username, email: user.email, role: user.role, name: user.name, position: user.position },
+  JWT_SECRET,
+  { expiresIn: '8h', issuer: 'sangguniang-bayan-system', audience: 'sb-client' }
+)
     await supabase.from('activity_logs').insert({
       user_id: user.id, user_name: user.name, user_role: user.role,
       action: 'LOGIN', module: 'Auth',
@@ -155,9 +155,9 @@ router.post('/login', loginLimiter, [
       ip_address: getIP(req), status: 'success'
     })
     res.json({
-      success: true, token,
-      user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role }
-    })
+  success: true, token,
+  user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, position: user.position }
+})
   } catch (err) {
     console.error('LOGIN ERROR:', err)
     res.status(500).json({ error: err.message })
@@ -180,13 +180,13 @@ router.post('/admin/add', verifyToken, adminOnly, [
     .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
     .matches(/\d/).withMessage('Password must contain at least 1 number.'),
 ], validate, async (req, res) => {
-  const { name, username, email, password } = req.body
-  try {
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
-    const { data, error } = await supabase
-      .from('users')
-      .insert({ name, username, email, password: hashedPassword, role: 'admin' })
-      .select().single()
+  const { name, username, email, password, position } = req.body
+try {
+  const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
+  const { data, error } = await supabase
+    .from('users')
+    .insert({ name, username, email, password: hashedPassword, role: 'admin', position: position || 'secretary' })
+    .select().single()
     if (error) {
       if (error.code === '23505')
         return res.status(400).json({ error: 'Username or email already exists.' })

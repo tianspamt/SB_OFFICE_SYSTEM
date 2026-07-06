@@ -121,17 +121,19 @@ export default function AdminDashboard() {
 
   // ── data ──
   const [newUser, setNewUser] = useState({
-    name: "",
-    username: "",
-    email: "",
-    password: "",
-  });
+  name: "",
+  username: "",
+  email: "",
+  password: "",
+  position: "councilor",
+});
   const [newAdmin, setNewAdmin] = useState({
-    name: "",
-    username: "",
-    email: "",
-    password: "",
-  });
+  name: "",
+  username: "",
+  email: "",
+  password: "",
+  position: "secretary",
+});
 
   // ordinances
   const [ordinances, setOrdinances] = useState([]);
@@ -330,13 +332,13 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(`${API}/api/users`);
       if (res.status === 401 || res.status === 403) {
-  if (admin?.role === "admin") {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    window.location.replace("/");
-  }
-  return;
-}
+        if (admin?.role === "admin") {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          window.location.replace("/");
+        }
+        return;
+      }
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
     } catch {
@@ -499,10 +501,10 @@ export default function AdminDashboard() {
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/api/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newUser),
-      });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ ...newUser, position: newUser.position || "councilor" }),
+});
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("User added!");
@@ -533,16 +535,10 @@ export default function AdminDashboard() {
 
   // ─── Ordinances ──────────────────────────────────────────────────────────────
   const handleUploadOrdinance = async () => {
-    if (
-      !ordinanceNumber ||
-      !ordinanceTitle ||
-      !ordinanceYear ||
-      !ordinanceFile ||
-      !uploadType
-    ) {
-      showModalMsg("Please fill all fields and choose upload type!", "error");
-      return;
-    }
+    if (!ordinanceNumber || !ordinanceTitle || !ordinanceYear || !ordinanceFile) {
+  showModalMsg("Please fill all fields and choose a file!", "error");
+  return;
+}
     setSubmitting(true);
     const fd = new FormData();
     fd.append("ordinance_number", ordinanceNumber);
@@ -550,13 +546,8 @@ export default function AdminDashboard() {
     fd.append("year", ordinanceYear);
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
-    fd.append("uploadType", uploadType);
     try {
-      const ep =
-        uploadType === "image-to-text"
-          ? `${API}/api/ordinances/upload-image-text`
-          : `${API}/api/ordinances/upload`;
-      const res = await authFetch(ep, { method: "POST", body: fd });
+  const res = await authFetch(`${API}/api/ordinances/upload`, { method: "POST", body: fd });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("Ordinance uploaded!");
@@ -1233,7 +1224,23 @@ export default function AdminDashboard() {
     }
   };
   const isAdmin = admin?.role === "admin";
-  const ADMIN_ONLY_TABS = ["users", "admins", "logs"];
+  const position = admin?.position;
+  const isSecretary = position === "secretary";
+  const isClerk = position === "clerk";
+  const isViceMayor = position === "vice_mayor";
+  const isCouncilor = position === "councilor";
+
+  const canManageUsers = isSecretary || isClerk;
+  const canViewLogs = isSecretary;
+  const canPublishLegislative = isSecretary || isClerk || isViceMayor;
+  const canEditLegislative = isSecretary || isClerk;
+  const canManageOfficials = isSecretary || isClerk;
+
+  const ADMIN_ONLY_TABS = canManageUsers
+    ? canViewLogs
+      ? ["users", "admins", "logs"]
+      : ["users", "admins"]
+    : ["users", "admins", "logs"];
   const pageLoading =
     fetchingUsers ||
     fetchingOrdinances ||
@@ -1434,73 +1441,71 @@ export default function AdminDashboard() {
             </span>
             <span className={styles.navLabel}>Content Management</span>
           </button>
-          {isAdmin && (
-            <>
-              <div className={styles.navDivider} />
+          {canManageUsers && (
+  <>
+    <div className={styles.navDivider} />
 
-              {/* User Management dropdown */}
-              <div className={styles.navSection}>
-                <button
-                  className={styles.navSectionHeader}
-                  onClick={() =>
-                    !sidebarCollapsed && setUserMgmtOpen((v) => !v)
-                  }
-                >
-                  <span className={styles.navSectionIcon}>
-                    <Users size={14} strokeWidth={1.8} />
-                  </span>
-                  <span className={styles.navSectionLabel}>
-                    User Management
-                  </span>
-                  {!sidebarCollapsed && (
-                    <span className={styles.navSectionChevron}>
-                      {userMgmtOpen ? (
-                        <ChevronDown size={13} />
-                      ) : (
-                        <ChevronRight size={13} />
-                      )}
-                    </span>
-                  )}
-                </button>
-                <div
-                  className={`${styles.navSectionItems} ${
-                    userMgmtOpen && !sidebarCollapsed
-                      ? styles.navSectionItemsOpen
-                      : ""
-                  }`}
-                >
-                  {[
-                    {
-                      key: "users",
-                      icon: <Users size={17} strokeWidth={1.5} />,
-                      label: "Manage Users",
-                    },
-                    {
-                      key: "admins",
-                      icon: <ShieldCheck size={17} strokeWidth={1.5} />,
-                      label: "Manage Admins",
-                    },
-                    {
-                      key: "logs",
-                      icon: <Activity size={17} strokeWidth={1.5} />,
-                      label: "Activity Logs",
-                    },
-                  ].map((t) => (
-                    <button
-                      key={t.key}
-                      className={`${styles.navBtn} ${styles.navBtnIndented} ${
-                        activeTab === t.key ? styles.navBtnActive : ""
-                      }`}
-                      onClick={() => handleTabChange(t.key)}
-                    >
-                      <span className={styles.navIcon}>{t.icon}</span>
-                      <span className={styles.navLabel}>{t.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+    {/* User Management dropdown */}
+    <div className={styles.navSection}>
+      <button
+        className={styles.navSectionHeader}
+        onClick={() =>
+          !sidebarCollapsed && setUserMgmtOpen((v) => !v)
+        }
+      >
+        <span className={styles.navSectionIcon}>
+          <Users size={14} strokeWidth={1.8} />
+        </span>
+        <span className={styles.navSectionLabel}>User Management</span>
+        {!sidebarCollapsed && (
+          <span className={styles.navSectionChevron}>
+            {userMgmtOpen ? (
+              <ChevronDown size={13} />
+            ) : (
+              <ChevronRight size={13} />
+            )}
+          </span>
+        )}
+      </button>
+      <div
+        className={`${styles.navSectionItems} ${
+          userMgmtOpen && !sidebarCollapsed
+            ? styles.navSectionItemsOpen
+            : ""
+        }`}
+      >
+        {[
+          {
+            key: "users",
+            icon: <Users size={17} strokeWidth={1.5} />,
+            label: "Manage Users",
+          },
+          {
+            key: "admins",
+            icon: <ShieldCheck size={17} strokeWidth={1.5} />,
+            label: "Manage Admins",
+          },
+          ...(canViewLogs ? [{
+            key: "logs",
+            icon: <Activity size={17} strokeWidth={1.5} />,
+            label: "Activity Logs",
+          }] : []),
+        ].map((t) => (
+          <button
+            key={t.key}
+            className={`${styles.navBtn} ${styles.navBtnIndented} ${
+              activeTab === t.key ? styles.navBtnActive : ""
+            }`}
+            onClick={() => handleTabChange(t.key)}
+          >
+            <span className={styles.navIcon}>{t.icon}</span>
+            <span className={styles.navLabel}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  </>
+)}
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.adminInfo}>
@@ -1508,8 +1513,12 @@ export default function AdminDashboard() {
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
               <div className={styles.adminRole}>
-                {isAdmin ? "Administrator" : "User"}
-              </div>
+  {position === "secretary" ? "Secretary" :
+   position === "clerk" ? "Clerk" :
+   position === "vice_mayor" ? "Vice Mayor" :
+   position === "councilor" ? "Councilor" : 
+   isAdmin ? "Administrator" : "User"}
+</div>
             </div>
           </div>
           <button className={styles.logoutBtn} onClick={handleLogout}>
@@ -1653,19 +1662,23 @@ export default function AdminDashboard() {
         )}
         {activeTab === "ordinances" && !fetchingOrdinances && (
           <OrdinancesPage
-            ordinances={ordinances}
-            setDeleteTarget={setDeleteTarget}
-            onEdit={handleOpenEditOrdinance}
-            readOnly={!isAdmin}
-          />
+  ordinances={ordinances}
+  setDeleteTarget={setDeleteTarget}
+  onEdit={handleOpenEditOrdinance}
+  readOnly={!canEditLegislative}
+  canPublish={canPublishLegislative}
+  isViceMayor={isViceMayor}
+/>
         )}
         {activeTab === "resolutions" && !fetchingResolutions && (
           <ResolutionsPage
-            resolutions={resolutions}
-            setDeleteTarget={setDeleteTarget}
-            onEdit={handleOpenEditResolution}
-            readOnly={!isAdmin}
-          />
+  resolutions={resolutions}
+  setDeleteTarget={setDeleteTarget}
+  onEdit={handleOpenEditResolution}
+  readOnly={!canEditLegislative}
+  canPublish={canPublishLegislative}
+  isViceMayor={isViceMayor}
+/>
         )}
 
         {/* ── OFFICIALS PAGE — group-by-council wiring ── */}
@@ -1693,48 +1706,50 @@ export default function AdminDashboard() {
               setModalMessage("");
               setShowOfficialModal(true);
             }}
-            readOnly={!isAdmin}
+            readOnly={!canManageOfficials}
           />
         )}
 
         {activeTab === "sessions" && !fetchingMinutes && (
           <SessionsPage
-            sessionMinutes={sessionMinutes}
-            setDeleteTarget={setDeleteTarget}
-            onEdit={handleOpenEditSession}
-            readOnly={!isAdmin}
-          />
+  sessionMinutes={sessionMinutes}
+  setDeleteTarget={setDeleteTarget}
+  onEdit={handleOpenEditSession}
+  readOnly={!canEditLegislative}
+  canPublish={canPublishLegislative}
+  isViceMayor={isViceMayor}
+/>
         )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
           <AnnouncementsPage
-            announcements={announcements}
-            setDeleteTarget={setDeleteTarget}
-            onEdit={handleOpenEditAnnouncement}
-            readOnly={!isAdmin}
+  announcements={announcements}
+  setDeleteTarget={setDeleteTarget}
+  onEdit={handleOpenEditAnnouncement}
+  readOnly={false}
+/>
+        )}
+        {activeTab === "calendar" && (
+          <CalendarPage
+            localEvents={localEvents}
+            phHolidays={phHolidays}
+            fetchingHolidays={fetchingHolidays}
+            showHolidays={showHolidays}
+            setShowHolidays={setShowHolidays}
+            onAddEvent={(dateStr) => {
+              setLocalEventForm({
+                ...emptyEventForm,
+                start_date: dateStr,
+                end_date: dateStr,
+              });
+              setModalMessage("");
+              setShowLocalEventModal(true);
+            }}
+            onEditEvent={handleOpenEditEvent}
+            onDeleteEvent={handleDeleteEvent}
+            isAdmin={isAdmin}
+            currentUser={admin}
           />
         )}
-       {activeTab === "calendar" && (
-  <CalendarPage
-    localEvents={localEvents}
-    phHolidays={phHolidays}
-    fetchingHolidays={fetchingHolidays}
-    showHolidays={showHolidays}
-    setShowHolidays={setShowHolidays}
-    onAddEvent={(dateStr) => {
-      setLocalEventForm({
-        ...emptyEventForm,
-        start_date: dateStr,
-        end_date: dateStr,
-      });
-      setModalMessage("");
-      setShowLocalEventModal(true);
-    }}
-    onEditEvent={handleOpenEditEvent}
-    onDeleteEvent={handleDeleteEvent}
-    isAdmin={isAdmin}
-    currentUser={admin}
-  />
-)}
         {activeTab === "logs" && (
           <LogsPage
             logs={logs}
@@ -1788,33 +1803,42 @@ export default function AdminDashboard() {
               }
             />
             <input
-              className={styles.input}
-              type="password"
-              placeholder="Password"
-              value={newAdmin.password}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, password: e.target.value })
-              }
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAddAdminModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleAddAdmin}
-                disabled={submitting}
-              >
-                {submitting ? "Adding..." : "Add Admin"}
-              </button>
-            </div>
+  className={styles.input}
+  type="password"
+  placeholder="Password"
+  value={newAdmin.password}
+  onChange={(e) =>
+    setNewAdmin({ ...newAdmin, password: e.target.value })
+  }
+/>
+<label className={styles.fieldLabel}>Position</label>
+<select
+  className={styles.input}
+  value={newAdmin.position}
+  onChange={(e) => setNewAdmin({ ...newAdmin, position: e.target.value })}
+>
+  <option value="secretary">Secretary</option>
+  <option value="clerk">Clerk</option>
+</select>
+<MAlert />
+<div className={styles.modalBtns}>
+  <button
+    className={styles.cancelBtn}
+    onClick={() => {
+      setShowAddAdminModal(false);
+      setModalMessage("");
+    }}
+  >
+    Cancel
+  </button>
+  <button
+    className={styles.confirmBtn}
+    onClick={handleAddAdmin}
+    disabled={submitting}
+  >
+    {submitting ? "Adding..." : "Add Admin"}
+  </button>
+</div>
           </div>
         </div>
       )}
@@ -1848,33 +1872,42 @@ export default function AdminDashboard() {
               }
             />
             <input
-              className={styles.input}
-              type="password"
-              placeholder="Password"
-              value={newUser.password}
-              onChange={(e) =>
-                setNewUser({ ...newUser, password: e.target.value })
-              }
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAddUserModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleAddUser}
-                disabled={submitting}
-              >
-                {submitting ? "Adding..." : "Add User"}
-              </button>
-            </div>
+  className={styles.input}
+  type="password"
+  placeholder="Password"
+  value={newUser.password}
+  onChange={(e) =>
+    setNewUser({ ...newUser, password: e.target.value })
+  }
+/>
+<label className={styles.fieldLabel}>Position</label>
+<select
+  className={styles.input}
+  value={newUser.position}
+  onChange={(e) => setNewUser({ ...newUser, position: e.target.value })}
+>
+  <option value="councilor">Councilor</option>
+  <option value="vice_mayor">Vice Mayor</option>
+</select>
+<MAlert />
+<div className={styles.modalBtns}>
+  <button
+    className={styles.cancelBtn}
+    onClick={() => {
+      setShowAddUserModal(false);
+      setModalMessage("");
+    }}
+  >
+    Cancel
+  </button>
+  <button
+    className={styles.confirmBtn}
+    onClick={handleAddUser}
+    disabled={submitting}
+  >
+    {submitting ? "Adding..." : "Add User"}
+  </button>
+</div>
           </div>
         </div>
       )}
@@ -2519,70 +2552,30 @@ export default function AdminDashboard() {
               value={ordinanceYear}
               onChange={(e) => setOrdinanceYear(e.target.value)}
             />
-            <p className={styles.officialsSelectLabel}>Choose upload type:</p>
-            <div className={styles.uploadTypeRow}>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  uploadType === "pdf" ? styles.uploadTypeBtnActive : ""
-                }`}
-                onClick={() => {
-                  setUploadType("pdf");
-                  setOrdinanceFile(null);
-                }}
-              >
-                <FileText size={16} strokeWidth={1.5} /> Upload as PDF
-                <span className={styles.uploadTypeDesc}>
-                  Store and view the PDF file
-                </span>
-              </button>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  uploadType === "image-to-text"
-                    ? styles.uploadTypeBtnActive
-                    : ""
-                }`}
-                onClick={() => {
-                  setUploadType("image-to-text");
-                  setOrdinanceFile(null);
-                }}
-              >
-                <Image size={16} strokeWidth={1.5} /> Image to Text (OCR)
-                <span className={styles.uploadTypeDesc}>
-                  Upload image and extract text
-                </span>
-              </button>
-            </div>
-            {uploadType && (
-              <div className={styles.fileUploadBox}>
-                <input
-                  type="file"
-                  accept={uploadType === "pdf" ? ".pdf" : "image/*"}
-                  id="fileInput"
-                  style={{ display: "none" }}
-                  onChange={(e) => setOrdinanceFile(e.target.files[0])}
-                />
-                <label htmlFor="fileInput" className={styles.fileLabel}>
-                  {ordinanceFile ? (
-                    <>
-                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                      {ordinanceFile.name}
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} strokeWidth={1.5} />{" "}
-                      {uploadType === "pdf"
-                        ? "Click to choose PDF file"
-                        : "Click to choose Image (JPG, PNG)"}
-                    </>
-                  )}
-                </label>
-                <p className={styles.fileHint}>
-                  {uploadType === "pdf"
-                    ? "Accepted: PDF only"
-                    : "Accepted: JPG, PNG — text will be extracted automatically"}
-                </p>
-              </div>
-            )}
+            <div className={styles.fileUploadBox}>
+  <input
+    type="file"
+    accept=".pdf,.doc,.docx,image/*"
+    id="fileInput"
+    style={{ display: "none" }}
+    onChange={(e) => setOrdinanceFile(e.target.files[0])}
+  />
+  <label htmlFor="fileInput" className={styles.fileLabel}>
+    {ordinanceFile ? (
+      <>
+        <CheckSquare size={14} strokeWidth={1.5} /> {ordinanceFile.name}
+      </>
+    ) : (
+      <>
+        <Upload size={14} strokeWidth={1.5} /> Click to choose file
+      </>
+    )}
+  </label>
+  <p className={styles.fileHint}>
+    Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+  </p>
+</div>
+            
             <div className={styles.officialsSelectSection}>
               <p className={styles.officialsSelectLabel}>
                 Tag Council Members who passed this ordinance:
@@ -2614,13 +2607,9 @@ export default function AdminDashboard() {
               <button
                 className={styles.confirmBtn}
                 onClick={handleUploadOrdinance}
-                disabled={submitting || !uploadType}
+                disabled={submitting}
               >
-                {submitting
-                  ? uploadType === "image-to-text"
-                    ? "Extracting text..."
-                    : "Uploading..."
-                  : "Upload"}
+                {submitting ? "Uploading..." : "Upload"}
               </button>
             </div>
           </div>

@@ -12,11 +12,10 @@ import styles from "./LegislativeModule.module.css";
 
 export function StatusBadge({ status }) {
   const map = {
-    pending: { label: "● Pending Review", cls: styles.statusPending },
-    approved: { label: "✓ Approved", cls: styles.statusApproved },
-    rejected: { label: "✕ Rejected", cls: styles.statusRejected },
-    published: { label: "● Published", cls: styles.statusPublished },
-  };
+  pending: { label: "● Pending Review", cls: styles.statusPending },
+  ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
+  published: { label: "● Published", cls: styles.statusPublished },
+};
   const s = map[status] || map.pending;
   return <span className={`${styles.statusBadge} ${s.cls}`}>{s.label}</span>;
 }
@@ -190,9 +189,9 @@ export function DropdownSelect({ options, value, onChange, label }) {
 export function ActionButtons({
   status,
   onApprove,
-  onReject,
   onViewDraft,
   onComment,
+  isViceMayor = false,
 }) {
   return (
     <div className={styles.recordActions}>
@@ -202,25 +201,32 @@ export function ActionButtons({
       >
         View Draft
       </button>
-      {status !== "approved" && status !== "rejected" && (
-        <>
+
+      {isViceMayor ? (
+        status === "pending" && (
           <button
             className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
             onClick={onApprove}
           >
-            ✓ Approve
+            Mark Ready
           </button>
+        )
+      ) : (
+        status === "ready_to_publish" && (
           <button
-            className={`${styles.btn} ${styles.btnSm} ${styles.btnDanger}`}
-            onClick={onReject}
+            className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
+            onClick={onApprove}
           >
-            ✕ Reject
+            ✅ Publish
           </button>
-        </>
+        )
       )}
-      <button className={`${styles.btn} ${styles.btnSm}`} onClick={onComment}>
-        💬 Comment
-      </button>
+
+      {!isViceMayor && (
+        <button className={`${styles.btn} ${styles.btnSm}`} onClick={onComment}>
+          💬 Comment
+        </button>
+      )}
     </div>
   );
 }
@@ -238,6 +244,7 @@ export function PendingRecordCard({
   onReject,
   onViewDraft,
   onComment,
+  isViceMayor = false,
 }) {
   const isApproved = status === "approved";
   return (
@@ -261,12 +268,13 @@ export function PendingRecordCard({
         </div>
       </div>
       <ActionButtons
-        status={status}
-        onApprove={onApprove}
-        onReject={onReject}
-        onViewDraft={onViewDraft}
-        onComment={onComment}
-      />
+  status={status}
+  onApprove={onApprove}
+  onReject={onReject}
+  onViewDraft={onViewDraft}
+  onComment={onComment}
+  isViceMayor={isViceMayor}
+/>
     </div>
   );
 }
