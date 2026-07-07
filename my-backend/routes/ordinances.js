@@ -13,7 +13,34 @@ const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { safeParseJSON } = require('../helpers/utils')
 
-// GET /api/ordinances
+// ─── Helper: extract text based on file type ──────────────────────────────────
+// PDFs and Word files are stored only — no extraction at upload time.
+// Only images run through OCR here. (PDF text can still be extracted
+// on-the-fly by the /:id/print route, cached after the first view.)
+async function extractText(file) {
+  const mime = file.mimetype
+  const isImage = mime.startsWith('image/')
+
+  if (isImage) {
+    let tempPath = null
+    try {
+      tempPath = path.join(os.tmpdir(), `${Date.now()}-${file.originalname}`)
+      fs.writeFileSync(tempPath, file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      fs.unlinkSync(tempPath)
+      return text.trim() || null
+    } catch (err) {
+      console.error('OCR extract error:', err.message)
+      if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+      return null
+    }
+  }
+
+  // PDF and Word files — no extraction, just store
+  return null
+}
+
+// ─── GET /api/ordinances ──────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
     const { year, search } = req.query
@@ -22,7 +49,11 @@ router.get('/', async (req, res) => {
       .select(`*, ordinance_officials ( sb_council_members ( id, full_name, position, photo ) )`)
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
-    if (search) query = query.ilike('title', `%${search}%`)
+if (search) query = query.ilike('title', `%${search}%`)
+if (req.query.status) {
+  const statuses = req.query.status.split(',')
+  query = query.in('status', statuses)
+}
     const { data, error } = await query
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(o => ({
@@ -36,66 +67,50 @@ router.get('/', async (req, res) => {
   }
 })
 
+// ─── GET /api/ordinances/:id/print ───────────────────────────────────────────
 router.get('/:id/print', async (req, res) => {
   try {
     const { data: o, error } = await supabase
       .from('ordinances').select('*').eq('id', req.params.id).single()
     if (error || !o) return res.status(404).send('Not found')
 
-    console.log('ORDINANCE DEBUG:', {
-      id: o.id,
-      filetype: o.filetype,
-      filepath: o.filepath,
-      has_extracted_text: !!o.extracted_text,
-      extracted_text_preview: o.extracted_text?.slice(0, 100)
-    })
-
     let extractedText = o.extracted_text || ''
 
+    // If PDF with no cached text, extract on the fly
     if (o.filetype === 'application/pdf' && !extractedText) {
       try {
         const fileUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/assets/${o.filepath}`
-        console.log('Fetching PDF from:', fileUrl)
         const response = await fetch(fileUrl)
-        console.log('Fetch status:', response.status)
         if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`)
-        const arrayBuffer = await response.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
-        console.log('Buffer size:', buffer.length)
-
+        const buffer = Buffer.from(await response.arrayBuffer())
         extractedText = await new Promise((resolve) => {
           const pdfParser = new PDFParser()
           pdfParser.on('pdfParser_dataReady', (data) => {
-            console.log('PDF pages found:', data.Pages?.length)
             const text = data.Pages
               ?.flatMap(p => p.Texts)
               ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
               ?.join(' ')
               ?.trim() || ''
-            console.log('Extracted text length:', text.length)
-            console.log('Extracted text preview:', text.slice(0, 200))
             resolve(text)
           })
-          pdfParser.on('pdfParser_dataError', (err) => {
-            console.log('PDFParser error:', err)
-            resolve('')
-          })
+          pdfParser.on('pdfParser_dataError', () => resolve(''))
           pdfParser.parseBuffer(buffer)
         })
-
         if (extractedText) {
           await supabase.from('ordinances')
             .update({ extracted_text: extractedText })
             .eq('id', o.id)
-          console.log('Cached extracted text to DB')
-        } else {
-          console.log('No text extracted from PDF')
         }
       } catch (pdfErr) {
-        console.error('PDF block error:', pdfErr.message)
+        console.error('PDF print error:', pdfErr.message)
         extractedText = ''
       }
     }
+
+    // If Word file, show download link instead
+    const isWord = o.filetype === 'application/msword' ||
+      o.filetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    const fileUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/assets/${o.filepath}`
 
     res.send(`<!DOCTYPE html><html><head>
       <title>${o.ordinance_number || o.title}</title>
@@ -106,21 +121,25 @@ router.get('/:id/print', async (req, res) => {
         .meta { text-align:center; font-size:13px; color:#555; margin-bottom:32px; border-bottom:2px solid #000; padding-bottom:16px; }
         .content { font-size:14px; line-height:1.8; white-space:pre-wrap; }
         .print-btn { position:fixed; top:20px; right:20px; padding:10px 20px; background:#1a365d; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px; }
+        .download-btn { display:inline-block; margin:20px auto; padding:12px 24px; background:#009439; color:#fff; border-radius:8px; text-decoration:none; font-size:14px; }
         @media print { .print-btn { display:none; } }
       </style>
       </head><body>
       <button class="print-btn" onclick="window.print()">🖨 Print</button>
       ${o.ordinance_number ? `<h2>${o.ordinance_number}</h2>` : ''}
       <h1>${o.title}</h1>
-      <div class="meta">${o.year ? `Year: ${o.year} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}</div>
-      <div class="content">${extractedText || 'No extracted text available.'}</div>
+      <div class="meta">${o.year ? `Year: ${o.year} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+      ${isWord
+        ? `<div style="text-align:center"><p>This ordinance is stored as a Word document.</p><a href="${fileUrl}" class="download-btn" download>⬇ Download Word File</a></div>`
+        : `<div class="content">${extractedText || 'No extracted text available.'}</div>`
+      }
       </body></html>`)
   } catch (err) {
     res.status(500).send('Server error')
   }
 })
 
-// GET /api/ordinances/:id
+// ─── GET /api/ordinances/:id ──────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
     const { data: o, error } = await supabase
@@ -140,56 +159,18 @@ router.get('/:id', async (req, res) => {
   }
 })
 
-// POST /api/ordinances/upload
-// POST /api/ordinances/upload — auto-detects file type
+// ─── POST /api/ordinances/upload ─────────────────────────────────────────────
 router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
-  let tempPath = null
+
+  let fileName = null
   try {
-    const mime = req.file.mimetype
-    const isImage = mime.startsWith('image/')
-    const isPDF = mime === 'application/pdf'
-    const isWord = mime === 'application/msword' || 
-                   mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-
-    let extracted_text = null
-
-    // Extract text from image via OCR
-    if (isImage) {
-      tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
-      fs.writeFileSync(tempPath, req.file.buffer)
-      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-      fs.unlinkSync(tempPath)
-      tempPath = null
-      extracted_text = text.trim() || null
-    }
-
-    // Extract text from PDF
-    if (isPDF) {
-      try {
-        extracted_text = await new Promise((resolve) => {
-          const pdfParser = new PDFParser()
-          pdfParser.on('pdfParser_dataReady', (data) => {
-            const text = data.Pages
-              ?.flatMap(p => p.Texts)
-              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-              ?.join(' ')
-              ?.trim() || ''
-            resolve(text || null)
-          })
-          pdfParser.on('pdfParser_dataError', () => resolve(null))
-          pdfParser.parseBuffer(req.file.buffer)
-        })
-      } catch (pdfErr) {
-        console.error('PDF parse error on upload:', pdfErr.message)
-      }
-    }
-
-    // Upload file to storage
-    const { fileName } = await uploadToStorage(req.file, 'ordinances')
+    const extracted_text = await extractText(req.file)
+    const uploadResult = await uploadToStorage(req.file, 'ordinances')
+    fileName = uploadResult.fileName
 
     const { data: ordinance, error } = await supabase
       .from('ordinances')
@@ -198,9 +179,10 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
         title,
         year: year ? parseInt(year) : null,
         filename: req.file.originalname,
-        filetype: mime,
+        filetype: req.file.mimetype,
         filepath: fileName,
-        extracted_text
+        extracted_text,
+        status: 'pending'
       })
       .select().single()
 
@@ -217,137 +199,85 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
     }
 
     await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance: ${title}`)
-    res.json({ 
-      success: true, 
-      id: ordinance.id, 
-      data: ordinance,
-      ...(isImage && extracted_text ? { text: extracted_text } : {})
-    })
+    res.json({ success: true, id: ordinance.id, data: ordinance })
   } catch (err) {
-    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+    console.error('Ordinance upload error:', err)
+    if (fileName) await deleteFromStorage(fileName)
     res.status(500).json({ error: err.message })
   }
 })
 
-// POST /api/ordinances/upload-image-text
-router.post('/upload-image-text', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
-  const { ordinance_number, title, year, officials } = req.body
-  if (!title) return res.status(400).json({ error: 'Title is required.' })
-  const officialIds = safeParseJSON(officials, [])
-  let tempPath = null
-  try {
-    tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
-    fs.writeFileSync(tempPath, req.file.buffer)
-    const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-    fs.unlinkSync(tempPath)
-    tempPath = null
-    const { fileName } = await uploadToStorage(req.file, 'ordinances')
-    const { data: ordinance, error } = await supabase
-      .from('ordinances')
-      .insert({
-        ordinance_number: ordinance_number || null,
-        title,
-        year: year ? parseInt(year) : null,
-        filename: req.file.originalname,
-        filetype: req.file.mimetype,
-        filepath: fileName,
-        extracted_text: text.trim()
-      })
-      .select().single()
-    if (error) {
-      await deleteFromStorage(fileName)
-      return res.status(500).json({ error: error.message })
-    }
-    if (officialIds.length > 0) {
-      await supabase.from('ordinance_officials').insert(
-        officialIds.map(oid => ({ ordinance_id: ordinance.id, official_id: oid }))
-      )
-    }
-    await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance (OCR): ${title}`)
-    res.json({ success: true, id: ordinance.id, text: text.trim(), data: ordinance })
-  } catch (err) {
-    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// PUT /api/ordinances/:id
+// ─── PUT /api/ordinances/:id ──────────────────────────────────────────────────
 router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
+
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
-    const updateData = { ordinance_number: ordinance_number || null, title, year: year ? parseInt(year) : null }
+
+    const updateData = {
+      ordinance_number: ordinance_number || null,
+      title,
+      year: year ? parseInt(year) : null
+    }
+
     if (req.file) {
-      if (existing.filepath) await deleteFromStorage(existing.filepath)
       const { fileName } = await uploadToStorage(req.file, 'ordinances')
       updateData.filename = req.file.originalname
       updateData.filetype = req.file.mimetype
       updateData.filepath = fileName
+      updateData.extracted_text = await extractText(req.file)
 
-      // Re-extract text if a new PDF file was uploaded
-     const mime = req.file.mimetype
-const isImage = mime.startsWith('image/')
-const isPDF = mime === 'application/pdf'
-
-let extracted_text = null
-
-if (isPDF) {
-  try {
-    extracted_text = await new Promise((resolve) => {
-      const pdfParser = new PDFParser()
-      pdfParser.on('pdfParser_dataReady', (data) => {
-        const text = data.Pages
-          ?.flatMap(p => p.Texts)
-          ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-          ?.join(' ')
-          ?.trim() || ''
-        resolve(text || null)
-      })
-      pdfParser.on('pdfParser_dataError', () => resolve(null))
-      pdfParser.parseBuffer(req.file.buffer)
-    })
-  } catch (pdfErr) {
-    console.error('PDF parse error on update:', pdfErr.message)
-  }
-} else if (isImage) {
-  let tempPath = null
-  try {
-    tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
-    fs.writeFileSync(tempPath, req.file.buffer)
-    const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-    fs.unlinkSync(tempPath)
-    extracted_text = text.trim() || null
-  } catch (ocrErr) {
-    console.error('OCR error on update:', ocrErr.message)
-    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
-  }
-}
-
-updateData.extracted_text = extracted_text
+      // Only delete the old stored file after the new one is confirmed uploaded
+      if (existing.filepath) await deleteFromStorage(existing.filepath)
     }
+
     const { data: updated, error } = await supabase
       .from('ordinances').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
-    await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
+
     const officialIds = safeParseJSON(officials, [])
+    await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
     if (officialIds.length > 0) {
-      await supabase.from('ordinance_officials').insert(
+      const { error: relErr } = await supabase.from('ordinance_officials').insert(
         officialIds.map(oid => ({ ordinance_id: id, official_id: oid }))
       )
+      if (relErr) console.error('ordinance_officials insert error:', relErr.message)
     }
+
     await logActivity(req, 'UPDATE', 'Ordinances', `Updated ordinance: ${title}`)
     res.json({ success: true, data: updated })
+  } catch (err) {
+    console.error('Ordinance update error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+// ─── PUT /api/ordinances/:id/status ──────────────────────────────────────────
+router.put('/:id/status', verifyToken, async (req, res) => {
+  const { id } = req.params
+  const { status } = req.body
+  const validStatuses = ['pending', 'ready_to_publish', 'published']
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status.' })
+  }
+  try {
+    const { data, error } = await supabase
+      .from('ordinances')
+      .update({ status })
+      .eq('id', id)
+      .select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'UPDATE', 'Ordinances', `Status updated to ${status} for ordinance id: ${id}`)
+    res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-// DELETE /api/ordinances/:id
+// ─── DELETE /api/ordinances/:id ───────────────────────────────────────────────
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing } = await supabase

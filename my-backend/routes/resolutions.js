@@ -12,6 +12,58 @@ const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { safeParseJSON } = require('../helpers/utils')
 
+// ─── Helper: extract text based on file type ──────────────────────────────────
+// PDFs and Word files are stored only — no extraction at upload time.
+// Only images run through OCR here.
+async function extractText(file) {
+  const mime = file.mimetype
+  const isImage = mime.startsWith('image/')
+
+  if (isImage) {
+    let tempPath = null
+    try {
+      tempPath = path.join(os.tmpdir(), `${Date.now()}-${file.originalname}`)
+      fs.writeFileSync(tempPath, file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      fs.unlinkSync(tempPath)
+      return text.trim() || null
+    } catch (err) {
+      console.error('OCR extract error:', err.message)
+      if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+      return null
+    }
+  }
+
+  // PDF and Word files — no extraction, just store
+  return null
+}
+
+// ─── Helper: extract text based on file type ──────────────────────────────────
+// PDFs and Word files are stored only — no extraction at upload time.
+// Only images run through OCR here.
+async function extractText(file) {
+  const mime = file.mimetype
+  const isImage = mime.startsWith('image/')
+
+  if (isImage) {
+    let tempPath = null
+    try {
+      tempPath = path.join(os.tmpdir(), `${Date.now()}-${file.originalname}`)
+      fs.writeFileSync(tempPath, file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      fs.unlinkSync(tempPath)
+      return text.trim() || null
+    } catch (err) {
+      console.error('OCR extract error:', err.message)
+      if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+      return null
+    }
+  }
+
+  // PDF and Word files — no extraction, just store
+  return null
+}
+
 // GET /api/resolutions
 router.get('/', async (req, res) => {
   try {
@@ -22,6 +74,10 @@ router.get('/', async (req, res) => {
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
     if (search) query = query.ilike('title', `%${search}%`)
+    if (req.query.status) {
+      const statuses = req.query.status.split(',')
+      query = query.in('status', statuses)
+    }
     const { data, error } = await query
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(r => ({
@@ -56,54 +112,19 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/resolutions/upload
+// POST /api/resolutions/upload
 router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { resolution_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const officialIds = safeParseJSON(officials, [])
-  try {
-    const { fileName } = await uploadToStorage(req.file, 'resolutions')
-    const { data: resolution, error } = await supabase
-      .from('resolutions')
-      .insert({
-        resolution_number: resolution_number || null,
-        title,
-        year: year ? parseInt(year) : null,
-        filename: req.file.originalname,
-        filetype: req.file.mimetype,
-        filepath: fileName
-      })
-      .select().single()
-    if (error) {
-      await deleteFromStorage(fileName)
-      return res.status(500).json({ error: error.message })
-    }
-    if (officialIds.length > 0) {
-      await supabase.from('resolution_officials').insert(
-        officialIds.map(oid => ({ resolution_id: resolution.id, official_id: oid }))
-      )
-    }
-    await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution: ${title}`)
-    res.json({ success: true, id: resolution.id, data: resolution })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
 
-// POST /api/resolutions/upload-image-text
-router.post('/upload-image-text', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'A file is required.' })
-  const { resolution_number, title, year, officials } = req.body
-  if (!title) return res.status(400).json({ error: 'Title is required.' })
-  const officialIds = safeParseJSON(officials, [])
-  let tempPath = null
+  let fileName = null
   try {
-    tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
-    fs.writeFileSync(tempPath, req.file.buffer)
-    const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-    fs.unlinkSync(tempPath)
-    tempPath = null
-    const { fileName } = await uploadToStorage(req.file, 'resolutions')
+    const extracted_text = await extractText(req.file)
+    const uploadResult = await uploadToStorage(req.file, 'resolutions')
+    fileName = uploadResult.fileName
+
     const { data: resolution, error } = await supabase
       .from('resolutions')
       .insert({
@@ -113,22 +134,28 @@ router.post('/upload-image-text', verifyToken, adminOnly, upload.single('file'),
         filename: req.file.originalname,
         filetype: req.file.mimetype,
         filepath: fileName,
-        extracted_text: text.trim()
+        extracted_text,
+        status: 'pending'
       })
       .select().single()
+
     if (error) {
       await deleteFromStorage(fileName)
       return res.status(500).json({ error: error.message })
     }
+
     if (officialIds.length > 0) {
-      await supabase.from('resolution_officials').insert(
+      const { error: relErr } = await supabase.from('resolution_officials').insert(
         officialIds.map(oid => ({ resolution_id: resolution.id, official_id: oid }))
       )
+      if (relErr) console.error('resolution_officials insert error:', relErr.message)
     }
-    await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution (OCR): ${title}`)
-    res.json({ success: true, id: resolution.id, text: text.trim(), data: resolution })
+
+    await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution: ${title}`)
+    res.json({ success: true, id: resolution.id, data: resolution })
   } catch (err) {
-    if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+    console.error('Resolution upload error:', err)
+    if (fileName) await deleteFromStorage(fileName)
     res.status(500).json({ error: err.message })
   }
 })
@@ -232,6 +259,28 @@ router.get('/:id/print', async (req, res) => {
     </body></html>`)
   } catch (err) {
     res.status(500).send('Server error')
+  }
+})
+
+// PUT /api/resolutions/:id/status
+router.put('/:id/status', verifyToken, async (req, res) => {
+  const { id } = req.params
+  const { status } = req.body
+  const validStatuses = ['pending', 'ready_to_publish', 'published']
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status.' })
+  }
+  try {
+    const { data, error } = await supabase
+      .from('resolutions')
+      .update({ status })
+      .eq('id', id)
+      .select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'UPDATE', 'Resolutions', `Status updated to ${status} for resolution id: ${id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 

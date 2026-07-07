@@ -4,7 +4,7 @@
  * Preserves existing props: resolutions, setDeleteTarget, onEdit
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Eye,
   Pencil,
@@ -60,14 +60,18 @@ export default function ResolutionsPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pendingStatuses, setPendingStatuses] = useState({});
+  const [pendingResolutions, setPendingResolutions] = useState([]);
+  const [fetchingPending, setFetchingPending] = useState(false);
 const [comments, setComments] = useState({});
 const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
+  // ── Split resolutions by actual status from the backend ─────────────────────
+  const publishedResolutions = resolutions.filter((r) => r.status === "published");
+
   // ── Derive available years from published resolutions ──────────────────────
   const availableYears = [
-    ...new Set(resolutions.map((r) => r.year?.toString()).filter(Boolean)),
+    ...new Set(publishedResolutions.map((r) => r.year?.toString()).filter(Boolean)),
   ].sort((a, b) => b - a);
 
   const filterPublished = (list) =>
@@ -110,14 +114,41 @@ const [panelItem, setPanelItem] = useState(null);
     setYearFilter("all");
   };
 
-  const handleApprove = (id) => {
-  const current = pendingStatuses[id];
-  if (isViceMayor && current === "pending") {
-    setPendingStatuses((prev) => ({ ...prev, [id]: "ready_to_publish" }));
-  } else if (!isViceMayor && current === "ready_to_publish") {
-    setPendingStatuses((prev) => ({ ...prev, [id]: "published" }));
-  }
-};
+  useEffect(() => {
+    if (activeTab === "pending" && canPublish) {
+      fetchPendingResolutions();
+    }
+  }, [activeTab]);
+
+  const fetchPendingResolutions = async () => {
+    setFetchingPending(true);
+    try {
+      const res = await fetch(`${API}/api/resolutions?status=pending,ready_to_publish`);
+      const data = await res.json();
+      setPendingResolutions(Array.isArray(data) ? data : []);
+    } catch {
+      setPendingResolutions([]);
+    } finally {
+      setFetchingPending(false);
+    }
+  };
+
+  const handleApprove = async (id) => {
+    const newStatus = isViceMayor ? "ready_to_publish" : "published";
+    try {
+      const res = await fetch(`${API}/api/resolutions/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchPendingResolutions();
+      }
+    } catch {
+      console.error("Failed to update status");
+    }
+  };
 
   const handleAddComment = (itemId, text) => {
     const now = new Date();
@@ -133,17 +164,16 @@ const [panelItem, setPanelItem] = useState(null);
     }));
   };
 
-  const pendingCount = 0;
-
-const publishedFiltered = filterPublished(resolutions);
-const pendingFiltered = [];
+  const pendingFiltered = filterPending(pendingResolutions);
+  const pendingCount = pendingResolutions.length;
+  const publishedFiltered = filterPublished(publishedResolutions);
 
   return (
     <>
       {/* STATS */}
       <StatsRow
   stats={[
-    { value: resolutions.length, label: "Total Published" },
+    { value: publishedResolutions.length, label: "Total Published" },
     { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
   ]}
 />
@@ -189,7 +219,7 @@ const pendingFiltered = [];
       {activeTab === "published" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {publishedFiltered.length} of {resolutions.length}{" "}
+            Showing {publishedFiltered.length} of {publishedResolutions.length}{" "}
             resolutions
           </div>
           <div className={lStyles.recordList}>
@@ -232,7 +262,7 @@ const pendingFiltered = [];
                           <CalendarDays size={12} /> {r.year}
                         </span>
                       )}
-                      <StatusBadge status="published" />
+                      <StatusBadge status={r.status} />
                     </div>
                   </div>
                   <div className={lStyles.recordActions}>
@@ -294,12 +324,12 @@ const pendingFiltered = [];
               pendingFiltered.map((item) => (
                 <PendingRecordCard
   key={item.id}
-  code={item.code}
+  code={item.resolution_number}
   title={item.title}
   category={item.category}
-  author={item.author}
-  submitted={item.submitted}
-  status={pendingStatuses[item.id] || item.status}
+  author={item.filename}
+  submitted={new Date(item.uploaded_at).toLocaleDateString("en-PH")}
+  status={item.status}
   onApprove={() => handleApprove(item.id)}
   onViewDraft={() => setPanelItem(item)}
   onComment={() => setPanelItem(item)}

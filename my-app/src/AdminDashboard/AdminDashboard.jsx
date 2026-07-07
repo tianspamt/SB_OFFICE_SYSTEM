@@ -157,7 +157,6 @@ export default function AdminDashboard() {
   const [resolutionTitle, setResolutionTitle] = useState("");
   const [resolutionYear, setResolutionYear] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
-  const [resolutionUploadType, setResolutionUploadType] = useState("");
   const [selectedResolutionOfficials, setSelectedResolutionOfficials] =
     useState([]);
   const [editingResolution, setEditingResolution] = useState(null);
@@ -634,53 +633,40 @@ export default function AdminDashboard() {
     );
 
   // ─── Resolutions ─────────────────────────────────────────────────────────────
-  const handleUploadResolution = async () => {
-    if (
-      !resolutionNumber ||
-      !resolutionTitle ||
-      !resolutionYear ||
-      !resolutionFile ||
-      !resolutionUploadType
-    ) {
-      showModalMsg("Please fill all fields and choose upload type!", "error");
-      return;
-    }
-    setSubmitting(true);
-    const fd = new FormData();
-    fd.append("resolution_number", resolutionNumber);
-    fd.append("title", resolutionTitle);
-    fd.append("year", resolutionYear);
-    fd.append("file", resolutionFile);
-    fd.append("officials", JSON.stringify(selectedResolutionOfficials));
-    fd.append("uploadType", resolutionUploadType);
-    try {
-      const ep =
-        resolutionUploadType === "image-to-text"
-          ? `${API}/api/resolutions/upload-image-text`
-          : `${API}/api/resolutions/upload`;
-      const res = await authFetch(ep, { method: "POST", body: fd });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showMsg("Resolution uploaded!");
-        if (resolutionUploadType === "image-to-text" && data.text) {
-          setExtractedText(data.text);
-          setShowTextModal(true);
-        }
-        setResolutionNumber("");
-        setResolutionTitle("");
-        setResolutionYear("");
-        setResolutionFile(null);
-        setSelectedResolutionOfficials([]);
-        setResolutionUploadType("");
-        setShowResolutionModal(false);
-        fetchResolutions();
-      } else showModalMsg(data.error || "Upload failed!", "error");
-    } catch {
-      showModalMsg("Server error!", "error");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+const handleUploadResolution = async () => {
+  if (!resolutionNumber || !resolutionTitle || !resolutionYear || !resolutionFile) {
+    showModalMsg("Please fill all fields and choose a file!", "error");
+    return;
+  }
+  setSubmitting(true);
+  const fd = new FormData();
+  fd.append("resolution_number", resolutionNumber);
+  fd.append("title", resolutionTitle);
+  fd.append("year", resolutionYear);
+  fd.append("file", resolutionFile);
+  fd.append("officials", JSON.stringify(selectedResolutionOfficials));
+  try {
+    const res = await authFetch(`${API}/api/resolutions/upload`, {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showMsg("Resolution uploaded!");
+      setResolutionNumber("");
+      setResolutionTitle("");
+      setResolutionYear("");
+      setResolutionFile(null);
+      setSelectedResolutionOfficials([]);
+      setShowResolutionModal(false);
+      fetchResolutions();
+    } else showModalMsg(data.error || "Upload failed!", "error");
+  } catch {
+    showModalMsg("Server error!", "error");
+  } finally {
+    setSubmitting(false);
+  }
+};
   const handleOpenEditResolution = (r) => {
     setEditingResolution(r);
     setEditResolutionNumber(r.resolution_number || "");
@@ -1573,22 +1559,21 @@ export default function AdminDashboard() {
               </button>
             )}
             {activeTab === "resolutions" && isAdmin && (
-              <button
-                className={styles.addBtn}
-                onClick={() => {
-                  setModalMessage("");
-                  setResolutionNumber("");
-                  setResolutionTitle("");
-                  setResolutionYear("");
-                  setResolutionFile(null);
-                  setSelectedResolutionOfficials([]);
-                  setResolutionUploadType("");
-                  setShowResolutionModal(true);
-                }}
-              >
-                + Upload Resolution
-              </button>
-            )}
+  <button
+    className={styles.addBtn}
+    onClick={() => {
+      setModalMessage("");
+      setResolutionNumber("");
+      setResolutionTitle("");
+      setResolutionYear("");
+      setResolutionFile(null);
+      setSelectedResolutionOfficials([]);
+      setShowResolutionModal(true);
+    }}
+  >
+    + Upload Resolution
+  </button>
+)}
             {activeTab === "sessions" && isAdmin && (
               <button
                 className={styles.addBtn}
@@ -2712,142 +2697,95 @@ export default function AdminDashboard() {
       )}
 
       {/* Upload Resolution */}
-      {showResolutionModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
-            </h2>
-            <input
-              className={styles.input}
-              placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
-              value={resolutionNumber}
-              onChange={(e) => setResolutionNumber(e.target.value)}
-            />
-            <input
-              className={styles.input}
-              placeholder="Resolution Title"
-              value={resolutionTitle}
-              onChange={(e) => setResolutionTitle(e.target.value)}
-            />
-            <input
-              className={styles.input}
-              placeholder="Year (e.g. 2024)"
-              type="number"
-              min="1900"
-              max="2100"
-              value={resolutionYear}
-              onChange={(e) => setResolutionYear(e.target.value)}
-            />
-            <p className={styles.officialsSelectLabel}>Choose upload type:</p>
-            <div className={styles.uploadTypeRow}>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  resolutionUploadType === "pdf"
-                    ? styles.uploadTypeBtnActive
-                    : ""
-                }`}
-                onClick={() => {
-                  setResolutionUploadType("pdf");
-                  setResolutionFile(null);
-                }}
-              >
-                <FileText size={16} strokeWidth={1.5} /> Upload as PDF
-                <span className={styles.uploadTypeDesc}>
-                  Store and view the PDF file
-                </span>
-              </button>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  resolutionUploadType === "image-to-text"
-                    ? styles.uploadTypeBtnActive
-                    : ""
-                }`}
-                onClick={() => {
-                  setResolutionUploadType("image-to-text");
-                  setResolutionFile(null);
-                }}
-              >
-                <Image size={16} strokeWidth={1.5} /> Image to Text (OCR)
-                <span className={styles.uploadTypeDesc}>
-                  Upload image and extract text
-                </span>
-              </button>
-            </div>
-            {resolutionUploadType && (
-              <div className={styles.fileUploadBox}>
-                <input
-                  type="file"
-                  accept={resolutionUploadType === "pdf" ? ".pdf" : "image/*"}
-                  id="resFileInput"
-                  style={{ display: "none" }}
-                  onChange={(e) => setResolutionFile(e.target.files[0])}
-                />
-                <label htmlFor="resFileInput" className={styles.fileLabel}>
-                  {resolutionFile ? (
-                    <>
-                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                      {resolutionFile.name}
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} strokeWidth={1.5} />{" "}
-                      {resolutionUploadType === "pdf"
-                        ? "Click to choose PDF file"
-                        : "Click to choose Image (JPG, PNG)"}
-                    </>
-                  )}
-                </label>
-                <p className={styles.fileHint}>
-                  {resolutionUploadType === "pdf"
-                    ? "Accepted: PDF only"
-                    : "Accepted: JPG, PNG — text will be extracted automatically"}
-                </p>
-              </div>
-            )}
-            <div className={styles.officialsSelectSection}>
-              <p className={styles.officialsSelectLabel}>
-                Tag Council Members who passed this resolution:
-              </p>
-              <OfficialsCheckList
-                officials={officials}
-                selected={selectedResolutionOfficials}
-                onToggle={toggleResolutionOfficial}
-                styles={styles}
-              />
-            </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowResolutionModal(false);
-                  setResolutionFile(null);
-                  setResolutionNumber("");
-                  setResolutionTitle("");
-                  setResolutionYear("");
-                  setSelectedResolutionOfficials([]);
-                  setResolutionUploadType("");
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleUploadResolution}
-                disabled={submitting || !resolutionUploadType}
-              >
-                {submitting
-                  ? resolutionUploadType === "image-to-text"
-                    ? "Extracting text..."
-                    : "Uploading..."
-                  : "Upload"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+{showResolutionModal && (
+  <div className={styles.modalOverlay}>
+    <div className={styles.modal}>
+      <h2 className={styles.modalTitle}>
+        <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
+      </h2>
+      <input
+        className={styles.input}
+        placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
+        value={resolutionNumber}
+        onChange={(e) => setResolutionNumber(e.target.value)}
+      />
+      <input
+        className={styles.input}
+        placeholder="Resolution Title"
+        value={resolutionTitle}
+        onChange={(e) => setResolutionTitle(e.target.value)}
+      />
+      <input
+        className={styles.input}
+        placeholder="Year (e.g. 2024)"
+        type="number"
+        min="1900"
+        max="2100"
+        value={resolutionYear}
+        onChange={(e) => setResolutionYear(e.target.value)}
+      />
+      <div className={styles.fileUploadBox}>
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,image/*"
+          id="resFileInput"
+          style={{ display: "none" }}
+          onChange={(e) => setResolutionFile(e.target.files[0])}
+        />
+        <label htmlFor="resFileInput" className={styles.fileLabel}>
+          {resolutionFile ? (
+            <>
+              <CheckSquare size={14} strokeWidth={1.5} /> {resolutionFile.name}
+            </>
+          ) : (
+            <>
+              <Upload size={14} strokeWidth={1.5} /> Click to choose file
+            </>
+          )}
+        </label>
+        <p className={styles.fileHint}>
+          Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+        </p>
+      </div>
+
+      <div className={styles.officialsSelectSection}>
+        <p className={styles.officialsSelectLabel}>
+          Tag Council Members who passed this resolution:
+        </p>
+        <OfficialsCheckList
+          officials={officials}
+          selected={selectedResolutionOfficials}
+          onToggle={toggleResolutionOfficial}
+          styles={styles}
+        />
+      </div>
+      <MAlert />
+      <div className={styles.modalBtns}>
+        <button
+          className={styles.cancelBtn}
+          onClick={() => {
+            setShowResolutionModal(false);
+            setResolutionFile(null);
+            setResolutionNumber("");
+            setResolutionTitle("");
+            setResolutionYear("");
+            setSelectedResolutionOfficials([]);
+            setModalMessage("");
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          className={styles.confirmBtn}
+          onClick={handleUploadResolution}
+          disabled={submitting}
+        >
+          {submitting ? "Uploading..." : "Upload"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Edit Resolution */}
       {showEditResolutionModal && editingResolution && (
