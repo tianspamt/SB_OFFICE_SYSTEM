@@ -16,6 +16,7 @@ import {
   Image,
   CalendarDays,
   Download,
+  ExternalLink,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
@@ -74,6 +75,7 @@ export default function OrdinancesPage({
   const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [pdfError, setPdfError] = useState(false);
 
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const getFileUrl = (filepath) =>
@@ -81,7 +83,7 @@ export default function OrdinancesPage({
 
   // ── Split ordinances by actual status from the backend ─────────────────────
   const publishedOrdinances = ordinances.filter((o) => o.status === "published");
-  
+
 
   // ── Derive available years from published ordinances ───────────────────────
   const availableYears = [
@@ -127,44 +129,44 @@ export default function OrdinancesPage({
     setAuthorFilter("");
     setYearFilter("all");
   };
-//
+  //
   useEffect(() => {
-  if (activeTab === "pending" && canPublish) {
-    fetchPendingOrdinances();
-  }
-}, [activeTab]);
+    if (activeTab === "pending" && canPublish) {
+      fetchPendingOrdinances();
+    }
+  }, [activeTab]);
 
-const fetchPendingOrdinances = async () => {
-  setFetchingPending(true);
-  try {
-    const res = await fetch(`${API}/api/ordinances?status=pending,ready_to_publish`);
-    const data = await res.json();
-    setPendingOrdinances(Array.isArray(data) ? data : []);
-  } catch {
-    setPendingOrdinances([]);
-  } finally {
-    setFetchingPending(false);
-  }
-};
+  const fetchPendingOrdinances = async () => {
+    setFetchingPending(true);
+    try {
+      const res = await fetch(`${API}/api/ordinances?status=pending,ready_to_publish`);
+      const data = await res.json();
+      setPendingOrdinances(Array.isArray(data) ? data : []);
+    } catch {
+      setPendingOrdinances([]);
+    } finally {
+      setFetchingPending(false);
+    }
+  };
 
   // ── Pending actions ─────────────────────────────────────────────────────────
 
   const handleApprove = async (id, currentStatus) => {
-  const newStatus = isViceMayor ? "ready_to_publish" : "published";
-  try {
-    const res = await fetch(`${API}/api/ordinances/${id}/status`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchPendingOrdinances();
+    const newStatus = isViceMayor ? "ready_to_publish" : "published";
+    try {
+      const res = await fetch(`${API}/api/ordinances/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchPendingOrdinances();
+      }
+    } catch {
+      console.error("Failed to update status");
     }
-  } catch {
-    console.error("Failed to update status");
-  }
-};
+  };
 
   const handleAddComment = (itemId, text) => {
     const now = new Date();
@@ -183,28 +185,28 @@ const fetchPendingOrdinances = async () => {
   // ── Pending count for badge ─────────────────────────────────────────────────
 
   const pendingFiltered = pendingOrdinances.filter((o) => {
-  return !search ||
-    (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-    (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase());
-});
-const pendingCount = pendingOrdinances.length;
-const publishedFiltered = filterPublished(publishedOrdinances);
+    return !search ||
+      (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
+      (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase());
+  });
+  const pendingCount = pendingOrdinances.length;
+  const publishedFiltered = filterPublished(publishedOrdinances);
 
   return (
     <>
       <StatsRow
-  stats={[
-    { value: publishedOrdinances.length, label: "Total Published" },
-    { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
-  ]}
-/>
+        stats={[
+          { value: publishedOrdinances.length, label: "Total Published" },
+          { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
+        ]}
+      />
 
       {/* TABS */}
       <TabNavigation
-  tabs={[
-    { id: "published", label: "Published" },
-    ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
-  ]}
+        tabs={[
+          { id: "published", label: "Published" },
+          ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+        ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
@@ -297,34 +299,34 @@ const publishedFiltered = filterPublished(publishedOrdinances);
                     </div>
                   </div>
                   <div className={lStyles.recordActions}>
-                   <button
+                    <button
                       className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
-                      onClick={() => setViewTarget(o)}
+                      onClick={() => { setPdfError(false); setViewTarget(o); }}
                     >
                       <Eye size={13} /> View
                     </button>
                     {!readOnly && (
-  <>
-    <button
-      className={`${lStyles.btn} ${lStyles.btnSm}`}
-      onClick={() => onEdit(o)}
-    >
-      <Pencil size={13} /> Edit
-    </button>
-    <button
-      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-      onClick={() =>
-        setDeleteTarget({
-          id: o.id,
-          type: "ordinance",
-          name: o.title,
-        })
-      }
-    >
-      <Trash2 size={13} /> Delete
-    </button>
-  </>
-)}
+                      <>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSm}`}
+                          onClick={() => onEdit(o)}
+                        >
+                          <Pencil size={13} /> Edit
+                        </button>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: o.id,
+                              type: "ordinance",
+                              name: o.title,
+                            })
+                          }
+                        >
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))
@@ -337,8 +339,8 @@ const publishedFiltered = filterPublished(publishedOrdinances);
       {activeTab === "pending" && (
         <>
           <div className={lStyles.resultCount}>
-  Showing {pendingFiltered.length} drafts
-</div>
+            Showing {pendingFiltered.length} drafts
+          </div>
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -347,20 +349,20 @@ const publishedFiltered = filterPublished(publishedOrdinances);
               />
             ) : (
               pendingFiltered.map((item) => (
-  <PendingRecordCard
-    key={item.id}
-    code={item.ordinance_number}
-    title={item.title}
-    category={item.category}
-    author={item.filename}
-    submitted={new Date(item.uploaded_at).toLocaleDateString("en-PH")}
-    status={item.status}
-    onApprove={() => handleApprove(item.id, item.status)}
-    onViewDraft={() => setPanelItem(item)}
-    onComment={() => setPanelItem(item)}
-    isViceMayor={isViceMayor}
-  />
-))
+                <PendingRecordCard
+                  key={item.id}
+                  code={item.ordinance_number}
+                  title={item.title}
+                  category={item.category}
+                  author={item.filename}
+                  submitted={new Date(item.uploaded_at).toLocaleDateString("en-PH")}
+                  status={item.status}
+                  onApprove={() => handleApprove(item.id, item.status)}
+                  onViewDraft={() => setPanelItem(item)}
+                  onComment={() => setPanelItem(item)}
+                  isViceMayor={isViceMayor}
+                />
+              ))
             )}
           </div>
         </>
@@ -389,215 +391,197 @@ const publishedFiltered = filterPublished(publishedOrdinances);
         />
       )}
 
-       {/* ── VIEW ORDINANCE MODAL ─────────────────────────────────────────────── */}
+      {/* ── VIEW ORDINANCE MODAL ─────────────────────────────────────────────── */}
       {viewTarget && (
-        <div className={styles.modalOverlay} onClick={() => setViewTarget(null)}>
+        <div className={lStyles.viewModalOverlay} onClick={() => setViewTarget(null)}>
           <div
-            className={`${styles.modal} ${styles.sessionModal}`}
+            className={lStyles.viewModal}
             onClick={(e) => e.stopPropagation()}
-            style={{ display: "flex", flexDirection: "column", maxHeight: "90vh", overflow: "hidden" }}
           >
-            {/* ── Sticky header ── */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "20px 24px 16px",
-                borderBottom: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-                position: "sticky",
-                top: 0,
-                zIndex: 2,
-              }}
-            >
-              <h2 className={styles.modalTitle} style={{ margin: 0, fontSize: 18 }}>
-                {viewTarget.title}
-              </h2>
-              <button
-                onClick={() => setViewTarget(null)}
-                aria-label="Close modal"
-                style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#64748b",
-                  width: 32,
-                  height: 32,
-                  minWidth: 32,
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  transition: "background 0.15s, color 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#fee2e2";
-                  e.currentTarget.style.color = "#dc2626";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#f1f5f9";
-                  e.currentTarget.style.color = "#64748b";
-                }}
-              >
-                <X size={16} />
-              </button>
+            {/* ── Green gradient header ── */}
+            <div className={lStyles.viewModalHeader}>
+              <div className={lStyles.viewModalHeaderTop}>
+                <div className={lStyles.viewModalHeaderInfo}>
+                  {viewTarget.ordinance_number && (
+                    <div className={lStyles.viewModalOrdNumber}>
+                      <FileText size={12} />
+                      {viewTarget.ordinance_number}
+                    </div>
+                  )}
+                  <h2 className={lStyles.viewModalTitle}>{viewTarget.title}</h2>
+                </div>
+                <button
+                  className={lStyles.viewModalCloseBtn}
+                  onClick={() => setViewTarget(null)}
+                  aria-label="Close modal"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* ── Scrollable body ── */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", overscrollBehavior: "contain" }}>
-              <div style={{ fontSize: 13, color: "#4a5568", marginBottom: 16, lineHeight: 1.7 }}>
-                {viewTarget.ordinance_number && (
-                  <div><strong>Ordinance No:</strong> {viewTarget.ordinance_number}</div>
+            <div className={lStyles.viewModalBody}>
+              {/* ── Metadata cards ── */}
+              <div className={lStyles.viewModalMeta}>
+                {viewTarget.year && (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}>
+                      <CalendarDays size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Year</div>
+                      <div className={lStyles.viewModalMetaValue}>{viewTarget.year}</div>
+                    </div>
+                  </div>
                 )}
-                {viewTarget.year && <div><strong>Year:</strong> {viewTarget.year}</div>}
-                <div>
-                  <strong>Uploaded:</strong>{" "}
-                  {new Date(viewTarget.uploaded_at).toLocaleDateString("en-PH", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                <div className={lStyles.viewModalMetaItem}>
+                  <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}>
+                    <CalendarDays size={16} />
+                  </div>
+                  <div>
+                    <div className={lStyles.viewModalMetaLabel}>Uploaded</div>
+                    <div className={lStyles.viewModalMetaValue}>
+                      {new Date(viewTarget.uploaded_at).toLocaleDateString("en-PH", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </div>
+                  </div>
                 </div>
+                {viewTarget.category && (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconPurple}`}>
+                      <Filter size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Category</div>
+                      <div className={lStyles.viewModalMetaValue}>{viewTarget.category}</div>
+                    </div>
+                  </div>
+                )}
+                {viewTarget.status && (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}>
+                      <Eye size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Status</div>
+                      <div className={lStyles.viewModalMetaValue} style={{ textTransform: "capitalize" }}>
+                        {viewTarget.status}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* ── Read Files ── */}
+              <div className={lStyles.viewModalDivider} />
+
+              {/* ── File actions ── */}
               {viewTarget.filetype === "application/pdf" && (
-                
-                <a href={getFileUrl(viewTarget.filepath)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.confirmBtn}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, textDecoration: "none", marginBottom: 16 }}
-                >
-                  <FileText size={14} /> Read File (PDF)
-                </a>
+                <div className={lStyles.viewModalFileActions}>
+                  <a
+                    href={getFileUrl(viewTarget.filepath)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                  >
+                    <FileText size={16} />
+                    Open PDF Document
+                  </a>
+                </div>
               )}
 
+              {/* ── Word document download ── */}
               {(viewTarget.filetype === "application/msword" ||
                 viewTarget.filetype ===
-                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
-                
-                <a  href={getFileUrl(viewTarget.filepath)}
-                  download={viewTarget.filename}
-                  className={styles.confirmBtn}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none", marginBottom: 16, width: "100%" }}
-                >
-                  <Download size={14} /> Download Word File
-                </a>
-              )}
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
+                  <div className={lStyles.viewModalFileActions}>
+                    <a
+                      href={getFileUrl(viewTarget.filepath)}
+                      download={viewTarget.filename}
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                    >
+                      <Download size={16} />
+                      Download Word Document
+                    </a>
+                  </div>
+                )}
 
+              {/* ── Image preview + OCR extracted text ── */}
               {viewTarget.filetype?.startsWith("image/") && (
-                <div style={{ marginBottom: 16 }}>
-                  <p className={styles.officialsSelectLabel}>Extracted Text (OCR):</p>
+                <div className={lStyles.viewModalOcrSection}>
+                  <img
+                    src={getFileUrl(viewTarget.filepath)}
+                    alt={viewTarget.title}
+                    className={lStyles.viewModalImagePreview}
+                  />
+                  <div className={lStyles.viewModalOcrLabel}>
+                    <Image size={14} />
+                    Extracted Text (OCR)
+                  </div>
                   <textarea
-                    className={styles.textArea}
+                    className={lStyles.viewModalOcrText}
                     readOnly
-                    rows={8}
-                    value={viewTarget.extracted_text || "No text could be extracted from this image."}
+                    rows={6}
+                    value={
+                      viewTarget.extracted_text ||
+                      "No text could be extracted from this image."
+                    }
                   />
                 </div>
               )}
 
-              {/* ── Council members with photo ── */}
+              {/* ── Council members ── */}
               {viewTarget.officials?.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    padding: "14px 16px",
-                    background: "#f8fafc",
-                    borderRadius: 10,
-                    border: "1px solid #e2e8f0",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: "#1a365d",
-                      marginBottom: 10,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.4px",
-                    }}
-                  >
-                    Council Members
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {viewTarget.officials.map((m) => (
-                      <div
-                        key={m.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: "8px 10px",
-                          background: "#fff",
-                          borderRadius: 8,
-                          border: "1px solid #e2e8f0",
-                        }}
-                      >
-                        {m.photo ? (
-                          <img
-                            src={m.photo}
-                            alt={m.full_name}
-                            style={{
-                              width: 36,
-                              height: 36,
-                              borderRadius: "50%",
-                              objectFit: "cover",
-                              flexShrink: 0,
-                            }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              width: 36,
-                              height: 36,
-                              borderRadius: "50%",
-                              background: "#e2e8f0",
-                              color: "#4a5568",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontWeight: 700,
-                              fontSize: 14,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {m.full_name?.charAt(0)}
-                          </div>
-                        )}
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#1a202c" }}>
-                            {m.full_name}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#718096" }}>{m.position}</div>
-                        </div>
+                <>
+                  <div className={lStyles.viewModalDivider} />
+                  <div className={lStyles.viewModalCouncilSection}>
+                    <div className={lStyles.viewModalCouncilHeader}>
+                      <div className={lStyles.viewModalCouncilTitle}>
+                        Council Members
                       </div>
-                    ))}
+                      <div className={lStyles.viewModalCouncilCount}>
+                        {viewTarget.officials.length} member{viewTarget.officials.length !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <div className={lStyles.viewModalCouncilGrid}>
+                      {viewTarget.officials.map((m) => (
+                        <div key={m.id} className={lStyles.viewModalCouncilCard}>
+                          {m.photo ? (
+                            <img
+                              src={m.photo}
+                              alt={m.full_name}
+                              className={lStyles.viewModalCouncilPhoto}
+                            />
+                          ) : (
+                            <div className={lStyles.viewModalCouncilAvatar}>
+                              {m.full_name?.charAt(0)}
+                            </div>
+                          )}
+                          <div>
+                            <div className={lStyles.viewModalCouncilName}>
+                              {m.full_name}
+                            </div>
+                            <div className={lStyles.viewModalCouncilPosition}>
+                              {m.position}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
 
-            {/* ── Sticky footer ── */}
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                justifyContent: "flex-end",
-                padding: "16px 24px 20px",
-                borderTop: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-                position: "sticky",
-                bottom: 0,
-                zIndex: 2,
-              }}
-            >
-              <button className={styles.cancelBtn} onClick={() => setViewTarget(null)}>
+            {/* ── Footer ── */}
+            <div className={lStyles.viewModalFooter}>
+              <button
+                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
+                onClick={() => setViewTarget(null)}
+              >
                 Close
               </button>
             </div>
