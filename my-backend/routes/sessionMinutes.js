@@ -10,6 +10,7 @@ const { verifyToken, adminOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
 
+
 // GET /api/session-minutes
 router.get('/', async (req, res) => {
   try {
@@ -67,21 +68,51 @@ router.post('/', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// POST /api/session-minutes/upload-image
-router.post('/upload-image', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+
+// POST /api/session-minutes/upload — auto-detects file type
+router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' })
-  const { session_number, session_date, session_type, venue, agenda, ocr_target, minutes_text } = req.body
+  const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
   if (!session_date) return res.status(400).json({ error: 'Session date is required.' })
+
+  const mime = req.file.mimetype
+  const isImage = mime.startsWith('image/')
+  const isPDF = mime === 'application/pdf'
+
+  let extractedText = null
   let tempPath = null
+
   try {
-    tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
-    fs.writeFileSync(tempPath, req.file.buffer)
-    const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-    fs.unlinkSync(tempPath)
-    tempPath = null
-    const extractedText = text.trim()
-    const minutesTextFinal = ocr_target !== 'agenda' ? extractedText : (minutes_text || null)
-    const agendaFinal = ocr_target === 'agenda' ? extractedText : (agenda || null)
+    if (isImage) {
+      tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
+      fs.writeFileSync(tempPath, req.file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      fs.unlinkSync(tempPath)
+      tempPath = null
+      extractedText = text.trim() || null
+    }
+
+    if (isPDF) {
+      const PDFParser = require('pdf2json')
+      try {
+        extractedText = await new Promise((resolve) => {
+          const pdfParser = new PDFParser()
+          pdfParser.on('pdfParser_dataReady', (data) => {
+            const text = data.Pages
+              ?.flatMap(p => p.Texts)
+              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
+              ?.join(' ')
+              ?.trim() || ''
+            resolve(text || null)
+          })
+          pdfParser.on('pdfParser_dataError', () => resolve(null))
+          pdfParser.parseBuffer(req.file.buffer)
+        })
+      } catch (pdfErr) {
+        console.error('PDF parse error:', pdfErr.message)
+      }
+    }
+
     const { data, error } = await supabase
       .from('session_minutes')
       .insert({
@@ -89,15 +120,17 @@ router.post('/upload-image', verifyToken, adminOnly, upload.single('file'), hand
         session_date,
         session_type: session_type || 'regular',
         venue: venue || null,
-        agenda: agendaFinal,
-        minutes_text: minutesTextFinal,
+        agenda: agenda || null,
+        minutes_text: extractedText || minutes_text || null,
         filename: req.file.originalname,
-        filetype: req.file.mimetype
+        filetype: mime,
+        status: 'pending'
       })
       .select().single()
+
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session (OCR): ${session_number || session_date}`)
-    res.json({ success: true, id: data.id, extracted_text: extractedText, ocr_target, data })
+    await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session: ${session_number || session_date}`)
+    res.json({ success: true, id: data.id, data })
   } catch (err) {
     if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
     res.status(500).json({ error: err.message })

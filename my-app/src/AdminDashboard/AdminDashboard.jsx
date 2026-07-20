@@ -936,19 +936,18 @@ const handleUploadResolution = async () => {
   };
 
   // ─── Sessions ─────────────────────────────────────────────────────────────────
-  const resetSessionForm = () => {
-    setSessionForm({
-      session_number: "",
-      session_date: "",
-      session_type: "regular",
-      venue: "",
-      agenda: "",
-      minutes_text: "",
-    });
-    setSessionFile(null);
-    setSessionInputMode("text");
-    setSessionOcrTarget("minutes");
-  };
+ const resetSessionForm = () => {
+  setSessionForm({
+    session_number: "",
+    session_date: "",
+    session_type: "regular",
+    venue: "",
+    agenda: "",
+    minutes_text: "",
+  });
+  setSessionFile(null);
+  setSessionInputMode("text");
+};
   const handleAddSession = async () => {
     if (!sessionForm.session_date) {
       showModalMsg("Session date is required!", "error");
@@ -956,28 +955,27 @@ const handleUploadResolution = async () => {
     }
     setSubmitting(true);
     try {
-      if (sessionInputMode === "ocr") {
-        if (!sessionFile) {
-          showModalMsg("Please upload an image file!", "error");
-          setSubmitting(false);
-          return;
-        }
-        const fd = new FormData();
-        Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
-        fd.append("file", sessionFile);
-        fd.append("ocr_target", sessionOcrTarget);
-        const res = await authFetch(`${API}/api/session-minutes/upload-image`, {
-          method: "POST",
-          body: fd,
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          showMsg(`Session added! OCR extracted text from ${data.ocr_target}.`);
-          resetSessionForm();
-          setShowSessionModal(false);
-          fetchSessionMinutes();
-        } else showModalMsg(data.error || "Upload failed!", "error");
-      } else {
+      if (sessionInputMode === "file") {
+  if (!sessionFile) {
+    showModalMsg("Please upload a file!", "error");
+    setSubmitting(false);
+    return;
+  }
+  const fd = new FormData();
+  Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
+  fd.append("file", sessionFile);
+  const res = await authFetch(`${API}/api/session-minutes/upload`, {
+    method: "POST",
+    body: fd,
+  });
+  const data = await res.json();
+  if (res.ok && data.success) {
+    showMsg("Session added!");
+    resetSessionForm();
+    setShowSessionModal(false);
+    fetchSessionMinutes();
+  } else showModalMsg(data.error || "Upload failed!", "error");
+} else {
         const res = await authFetch(`${API}/api/session-minutes`, {
           method: "POST",
           body: JSON.stringify(sessionForm),
@@ -2924,29 +2922,29 @@ const handleUploadResolution = async () => {
               Agenda
             </h2>
             <div className={styles.uploadTypeRow}>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  sessionInputMode === "text" ? styles.uploadTypeBtnActive : ""
-                }`}
-                onClick={() => setSessionInputMode("text")}
-              >
-                <FileEdit size={16} strokeWidth={1.5} /> Direct Input
-                <span className={styles.uploadTypeDesc}>
-                  Type or paste session minutes directly
-                </span>
-              </button>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  sessionInputMode === "ocr" ? styles.uploadTypeBtnActive : ""
-                }`}
-                onClick={() => setSessionInputMode("ocr")}
-              >
-                <Camera size={16} strokeWidth={1.5} /> Upload Image (OCR)
-                <span className={styles.uploadTypeDesc}>
-                  Scan handwritten or printed paper
-                </span>
-              </button>
-            </div>
+  <button
+    className={`${styles.uploadTypeBtn} ${
+      sessionInputMode === "text" ? styles.uploadTypeBtnActive : ""
+    }`}
+    onClick={() => setSessionInputMode("text")}
+  >
+    <FileEdit size={16} strokeWidth={1.5} /> Direct Input
+    <span className={styles.uploadTypeDesc}>
+      Type or paste session minutes directly
+    </span>
+  </button>
+  <button
+    className={`${styles.uploadTypeBtn} ${
+      sessionInputMode === "file" ? styles.uploadTypeBtnActive : ""
+    }`}
+    onClick={() => setSessionInputMode("file")}
+  >
+    <Upload size={16} strokeWidth={1.5} /> Upload File
+    <span className={styles.uploadTypeDesc}>
+      PDF, Word, or Image — system auto-detects
+    </span>
+  </button>
+</div>
             <div className={styles.sessionFormGrid}>
               <div className={styles.sessionFormCol}>
                 <label className={styles.fieldLabel}>Session Number</label>
@@ -3043,115 +3041,32 @@ const handleUploadResolution = async () => {
                 />
               </>
             ) : (
-              <>
-                <label className={styles.fieldLabel}>
-                  OCR will extract text for:
-                </label>
-                <div
-                  className={styles.uploadTypeRow}
-                  style={{ marginBottom: "10px" }}
-                >
-                  <button
-                    className={`${styles.uploadTypeBtn} ${
-                      sessionOcrTarget === "minutes"
-                        ? styles.uploadTypeBtnActive
-                        : ""
-                    }`}
-                    onClick={() => setSessionOcrTarget("minutes")}
-                    style={{ flex: 1 }}
-                  >
-                    <FileText size={14} /> Minutes Text
-                    <span className={styles.uploadTypeDesc}>
-                      OCR text becomes session minutes
-                    </span>
-                  </button>
-                  <button
-                    className={`${styles.uploadTypeBtn} ${
-                      sessionOcrTarget === "agenda"
-                        ? styles.uploadTypeBtnActive
-                        : ""
-                    }`}
-                    onClick={() => setSessionOcrTarget("agenda")}
-                    style={{ flex: 1 }}
-                  >
-                    <ClipboardList size={14} /> Agenda
-                    <span className={styles.uploadTypeDesc}>
-                      OCR text becomes agenda items
-                    </span>
-                  </button>
-                </div>
-                <div className={styles.fileUploadBox}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    id="sessionFileInput"
-                    style={{ display: "none" }}
-                    onChange={(e) => setSessionFile(e.target.files[0])}
-                  />
-                  <label
-                    htmlFor="sessionFileInput"
-                    className={styles.fileLabel}
-                  >
-                    {sessionFile ? (
-                      <>
-                        <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                        {sessionFile.name}
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={14} strokeWidth={1.5} /> Click to choose
-                        image (JPG, PNG)
-                      </>
-                    )}
-                  </label>
-                  <p className={styles.fileHint}>
-                    Accepted: JPG, PNG — handwritten or printed document
-                  </p>
-                </div>
-                {sessionOcrTarget === "minutes" && (
-                  <>
-                    <label className={styles.fieldLabel}>
-                      Agenda Items{" "}
-                      <span className={styles.fieldHint}>
-                        (optional, one per line)
-                      </span>
-                    </label>
-                    <textarea
-                      className={styles.textArea}
-                      placeholder={"1. Call to order\n2. Roll call\n..."}
-                      value={sessionForm.agenda}
-                      onChange={(e) =>
-                        setSessionForm({
-                          ...sessionForm,
-                          agenda: e.target.value,
-                        })
-                      }
-                      rows={4}
-                    />
-                  </>
-                )}
-                {sessionOcrTarget === "agenda" && (
-                  <>
-                    <label className={styles.fieldLabel}>
-                      Minutes Text{" "}
-                      <span className={styles.fieldHint}>(optional)</span>
-                    </label>
-                    <textarea
-                      className={styles.textArea}
-                      placeholder="Type session minutes or leave blank..."
-                      value={sessionForm.minutes_text}
-                      onChange={(e) =>
-                        setSessionForm({
-                          ...sessionForm,
-                          minutes_text: e.target.value,
-                        })
-                      }
-                      rows={4}
-                    />
-                  </>
-                )}
-              </>
-            )}
+  <>
+    <div className={styles.fileUploadBox}>
+      <input
+        type="file"
+        accept=".pdf,.doc,.docx,image/*"
+        id="sessionFileInput"
+        style={{ display: "none" }}
+        onChange={(e) => setSessionFile(e.target.files[0])}
+      />
+      <label htmlFor="sessionFileInput" className={styles.fileLabel}>
+        {sessionFile ? (
+          <>
+            <CheckSquare size={14} strokeWidth={1.5} /> {sessionFile.name}
+          </>
+        ) : (
+          <>
+            <Upload size={14} strokeWidth={1.5} /> Click to choose file
+          </>
+        )}
+      </label>
+      <p className={styles.fileHint}>
+        Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+      </p>
+    </div>
+  </>
+)}
             <MAlert />
             <div className={styles.modalBtns}>
               <button
@@ -3169,11 +3084,7 @@ const handleUploadResolution = async () => {
                 onClick={handleAddSession}
                 disabled={submitting}
               >
-                {submitting
-                  ? sessionInputMode === "ocr"
-                    ? "Extracting & Saving..."
-                    : "Saving..."
-                  : "Save Session"}
+                {submitting ? "Saving..." : "Save Session"}
               </button>
             </div>
           </div>
