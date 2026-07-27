@@ -11,30 +11,27 @@ import {
   Filter,
   Eye,
   Pencil,
-  Trash2,
+  Archive,
   FileText,
   Image,
   CalendarDays,
   Download,
   ExternalLink,
+  Upload,
+  Send,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
-import { API } from "./AdminContext";
+import { API, authFetch } from "./AdminContext";
 
 import {
   TabNavigation,
   SearchBar,
   FilterPanel,
-  PendingRecordCard,
-  PublishedRecordCard,
   UploadModal,
-  CommentPanel,
   EmptyState,
   StatsRow,
   StatusBadge,
-  CategoryBadge,
-  ReadyTag,
 } from "./LegislativeComponents";
 
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
@@ -62,6 +59,9 @@ export default function OrdinancesPage({
   readOnly = false,
   canPublish = false,
   isViceMayor = false,
+  isSecretary = false,
+  isClerk = false,
+  onRefresh,
 }) {
   const [activeTab, setActiveTab] = useState("published");
   const [search, setSearch] = useState("");
@@ -71,11 +71,17 @@ export default function OrdinancesPage({
   const [yearFilter, setYearFilter] = useState("all");
   const [pendingOrdinances, setPendingOrdinances] = useState([]);
   const [fetchingPending, setFetchingPending] = useState(false);
-  const [comments, setComments] = useState({});
-  const [panelItem, setPanelItem] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
   const [pdfError, setPdfError] = useState(false);
+
+  // ── Review workflow (comment thread + actions inside the View Draft modal) ──
+  const [reviewComments, setReviewComments] = useState([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [reviewCommentText, setReviewCommentText] = useState("");
+  const [reviewFile, setReviewFile] = useState(null);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const getFileUrl = (filepath) =>
@@ -136,10 +142,18 @@ export default function OrdinancesPage({
     }
   }, [activeTab]);
 
+  // Role-aware pending queue: each position only reviews the status it owns.
+  const pendingStatusesForRole = () => {
+    if (isSecretary) return "pending,approved";
+    if (isViceMayor) return "ready_to_publish";
+    if (isClerk) return "needs_revision";
+    return "pending,needs_revision,ready_to_publish,approved";
+  };
+
   const fetchPendingOrdinances = async () => {
     setFetchingPending(true);
     try {
-      const res = await fetch(`${API}/api/ordinances?status=pending,ready_to_publish`);
+      const res = await fetch(`${API}/api/ordinances?status=${pendingStatusesForRole()}`);
       const data = await res.json();
       setPendingOrdinances(Array.isArray(data) ? data : []);
     } catch {
@@ -149,37 +163,119 @@ export default function OrdinancesPage({
     }
   };
 
-  // ── Pending actions ─────────────────────────────────────────────────────────
+  const refreshAll = () => {
+    fetchPendingOrdinances();
+    onRefresh?.();
+  };
 
-  const handleApprove = async (id, currentStatus) => {
-    const newStatus = isViceMayor ? "ready_to_publish" : "published";
+  // ── Comment thread (inside the View Draft modal) ────────────────────────────
+  const fetchComments = async (ordinanceId) => {
+    setLoadingComments(true);
     try {
-      const res = await fetch(`${API}/api/ordinances/${id}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      const res = await authFetch(`${API}/api/comments?entity_type=ordinance&entity_id=${ordinanceId}`);
       const data = await res.json();
-      if (data.success) {
-        fetchPendingOrdinances();
-      }
+      setReviewComments(Array.isArray(data) ? data : []);
     } catch {
-      console.error("Failed to update status");
+      setReviewComments([]);
+    } finally {
+      setLoadingComments(false);
     }
   };
 
-  const handleAddComment = (itemId, text) => {
-    const now = new Date();
-    const time = now.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    setComments((prev) => ({
-      ...prev,
-      [itemId]: [...(prev[itemId] || []), { author: "Admin", text, time }],
+  const handleOpenView = (item) => {
+    setPdfError(false);
+    setReviewError("");
+    setReviewCommentText("");
+    setReviewFile(null);
+    setViewTarget(item);
+    if (item.status !== "published") fetchComments(item.id);
+  };
+
+  const handleSendComment = async () => {
+    if (!reviewCommentText.trim() || !viewTarget) return;
+    setReviewSubmitting(true);
+    try {
+      const res = await authFetch(`${API}/api/comments`, {
+        method: "POST",
+        body: JSON.stringify({ entity_type: "ordinance", entity_id: viewTarget.id, text: reviewCommentText.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setReviewCommentText("");
+        fetchComments(viewTarget.id);
+      } else setReviewError(data.error || "Failed to add comment.");
+    } catch {
+      setReviewError("Server error.");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  // ── Review workflow actions ──────────────────────────────────────────────────
+  const runReviewAction = async (url, options, successUpdate) => {
+    setReviewSubmitting(true);
+    setReviewError("");
+    try {
+      const res = await authFetch(`${API}${url}`, options);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setViewTarget((prev) => (prev ? { ...prev, ...successUpdate(data.data) } : prev));
+        refreshAll();
+        return true;
+      }
+      setReviewError(data.error || "Action failed.");
+      return false;
+    } catch {
+      setReviewError("Server error.");
+      return false;
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const handleAccept = (id) =>
+    runReviewAction(`/api/ordinances/${id}/accept`, { method: "PUT" }, (d) => ({ status: d.status }));
+
+  const handleRequestChanges = async () => {
+    if (!reviewCommentText.trim() || !viewTarget) return;
+    const ok = await runReviewAction(
+      `/api/ordinances/${viewTarget.id}/request-changes`,
+      { method: "PUT", body: JSON.stringify({ comment: reviewCommentText.trim() }) },
+      (d) => ({ status: d.status })
+    );
+    if (ok) {
+      setReviewCommentText("");
+      fetchComments(viewTarget.id);
+    }
+  };
+
+  const handleVMApprove = (id) =>
+    runReviewAction(`/api/ordinances/${id}/vm-approve`, { method: "PUT" }, (d) => ({ status: d.status }));
+
+  const handlePublish = (id) =>
+    runReviewAction(`/api/ordinances/${id}/publish`, { method: "PUT" }, (d) => ({ status: d.status }));
+
+  const handleReplaceFile = async (id) => {
+    if (!reviewFile) return;
+    const fd = new FormData();
+    fd.append("file", reviewFile);
+    const ok = await runReviewAction(`/api/ordinances/${id}/replace-file`, { method: "PUT", body: fd }, (d) => ({
+      filename: d.filename,
+      filetype: d.filetype,
+      filepath: d.filepath,
+      extracted_text: d.extracted_text,
+      revision_count: d.revision_count,
     }));
+    if (ok) setReviewFile(null);
+    return ok;
+  };
+
+  const handleResubmit = async (id) => {
+    if (reviewFile) {
+      const replaced = await handleReplaceFile(id);
+      if (!replaced) return;
+    }
+    runReviewAction(`/api/ordinances/${id}/resubmit`, { method: "PUT" }, (d) => ({ status: d.status }));
   };
 
   // ── Pending count for badge ─────────────────────────────────────────────────
@@ -301,7 +397,7 @@ export default function OrdinancesPage({
                   <div className={lStyles.recordActions}>
                     <button
                       className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
-                      onClick={() => { setPdfError(false); setViewTarget(o); }}
+                      onClick={() => handleOpenView(o)}
                     >
                       <Eye size={13} /> View
                     </button>
@@ -323,7 +419,7 @@ export default function OrdinancesPage({
                             })
                           }
                         >
-                          <Trash2 size={13} /> Delete
+                          <Archive size={13} /> Archive
                         </button>
                       </>
                     )}
@@ -349,19 +445,41 @@ export default function OrdinancesPage({
               />
             ) : (
               pendingFiltered.map((item) => (
-                <PendingRecordCard
-                  key={item.id}
-                  code={item.ordinance_number}
-                  title={item.title}
-                  category={item.category}
-                  author={item.filename}
-                  submitted={new Date(item.uploaded_at).toLocaleDateString("en-PH")}
-                  status={item.status}
-                  onApprove={() => handleApprove(item.id, item.status)}
-                  onViewDraft={() => setPanelItem(item)}
-                  onComment={() => setPanelItem(item)}
-                  isViceMayor={isViceMayor}
-                />
+                <div key={item.id} className={lStyles.recordCard}>
+                  <div
+                    className={lStyles.recordIcon}
+                    style={{ background: "var(--blue-50)" }}
+                  >
+                    {item.filetype === "application/pdf" ? (
+                      <FileText size={20} strokeWidth={1.2} />
+                    ) : (
+                      <Image size={20} strokeWidth={1.2} />
+                    )}
+                  </div>
+                  <div className={lStyles.recordBody}>
+                    <div className={lStyles.recordCode}>
+                      {item.ordinance_number || "—"}
+                    </div>
+                    <div className={lStyles.recordTitle}>{item.title}</div>
+                    <div className={lStyles.recordMeta}>
+                      <span>
+                        Submitted: {new Date(item.uploaded_at).toLocaleDateString("en-PH")}
+                      </span>
+                      {item.revision_count > 0 && (
+                        <span>Revision #{item.revision_count}</span>
+                      )}
+                      <StatusBadge status={item.status} />
+                    </div>
+                  </div>
+                  <div className={lStyles.recordActions}>
+                    <button
+                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
+                      onClick={() => handleOpenView(item)}
+                    >
+                      <Eye size={13} /> View Draft
+                    </button>
+                  </div>
+                </div>
               ))
             )}
           </div>
@@ -479,6 +597,7 @@ export default function OrdinancesPage({
               <div className={lStyles.viewModalDivider} />
 
               {/* ── File actions ── */}
+              {console.log("SUPABASE_URL:", SUPABASE_URL, "filepath:", viewTarget.filepath, "full URL:", getFileUrl(viewTarget.filepath))}
               {viewTarget.filetype === "application/pdf" && (
                 <div className={lStyles.viewModalFileActions}>
                   <a
@@ -498,14 +617,29 @@ export default function OrdinancesPage({
                 viewTarget.filetype ===
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
                   <div className={lStyles.viewModalFileActions}>
-                    <a
-                      href={getFileUrl(viewTarget.filepath)}
-                      download={viewTarget.filename}
+                    <button
                       className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(getFileUrl(viewTarget.filepath));
+                          const blob = await res.blob();
+                          const blobUrl = window.URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = blobUrl;
+                          const ext = viewTarget.filepath.split(".").pop();
+                          a.download = `${viewTarget.title}.${ext}`;
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                          window.URL.revokeObjectURL(blobUrl);
+                        } catch (err) {
+                          console.error("Download failed:", err);
+                        }
+                      }}
                     >
                       <Download size={16} />
                       Download Word Document
-                    </a>
+                    </button>
                   </div>
                 )}
 
@@ -540,7 +674,7 @@ export default function OrdinancesPage({
                   <div className={lStyles.viewModalCouncilSection}>
                     <div className={lStyles.viewModalCouncilHeader}>
                       <div className={lStyles.viewModalCouncilTitle}>
-                        Council Members
+                        Author
                       </div>
                       <div className={lStyles.viewModalCouncilCount}>
                         {viewTarget.officials.length} member{viewTarget.officials.length !== 1 ? "s" : ""}
@@ -571,6 +705,151 @@ export default function OrdinancesPage({
                         </div>
                       ))}
                     </div>
+                  </div>
+                </>
+              )}
+
+              {/* ── Review workflow (hidden once published) ── */}
+              {viewTarget.status !== "published" && (
+                <>
+                  <div className={lStyles.viewModalDivider} />
+
+                  {/* Replace file — Secretary or Clerk, while the draft is still under review */}
+                  {(isSecretary || isClerk) && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>
+                        Replace Draft File
+                      </div>
+                      <div className={lStyles.uploadZone} onClick={() => document.getElementById("reviewFileInput")?.click()}>
+                        <div className={lStyles.uploadIcon}>📎</div>
+                        <div className={lStyles.uploadText}>
+                          {reviewFile ? reviewFile.name : "Click to choose a replacement file"}
+                        </div>
+                        <input
+                          id="reviewFileInput"
+                          type="file"
+                          accept=".pdf,.doc,.docx,image/*"
+                          style={{ display: "none" }}
+                          onChange={(e) => setReviewFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+                      {reviewFile && viewTarget.status !== "needs_revision" && (
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSm}`}
+                          style={{ marginTop: 8 }}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleReplaceFile(viewTarget.id)}
+                        >
+                          <Upload size={13} /> Upload Replacement
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Comment thread */}
+                  <div className={lStyles.commentsLabel}>Comments</div>
+                  <div className={lStyles.commentsThread}>
+                    {loadingComments ? (
+                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                        Loading comments...
+                      </div>
+                    ) : reviewComments.length === 0 ? (
+                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                        No comments yet
+                      </div>
+                    ) : (
+                      reviewComments.map((c) => (
+                        <div key={c.id} className={lStyles.comment}>
+                          <div className={lStyles.commentMeta}>
+                            <span className={lStyles.commentAuthor}>
+                              {c.author?.name || c.author_role}
+                            </span>
+                            <span>
+                              {new Date(c.created_at).toLocaleString("en-PH", {
+                                month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                          <div className={lStyles.commentText}>{c.text}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {(isSecretary || isClerk) && (
+                    <div className={lStyles.commentInputRow}>
+                      <textarea
+                        className={lStyles.commentInput}
+                        rows={2}
+                        placeholder="Add a comment..."
+                        value={reviewCommentText}
+                        onChange={(e) => setReviewCommentText(e.target.value)}
+                      />
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSm}`}
+                        disabled={reviewSubmitting || !reviewCommentText.trim()}
+                        onClick={handleSendComment}
+                      >
+                        <Send size={13} />
+                      </button>
+                    </div>
+                  )}
+
+                  {reviewError && (
+                    <div style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}>{reviewError}</div>
+                  )}
+
+                  {/* Status + role driven actions */}
+                  <div className={lStyles.viewModalFileActions} style={{ marginTop: 16 }}>
+                    {isSecretary && viewTarget.status === "pending" && (
+                      <>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleAccept(viewTarget.id)}
+                        >
+                          ✅ Accept
+                        </button>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                          disabled={reviewSubmitting || !reviewCommentText.trim()}
+                          title={!reviewCommentText.trim() ? "Enter a comment above explaining the requested changes" : ""}
+                          onClick={handleRequestChanges}
+                        >
+                          Request Changes
+                        </button>
+                      </>
+                    )}
+
+                    {isClerk && viewTarget.status === "needs_revision" && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                        disabled={reviewSubmitting}
+                        onClick={() => handleResubmit(viewTarget.id)}
+                      >
+                        <Upload size={13} /> Replace File &amp; Resubmit
+                      </button>
+                    )}
+
+                    {isViceMayor && viewTarget.status === "ready_to_publish" && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                        disabled={reviewSubmitting}
+                        onClick={() => handleVMApprove(viewTarget.id)}
+                      >
+                        ✅ Approve
+                      </button>
+                    )}
+
+                    {isSecretary && viewTarget.status === "approved" && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                        disabled={reviewSubmitting}
+                        onClick={() => handlePublish(viewTarget.id)}
+                      >
+                        ✅ Publish
+                      </button>
+                    )}
                   </div>
                 </>
               )}

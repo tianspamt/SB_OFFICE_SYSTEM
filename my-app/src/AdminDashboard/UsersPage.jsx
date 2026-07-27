@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { Archive } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 
 export default function UsersPage({ users, setDeleteTarget }) {
@@ -27,7 +27,7 @@ export default function UsersPage({ users, setDeleteTarget }) {
                 <td className={styles.td}><span className={`${styles.badge} ${styles.badgeUser}`}>user</span></td>
                 <td className={styles.td}>
                   <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: u.id, type: "user", name: u.name })}>
-                    <Trash2 size={13} /> Delete
+                    <Archive size={13} /> Archive
                   </button>
                 </td>
               </tr>

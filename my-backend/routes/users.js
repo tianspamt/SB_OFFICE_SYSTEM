@@ -13,6 +13,7 @@ const SALT_ROUNDS = 10
 router.get('/', verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
     .from('users').select('id, name, username, email, role')
+    .eq('is_archived', false)
     .order('id', { ascending: true })
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
@@ -103,6 +104,9 @@ router.put('/:id/password', verifyToken, [
 })
 
 // DELETE /api/users/:id
+// Archives the account instead of a hard delete: the row stays in place (so
+// historical references like activity_logs.user_id still resolve) and is
+// flagged is_archived, which also blocks the account from authenticating.
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   const { id } = req.params
   try {
@@ -110,10 +114,32 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
       .from('users').select('id, username').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'User not found.' })
     if (req.user.id === parseInt(id))
-      return res.status(400).json({ error: 'You cannot delete your own account.' })
-    const { error } = await supabase.from('users').delete().eq('id', id)
+      return res.status(400).json({ error: 'You cannot archive your own account.' })
+    const { error } = await supabase
+      .from('users')
+      .update({ is_archived: true, archived_at: new Date().toISOString(), archived_by: req.user.id })
+      .eq('id', id)
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'DELETE', 'Users', `Deleted user: ${existing.username}`)
+    await logActivity(req, 'ARCHIVE', 'Users', `Archived user: ${existing.username}`)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/users/:id/restore
+router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
+  const { id } = req.params
+  try {
+    const { data: existing } = await supabase
+      .from('users').select('id, username').eq('id', id).single()
+    if (!existing) return res.status(404).json({ error: 'User not found.' })
+    const { error } = await supabase
+      .from('users')
+      .update({ is_archived: false, archived_at: null, archived_by: null })
+      .eq('id', id)
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'RESTORE', 'Users', `Restored user: ${existing.username}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

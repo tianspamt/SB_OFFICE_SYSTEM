@@ -13,7 +13,9 @@ import styles from "./LegislativeModule.module.css";
 export function StatusBadge({ status }) {
   const map = {
   pending: { label: "● Pending Review", cls: styles.statusPending },
+  needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
   ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
+  approved: { label: "VM Approved", cls: styles.statusApproved },
   published: { label: "● Published", cls: styles.statusPublished },
 };
   const s = map[status] || map.pending;

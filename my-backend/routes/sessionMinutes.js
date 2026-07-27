@@ -6,7 +6,7 @@ const os = require('os')
 const Tesseract = require('tesseract.js')
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly } = require('../middleware/auth')
+const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
 
@@ -17,9 +17,13 @@ router.get('/', async (req, res) => {
     const { month, year, type } = req.query
     let query = supabase
       .from('session_minutes')
-      .select('id, session_number, session_date, session_type, venue, agenda, minutes_text, filename, filetype, created_at')
+      .select('id, session_number, session_date, session_type, venue, agenda, minutes_text, filename, filetype, created_at, status, revision_count, reviewed_by, reviewed_at')
       .order('session_date', { ascending: false })
     if (type && type !== 'all') query = query.eq('session_type', type)
+    if (req.query.status) {
+      const statuses = req.query.status.split(',')
+      query = query.in('status', statuses)
+    }
     const { data, error } = await query
     if (error) return res.status(500).json({ error: error.message })
     let results = data
@@ -57,7 +61,8 @@ router.post('/', verifyToken, adminOnly, async (req, res) => {
         session_type: session_type || 'regular',
         venue: venue || null,
         agenda: agenda || null,
-        minutes_text: minutes_text || null
+        minutes_text: minutes_text || null,
+        status: 'pending'
       })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
@@ -166,15 +171,25 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // DELETE /api/session-minutes/:id
+// Archives the session minutes instead of a hard delete (see ordinances.js for the same pattern).
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const { data: existing } = await supabase
-      .from('session_minutes').select('id, session_number').eq('id', req.params.id).single()
-    if (!existing) return res.status(404).json({ error: 'Session minutes not found.' })
+    const { data: existing, error: fetchErr } = await supabase
+      .from('session_minutes').select('*').eq('id', req.params.id).single()
+    if (fetchErr || !existing) return res.status(404).json({ error: 'Session minutes not found.' })
+
+    const { error: archiveErr } = await supabase.from('archives').insert({
+      original_id: existing.id,
+      entity_type: 'session_minutes',
+      data: existing,
+      archived_by: req.user.id,
+    })
+    if (archiveErr) return res.status(500).json({ error: archiveErr.message })
+
     const { error } = await supabase
       .from('session_minutes').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'DELETE', 'Sessions', `Deleted session: ${existing.session_number || req.params.id}`)
+    await logActivity(req, 'ARCHIVE', 'Sessions', `Archived session: ${existing.session_number || req.params.id}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -259,6 +274,186 @@ router.get('/:id/print', async (req, res) => {
     </body></html>`)
   } catch (err) {
     res.status(500).send('Server error')
+  }
+})
+
+// ─── Review workflow: pending → needs_revision → pending → ready_to_publish → approved → published
+async function loadSessionInStatus(id, expectedStatus) {
+  const { data, error } = await supabase.from('session_minutes').select('*').eq('id', id).single()
+  if (error || !data) return { notFound: true }
+  if (data.status !== expectedStatus) return { wrongStatus: true, data }
+  return { data }
+}
+
+// ─── PUT /api/session-minutes/:id/revise ──────────────────────────────────────
+// Secretary or Clerk — corrects the draft (either a replacement file, re-run
+// through OCR/PDF extraction, or a direct edit of the text fields), bumps revision_count.
+router.put('/:id/revise', verifyToken, secretaryOrClerk, upload.single('file'), handleMulterError, async (req, res) => {
+  const { id } = req.params
+  try {
+    const { data: existing, error: fetchErr } = await supabase
+      .from('session_minutes').select('*').eq('id', id).single()
+    if (fetchErr || !existing) return res.status(404).json({ error: 'Session minutes not found.' })
+
+    const updateData = { revision_count: (existing.revision_count || 0) + 1 }
+
+    if (req.file) {
+      const mime = req.file.mimetype
+      let extractedText = null
+      if (mime.startsWith('image/')) {
+        const tempPath = path.join(os.tmpdir(), `${Date.now()}-${req.file.originalname}`)
+        fs.writeFileSync(tempPath, req.file.buffer)
+        const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+        fs.unlinkSync(tempPath)
+        extractedText = text.trim() || null
+      } else if (mime === 'application/pdf') {
+        const PDFParser = require('pdf2json')
+        extractedText = await new Promise((resolve) => {
+          const pdfParser = new PDFParser()
+          pdfParser.on('pdfParser_dataReady', (data) => {
+            const text = data.Pages
+              ?.flatMap(p => p.Texts)
+              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
+              ?.join(' ')
+              ?.trim() || ''
+            resolve(text || null)
+          })
+          pdfParser.on('pdfParser_dataError', () => resolve(null))
+          pdfParser.parseBuffer(req.file.buffer)
+        })
+      }
+      updateData.filename = req.file.originalname
+      updateData.filetype = mime
+      if (extractedText) updateData.minutes_text = extractedText
+    } else {
+      const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
+      if (session_number !== undefined) updateData.session_number = session_number || null
+      if (session_date !== undefined) updateData.session_date = session_date
+      if (session_type !== undefined) updateData.session_type = session_type || 'regular'
+      if (venue !== undefined) updateData.venue = venue || null
+      if (agenda !== undefined) updateData.agenda = agenda || null
+      if (minutes_text !== undefined) updateData.minutes_text = minutes_text || null
+    }
+
+    const { data, error } = await supabase
+      .from('session_minutes').update(updateData).eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+
+    await logActivity(req, 'REPLACE_FILE', 'Sessions', `Revised draft session: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── PUT /api/session-minutes/:id/accept ──────────────────────────────────────
+// Secretary — pending → ready_to_publish
+router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
+  const { id } = req.params
+  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'pending')
+  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
+  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not pending review.' })
+  try {
+    const { data, error } = await supabase
+      .from('session_minutes')
+      .update({ status: 'ready_to_publish', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
+      .eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'ACCEPT', 'Sessions', `Accepted draft session: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── PUT /api/session-minutes/:id/request-changes ─────────────────────────────
+// Secretary — pending → needs_revision, requires an accompanying comment
+router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
+  const { id } = req.params
+  const { comment } = req.body
+  if (!comment?.trim()) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
+  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'pending')
+  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
+  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not pending review.' })
+  try {
+    const { error: commentErr } = await supabase.from('comments').insert({
+      entity_type: 'session_minutes',
+      entity_id: id,
+      author_id: req.user.id,
+      author_role: req.user.position || req.user.role,
+      text: comment.trim(),
+    })
+    if (commentErr) return res.status(500).json({ error: commentErr.message })
+
+    const { data, error } = await supabase
+      .from('session_minutes')
+      .update({ status: 'needs_revision', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
+      .eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'REQUEST_CHANGES', 'Sessions', `Requested changes on draft session: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── PUT /api/session-minutes/:id/vm-approve ──────────────────────────────────
+// Vice-Mayor — ready_to_publish → approved
+router.put('/:id/vm-approve', verifyToken, viceMayorOnly, async (req, res) => {
+  const { id } = req.params
+  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'ready_to_publish')
+  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
+  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not ready for Vice-Mayor approval.' })
+  try {
+    const { data, error } = await supabase
+      .from('session_minutes')
+      .update({ status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
+      .eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'VM_APPROVE', 'Sessions', `Vice-Mayor approved: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── PUT /api/session-minutes/:id/publish ─────────────────────────────────────
+// Secretary — approved → published
+router.put('/:id/publish', verifyToken, secretaryOnly, async (req, res) => {
+  const { id } = req.params
+  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'approved')
+  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
+  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not approved for publishing.' })
+  try {
+    const { data, error } = await supabase
+      .from('session_minutes')
+      .update({ status: 'published' })
+      .eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'PUBLISH', 'Sessions', `Published: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── PUT /api/session-minutes/:id/resubmit ────────────────────────────────────
+// Clerk — needs_revision → pending
+router.put('/:id/resubmit', verifyToken, clerkOnly, async (req, res) => {
+  const { id } = req.params
+  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'needs_revision')
+  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
+  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not awaiting revision.' })
+  try {
+    const { data, error } = await supabase
+      .from('session_minutes')
+      .update({ status: 'pending' })
+      .eq('id', id).select().single()
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'RESUBMIT', 'Sessions', `Resubmitted draft after revision: ${existing.session_number || id}`)
+    res.json({ success: true, data })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 

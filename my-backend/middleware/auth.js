@@ -1,16 +1,22 @@
 const jwt = require('jsonwebtoken')
 const { validationResult } = require('express-validator')
+const supabase = require('../config/supabase')
 
 const JWT_SECRET = process.env.JWT_SECRET
 
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1]
   if (!token) return res.status(401).json({ error: 'No token provided.' })
   try {
-    req.user = jwt.verify(token, JWT_SECRET, {
+    const decoded = jwt.verify(token, JWT_SECRET, {
       issuer: 'sangguniang-bayan-system',
       audience: 'sb-client'
     })
+    const { data: user } = await supabase
+      .from('users').select('is_archived').eq('id', decoded.id).single()
+    if (user?.is_archived)
+      return res.status(401).json({ error: 'This account has been archived.' })
+    req.user = decoded
     next()
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token.' })
@@ -35,6 +41,18 @@ const secretaryOrClerk = (req, res, next) => {
   next()
 }
 
+const clerkOnly = (req, res, next) => {
+  if (req.user?.position !== 'clerk')
+    return res.status(403).json({ error: 'Clerk only.' })
+  next()
+}
+
+const viceMayorOnly = (req, res, next) => {
+  if (req.user?.position !== 'vice_mayor')
+    return res.status(403).json({ error: 'Vice-Mayor only.' })
+  next()
+}
+
 const validate = (req, res, next) => {
   const errors = validationResult(req)
   if (!errors.isEmpty())
@@ -42,4 +60,4 @@ const validate = (req, res, next) => {
   next()
 }
 
-module.exports = { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, validate }
+module.exports = { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly, validate }

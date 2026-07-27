@@ -31,6 +31,7 @@ import {
   Pencil,
   Trash2,
   CalendarDays,
+  Archive,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -60,6 +61,9 @@ import CalendarPage from "./CalendarPage";
 import LogsPage from "./LogsPage";
 import DashboardPage from "./DashboardPage";
 import ContentManagementPage from "./ContentManagementPage";
+import ArchivesPage from "./ArchivesPage";
+
+const ARCHIVABLE_TYPES = ["user", "ordinance", "resolution", "official", "session"];
 
 export default function AdminDashboard() {
   // ── core ──
@@ -524,7 +528,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("User deleted!");
+        showMsg("User archived!");
         fetchUsers();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -620,7 +624,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Deleted!");
+        showMsg("Archived!");
         fetchOrdinances();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -720,7 +724,7 @@ const handleUploadResolution = async () => {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Resolution deleted!");
+        showMsg("Resolution archived!");
         fetchResolutions();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -823,7 +827,7 @@ const handleUploadResolution = async () => {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Council member deleted!");
+        showMsg("Council member archived!");
         fetchOfficials();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1038,7 +1042,7 @@ const handleUploadResolution = async () => {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Session deleted!");
+        showMsg("Session archived!");
         fetchSessionMinutes();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1222,9 +1226,9 @@ const handleUploadResolution = async () => {
 
   const ADMIN_ONLY_TABS = canManageUsers
     ? canViewLogs
-      ? ["users", "admins", "logs"]
-      : ["users", "admins"]
-    : ["users", "admins", "logs"];
+      ? ["users", "admins", "logs", "archives"]
+      : ["users", "admins", "archives"]
+    : ["users", "admins", "logs", "archives"];
   const pageLoading =
     fetchingUsers ||
     fetchingOrdinances ||
@@ -1425,6 +1429,22 @@ const handleUploadResolution = async () => {
             </span>
             <span className={styles.navLabel}>Content Management</span>
           </button>
+
+          {/* Archives */}
+          {canManageUsers && (
+            <button
+              className={`${styles.navBtn} ${
+                activeTab === "archives" ? styles.navBtnActive : ""
+              }`}
+              onClick={() => handleTabChange("archives")}
+            >
+              <span className={styles.navIcon}>
+                <Archive size={18} strokeWidth={1.5} />
+              </span>
+              <span className={styles.navLabel}>Archives</span>
+            </button>
+          )}
+
           {canManageUsers && (
   <>
     <div className={styles.navDivider} />
@@ -1651,6 +1671,9 @@ const handleUploadResolution = async () => {
   readOnly={!canEditLegislative}
   canPublish={canPublishLegislative}
   isViceMayor={isViceMayor}
+  isSecretary={isSecretary}
+  isClerk={isClerk}
+  onRefresh={fetchOrdinances}
 />
         )}
         {activeTab === "resolutions" && !fetchingResolutions && (
@@ -1661,6 +1684,9 @@ const handleUploadResolution = async () => {
   readOnly={!canEditLegislative}
   canPublish={canPublishLegislative}
   isViceMayor={isViceMayor}
+  isSecretary={isSecretary}
+  isClerk={isClerk}
+  onRefresh={fetchResolutions}
 />
         )}
 
@@ -1701,6 +1727,9 @@ const handleUploadResolution = async () => {
   readOnly={!canEditLegislative}
   canPublish={canPublishLegislative}
   isViceMayor={isViceMayor}
+  isSecretary={isSecretary}
+  isClerk={isClerk}
+  onRefresh={fetchSessionMinutes}
 />
         )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
@@ -1751,6 +1780,7 @@ const handleUploadResolution = async () => {
         {activeTab === "content" && (
           <ContentManagementPage isAdmin={isAdmin} currentUser={admin} />
         )}
+        {activeTab === "archives" && canManageUsers && <ArchivesPage />}
       </div>
 
       {/* ══════════════════ MODALS ══════════════════ */}
@@ -3502,10 +3532,18 @@ const handleUploadResolution = async () => {
       {/* Delete Confirm */}
       {deleteTarget && (
         <ConfirmModal
-          type="delete"
-          title={`Delete this ${deleteTarget.type}?`}
-          message={`"${deleteTarget.name}" will be permanently removed. This cannot be undone.`}
-          confirmLabel="Delete"
+          type={ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "warning" : "delete"}
+          title={
+            ARCHIVABLE_TYPES.includes(deleteTarget.type)
+              ? `Archive this ${deleteTarget.type}?`
+              : `Delete this ${deleteTarget.type}?`
+          }
+          message={
+            ARCHIVABLE_TYPES.includes(deleteTarget.type)
+              ? `"${deleteTarget.name}" will be moved to Archives. You can restore it later.`
+              : `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
+          }
+          confirmLabel={ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "Archive" : "Delete"}
           onConfirm={() => {
             if (deleteTarget.type === "user") handleDeleteUser(deleteTarget.id);
             else if (deleteTarget.type === "ordinance")

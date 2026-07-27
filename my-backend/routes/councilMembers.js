@@ -19,6 +19,7 @@ router.get('/', async (req, res) => {
           id, term_period, term_start, term_end, status, is_reelected, notes, created_at
         )
       `)
+      .eq('is_archived', false)
       .order('created_at', { ascending: false })
     if (error) return res.status(500).json({ error: error.message })
 
@@ -145,17 +146,40 @@ router.put('/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterE
 })
 
 // DELETE /api/sb-council-members/:id
+// Archives the council member instead of a hard delete: the row stays in place
+// (so already-published ordinances/resolutions keep showing their name/photo)
+// and is just hidden from active lists and "select author" pickers.
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: member } = await supabase
       .from('sb_council_members')
-      .select('photo_path, full_name')
+      .select('id, full_name')
       .eq('id', req.params.id).single()
     if (!member) return res.status(404).json({ error: 'Council member not found.' })
-    if (member.photo_path) await deleteFromStorage(member.photo_path)
-    const { error } = await supabase.from('sb_council_members').delete().eq('id', req.params.id)
+    const { error } = await supabase
+      .from('sb_council_members')
+      .update({ is_archived: true, archived_at: new Date().toISOString(), archived_by: req.user.id })
+      .eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'DELETE', 'Officials', `Deleted council member: ${member.full_name}`)
+    await logActivity(req, 'ARCHIVE', 'Officials', `Archived council member: ${member.full_name}`)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/sb-council-members/:id/restore
+router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
+  try {
+    const { data: member } = await supabase
+      .from('sb_council_members').select('id, full_name').eq('id', req.params.id).single()
+    if (!member) return res.status(404).json({ error: 'Council member not found.' })
+    const { error } = await supabase
+      .from('sb_council_members')
+      .update({ is_archived: false, archived_at: null, archived_by: null })
+      .eq('id', req.params.id)
+    if (error) return res.status(500).json({ error: error.message })
+    await logActivity(req, 'RESTORE', 'Officials', `Restored council member: ${member.full_name}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

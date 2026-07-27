@@ -17,6 +17,8 @@ const resolutionRoutes    = require('./routes/resolutions')
 const sessionMinuteRoutes = require('./routes/sessionMinutes')
 const announcementRoutes  = require('./routes/announcements')
 const calendarEventRoutes = require('./routes/calendarEvents')
+const archiveRoutes       = require('./routes/archives')
+const commentRoutes       = require('./routes/comments')
 
 const app = express()
 
@@ -52,6 +54,8 @@ app.use('/api/resolutions', resolutionRoutes)
 app.use('/api/session-minutes', sessionMinuteRoutes)
 app.use('/api/announcements', announcementRoutes)
 app.use('/api/calendar-events', calendarEventRoutes)
+app.use('/api/archives', archiveRoutes)
+app.use('/api/comments', commentRoutes)
 
 // ---- GLOBAL ERROR HANDLER ----
 app.use((err, req, res, next) => {

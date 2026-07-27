@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  Users, Plus, Search, Pencil, Trash2, X, Eye,
+  Users, Plus, Search, Pencil, Archive, X, Eye,
   ChevronDown, ChevronRight, CalendarDays, UserPlus
 } from 'lucide-react'
 import styles from './OfficialsPage.module.css'
@@ -100,8 +100,9 @@ function MemberCard({ member, term, onEdit, onDelete, onViewProfile, readOnly = 
       <button
         className={`${styles.iconBtn} ${styles.iconBtnDel}`}
         onClick={() => onDelete(member)}
+        title="Archive"
       >
-        <Trash2 size={13} />
+        <Archive size={13} />
       </button>
     </>
   )}

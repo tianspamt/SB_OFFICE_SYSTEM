@@ -82,6 +82,15 @@ export const ACTION_COLORS = {
   CREATE: { bg: "#fef9c3", color: "#854d0e" },
   UPDATE: { bg: "#ffedd5", color: "#9a3412" },
   DELETE: { bg: "#fee2e2", color: "#991b1b" },
+  ARCHIVE: { bg: "#fef3c7", color: "#92400e" },
+  RESTORE: { bg: "#e0f2fe", color: "#075985" },
+  ACCEPT: { bg: "#d1fae5", color: "#065f46" },
+  REQUEST_CHANGES: { bg: "#fee2e2", color: "#991b1b" },
+  VM_APPROVE: { bg: "#dbeafe", color: "#1e40af" },
+  PUBLISH: { bg: "#ede9fe", color: "#5b21b6" },
+  RESUBMIT: { bg: "#fef9c3", color: "#854d0e" },
+  REPLACE_FILE: { bg: "#ffedd5", color: "#9a3412" },
+  COMMENT: { bg: "#f3f4f6", color: "#374151" },
 };
 
 export const priorityConfig = {
@@ -127,4 +136,5 @@ export const tabTitles = {
   officials: "Sangguniang Bayan Council Members",
   logs: "Activity Logs",
   content: "Content Management",
+  archives: "Archives",
 };
