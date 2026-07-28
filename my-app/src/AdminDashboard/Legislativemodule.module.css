@@ -1137,6 +1137,43 @@
   flex-direction: column;
   gap: 10px;
 }
+
+/* ── Pending review actions (Accept / Request Changes) ── */
+.pendingActionsRow {
+  display: flex;
+  gap: 10px;
+}
+.pillActionBtn {
+  flex: 1;
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  transition: background 0.15s, transform 0.1s;
+}
+.pillActionBtn:active:not(:disabled) { transform: scale(0.98); }
+.pillActionBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pillAccept {
+  background: #009439;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 148, 57, 0.25);
+}
+.pillAccept:hover:not(:disabled) { background: #00792e; }
+
+.pillReject {
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+}
+.pillReject:hover:not(:disabled) { background: #b91c1c; }
 .viewModalFileBtn {
   display: flex;
   align-items: center;

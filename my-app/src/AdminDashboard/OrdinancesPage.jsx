@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Upload,
   Send,
+  Check,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
@@ -802,23 +803,23 @@ export default function OrdinancesPage({
                   {/* Status + role driven actions */}
                   <div className={lStyles.viewModalFileActions} style={{ marginTop: 16 }}>
                     {isSecretary && viewTarget.status === "pending" && (
-                      <>
+                      <div className={lStyles.pendingActionsRow}>
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleAccept(viewTarget.id)}
-                        >
-                          ✅ Accept
-                        </button>
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
                           disabled={reviewSubmitting || !reviewCommentText.trim()}
                           title={!reviewCommentText.trim() ? "Enter a comment above explaining the requested changes" : ""}
                           onClick={handleRequestChanges}
                         >
-                          Request Changes
+                          <X size={16} /> Request Changes
                         </button>
-                      </>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleAccept(viewTarget.id)}
+                        >
+                          <Check size={16} /> Accept
+                        </button>
+                      </div>
                     )}
 
                     {isClerk && viewTarget.status === "needs_revision" && (

@@ -91,13 +91,20 @@
     color: #777777;
     
   }
-  .input-box i{
+  .input-box i,
+  .input-box .input-icon{
     position: absolute;
     right: 20px;
-    top: 30%;
-    transform: translate(-50%);
+    top: 50%;
+    transform: translateY(-50%);
     font-size: 20px;
-    
+    color: #555555;
+    pointer-events: none;
+  }
+  .input-box .toggle-password{
+    cursor: pointer;
+    user-select: none;
+    pointer-events: auto;
   }
   .wrapper .remember-forgot{
     display: flex;
@@ -210,7 +217,8 @@
     font-size: 14px;
     padding: 18px 40px 18px 18px;
   }
-  .input-box i {
+  .input-box i,
+  .input-box .input-icon {
     font-size: 18px;
     right: 15px;
   }
@@ -265,7 +273,8 @@
     padding: 16px 35px 16px 15px;
     border-radius: 8px;
   }
-  .input-box i {
+  .input-box i,
+  .input-box .input-icon {
     font-size: 16px;
     right: 12px;
   }
@@ -325,7 +334,8 @@
     padding: 14px 30px 14px 12px;
     border-radius: 6px;
   }
-  .input-box i {
+  .input-box i,
+  .input-box .input-icon {
     font-size: 14px;
     right: 10px;
   }

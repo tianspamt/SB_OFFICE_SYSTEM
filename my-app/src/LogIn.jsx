@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { User, Eye, EyeOff } from 'lucide-react'
 import './LogIn.css'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
@@ -10,6 +11,7 @@ export default function Login() {
   const [passwordError, setPasswordError] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -63,12 +65,12 @@ export default function Login() {
               if (e.target.value) setIdentifierError(false)
             }}
           />
-          <i className='bx bxs-user'></i>
+          <User className="input-icon" size={20} />
         </div>
 
         <div className={`input-box ${passwordError ? 'input-error' : ''}`}>
           <input
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             placeholder={passwordError ? 'Password is required' : 'Password'}
             value={password}
             onChange={(e) => {
@@ -76,7 +78,25 @@ export default function Login() {
               if (e.target.value) setPasswordError(false)
             }}
           />
-          <i className='bx bxs-lock-alt'></i>
+          {showPassword ? (
+            <EyeOff
+              className="input-icon toggle-password"
+              size={20}
+              onClick={() => setShowPassword(false)}
+              role="button"
+              tabIndex={0}
+              aria-label="Hide password"
+            />
+          ) : (
+            <Eye
+              className="input-icon toggle-password"
+              size={20}
+              onClick={() => setShowPassword(true)}
+              role="button"
+              tabIndex={0}
+              aria-label="Show password"
+            />
+          )}
         </div>
 
         {loginError && (
