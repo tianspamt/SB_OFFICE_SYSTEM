@@ -76,7 +76,7 @@ export default function AdminDashboard() {
   const [modalMessageType, setModalMessageType] = useState("success");
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [legislativeOpen, setLegislativeOpen] = useState(false);
   const [userMgmtOpen, setUserMgmtOpen] = useState(false);
@@ -327,6 +327,16 @@ export default function AdminDashboard() {
     if (!isAdmin && ADMIN_ONLY_TABS.includes(key)) return;
     setActiveTab(key);
     setMobileOpen(false);
+  };
+  // Only laptops/PCs with a real mouse get hover-to-expand; touch devices keep manual toggle.
+  const canHoverSidebar = () =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  const handleSidebarMouseEnter = () => {
+    if (canHoverSidebar()) setSidebarCollapsed(false);
+  };
+  const handleSidebarMouseLeave = () => {
+    if (canHoverSidebar()) setSidebarCollapsed(true);
   };
 
   // ─── Fetches ──────────────────────────────────────────────────────────────────
@@ -1271,30 +1281,9 @@ const handleUploadResolution = async () => {
         className={`${styles.sidebar} ${
           sidebarCollapsed ? styles.collapsed : ""
         } ${mobileOpen ? styles.mobileOpen : ""}`}
+        onMouseEnter={handleSidebarMouseEnter}
+        onMouseLeave={handleSidebarMouseLeave}
       >
-        <button
-          className={styles.sidebarToggle}
-          onClick={() => setSidebarCollapsed((v) => !v)}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            fill="none"
-            style={{
-              transform: sidebarCollapsed ? "rotate(180deg)" : "rotate(0deg)",
-              transition: "transform 0.3s",
-            }}
-          >
-            <path
-              d="M8 2L4 6L8 10"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
         <div className={styles.sidebarHeader}>
           <img src={logo} alt="Balilihan Seal" className={styles.logoCircle} />
           <div className={styles.logoTextWrap}>
