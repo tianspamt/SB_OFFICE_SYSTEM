@@ -125,6 +125,103 @@ export const MONTHS = [
   "Dec",
 ];
 
+// ─── Legislative Record Numbering ──────────────────────────────────────────
+// Implements the "Legislative Record Numbering" functional requirement:
+//  - suggest the next sequential number for a record type + year
+//  - allow the suggestion to be edited by the user (plain string state, so
+//    this is already possible wherever these helpers are used)
+//  - detect duplicate numbers before a record is saved
+//  - (retention of the assigned number through the document lifecycle is
+//    handled by simply not re-suggesting a number once a record exists —
+//    edit forms should always prefill from the saved record, never from
+//    these suggestion helpers)
+
+export const getCurrentYear = () => new Date().getFullYear();
+
+const ordinalSuffix = (n) => {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+};
+
+// Pulls the trailing numeric sequence out of a record number string, e.g.
+// "Ordinance No. 2026-007" -> 7
+const extractSequence = (numberStr) => {
+  if (!numberStr) return 0;
+  const match = String(numberStr).match(/(\d+)\s*$/);
+  return match ? parseInt(match[1], 10) : 0;
+};
+
+const nextSequenceForYear = (records, numberField, yearField, year) => {
+  const y = String(year || getCurrentYear());
+  const seqs = records
+    .filter((r) => String(r[yearField] ?? "") === y)
+    .map((r) => extractSequence(r[numberField]));
+  const max = seqs.length ? Math.max(...seqs) : 0;
+  return max + 1;
+};
+
+// Suggests the next ordinance number for the given year, following the
+// office's "Ordinance No. {year}-{sequence}" convention.
+export const suggestOrdinanceNumber = (ordinances = [], year) => {
+  const y = String(year || getCurrentYear());
+  const next = nextSequenceForYear(ordinances, "ordinance_number", "year", y);
+  return `Ordinance No. ${y}-${String(next).padStart(3, "0")}`;
+};
+
+// Suggests the next resolution number for the given year, following the
+// office's "Resolution No. {year}-{sequence}" convention.
+export const suggestResolutionNumber = (resolutions = [], year) => {
+  const y = String(year || getCurrentYear());
+  const next = nextSequenceForYear(resolutions, "resolution_number", "year", y);
+  return `Resolution No. ${y}-${String(next).padStart(3, "0")}`;
+};
+
+// Suggests the next session number for the given year + session type,
+// following the office's "{ordinal} Regular/Special Session, {year}"
+// convention. Sequence resets every year, per session type.
+export const suggestSessionNumber = (
+  sessionMinutes = [],
+  year,
+  sessionType = "regular"
+) => {
+  const y = String(year || getCurrentYear());
+  const label =
+    sessionType === "special" ? "Special Session" : "Regular Session";
+  const count = sessionMinutes.filter((s) => {
+    const sy = s.session_date
+      ? new Date(s.session_date).getFullYear().toString()
+      : "";
+    return sy === y && (s.session_type || "regular") === sessionType;
+  }).length;
+  return `${ordinalSuffix(count + 1)} ${label}, ${y}`;
+};
+
+// Case-insensitive, whitespace-trimmed duplicate check across a list of
+// records for a given field (e.g. "ordinance_number"). Pass excludeId when
+// validating an edit so a record isn't flagged as a duplicate of itself.
+export const isDuplicateRecordNumber = (
+  records = [],
+  field,
+  value,
+  excludeId = null
+) => {
+  const v = (value || "").trim().toLowerCase();
+  if (!v) return false;
+  return records.some(
+    (r) => r.id !== excludeId && (r[field] || "").trim().toLowerCase() === v
+  );
+};
+
 export const tabTitles = {
   users: "Manage Users",
   admins: "Manage Admins",

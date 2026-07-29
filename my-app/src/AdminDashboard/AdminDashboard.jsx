@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./AdminDashboard.module.css";
 import logo from "../assets/image/balilihan-logo-Large-1.png";
 import {
@@ -42,6 +42,11 @@ import {
   formatDate,
   priorityConfig,
   tabTitles,
+  getCurrentYear,
+  suggestOrdinanceNumber,
+  suggestResolutionNumber,
+  suggestSessionNumber,
+  isDuplicateRecordNumber,
 } from "./AdminContext";
 import {
   TermStatusBadge,
@@ -63,7 +68,22 @@ import DashboardPage from "./DashboardPage";
 import ContentManagementPage from "./ContentManagementPage";
 import ArchivesPage from "./ArchivesPage";
 
-const ARCHIVABLE_TYPES = ["user", "ordinance", "resolution", "official", "session"];
+const ARCHIVABLE_TYPES = [
+  "user",
+  "ordinance",
+  "resolution",
+  "official",
+  "session",
+];
+
+// Fixed set of valid Sangguniang Bayan council positions — kept as a
+// dropdown (instead of free text) to prevent inconsistent/inaccurate entries.
+const OFFICIAL_POSITIONS = [
+  "Vice Mayor",
+  "Councilor",
+  "Liga ng mga Barangay President",
+  "SK Federated President",
+];
 
 export default function AdminDashboard() {
   // ── core ──
@@ -125,19 +145,26 @@ export default function AdminDashboard() {
 
   // ── data ──
   const [newUser, setNewUser] = useState({
-  name: "",
-  username: "",
-  email: "",
-  password: "",
-  position: "councilor",
-});
+    name: "",
+    username: "",
+    email: "",
+    password: "",
+    position: "councilor",
+  });
   const [newAdmin, setNewAdmin] = useState({
-  name: "",
-  username: "",
-  email: "",
-  password: "",
-  position: "secretary",
-});
+    name: "",
+    username: "",
+    email: "",
+    password: "",
+    position: "secretary",
+  });
+
+  // ── Legislative Record Numbering: tracks the last system-suggested
+  // number per record type so we know whether the user has since edited
+  // it manually (in which case we stop overwriting their input).
+  const lastOrdinanceSuggestion = useRef("");
+  const lastResolutionSuggestion = useRef("");
+  const lastSessionSuggestion = useRef("");
 
   // ordinances
   const [ordinances, setOrdinances] = useState([]);
@@ -453,7 +480,7 @@ export default function AdminDashboard() {
     setFetchingHolidays(true);
     try {
       const res = await fetch(
-        `https://date.nager.at/api/v3/PublicHolidays/${year}/PH`,
+        `https://date.nager.at/api/v3/PublicHolidays/${year}/PH`
       );
       const data = await res.json();
       setPhHolidays((prev) => ({
@@ -514,10 +541,13 @@ export default function AdminDashboard() {
     setSubmitting(true);
     try {
       const res = await fetch(`${API}/api/register`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ ...newUser, position: newUser.position || "councilor" }),
-});
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...newUser,
+          position: newUser.position || "councilor",
+        }),
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("User added!");
@@ -548,10 +578,24 @@ export default function AdminDashboard() {
 
   // ─── Ordinances ──────────────────────────────────────────────────────────────
   const handleUploadOrdinance = async () => {
-    if (!ordinanceNumber || !ordinanceTitle || !ordinanceYear || !ordinanceFile) {
-  showModalMsg("Please fill all fields and choose a file!", "error");
-  return;
-}
+    if (
+      !ordinanceNumber ||
+      !ordinanceTitle ||
+      !ordinanceYear ||
+      !ordinanceFile
+    ) {
+      showModalMsg("Please fill all fields and choose a file!", "error");
+      return;
+    }
+    if (
+      isDuplicateRecordNumber(ordinances, "ordinance_number", ordinanceNumber)
+    ) {
+      showModalMsg(
+        `"${ordinanceNumber}" is already in use by another ordinance. Please choose a different number.`,
+        "error"
+      );
+      return;
+    }
     setSubmitting(true);
     const fd = new FormData();
     fd.append("ordinance_number", ordinanceNumber);
@@ -560,7 +604,10 @@ export default function AdminDashboard() {
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
     try {
-  const res = await authFetch(`${API}/api/ordinances/upload`, { method: "POST", body: fd });
+      const res = await authFetch(`${API}/api/ordinances/upload`, {
+        method: "POST",
+        body: fd,
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("Ordinance uploaded!");
@@ -595,11 +642,25 @@ export default function AdminDashboard() {
   };
   const toggleEditOfficial = (id) =>
     setEditSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
   const handleUpdateOrdinance = async () => {
     if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceYear) {
       showModalMsg("All fields required!", "error");
+      return;
+    }
+    if (
+      isDuplicateRecordNumber(
+        ordinances,
+        "ordinance_number",
+        editOrdinanceNumber,
+        editingOrdinance.id
+      )
+    ) {
+      showModalMsg(
+        `"${editOrdinanceNumber}" is already in use by another ordinance. Please choose a different number.`,
+        "error"
+      );
       return;
     }
     setSubmitting(true);
@@ -612,7 +673,7 @@ export default function AdminDashboard() {
     try {
       const res = await authFetch(
         `${API}/api/ordinances/${editingOrdinance.id}`,
-        { method: "PUT", body: fd },
+        { method: "PUT", body: fd }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -643,51 +704,69 @@ export default function AdminDashboard() {
   };
   const toggleOfficial = (id) =>
     setSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
 
   // ─── Resolutions ─────────────────────────────────────────────────────────────
-const handleUploadResolution = async () => {
-  if (!resolutionNumber || !resolutionTitle || !resolutionYear || !resolutionFile) {
-    showModalMsg("Please fill all fields and choose a file!", "error");
-    return;
-  }
-  setSubmitting(true);
-  const fd = new FormData();
-  fd.append("resolution_number", resolutionNumber);
-  fd.append("title", resolutionTitle);
-  fd.append("year", resolutionYear);
-  fd.append("file", resolutionFile);
-  fd.append("officials", JSON.stringify(selectedResolutionOfficials));
-  try {
-    const res = await authFetch(`${API}/api/resolutions/upload`, {
-      method: "POST",
-      body: fd,
-    });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      showMsg("Resolution uploaded!");
-      setResolutionNumber("");
-      setResolutionTitle("");
-      setResolutionYear("");
-      setResolutionFile(null);
-      setSelectedResolutionOfficials([]);
-      setShowResolutionModal(false);
-      fetchResolutions();
-    } else showModalMsg(data.error || "Upload failed!", "error");
-  } catch {
-    showModalMsg("Server error!", "error");
-  } finally {
-    setSubmitting(false);
-  }
-};
+  const handleUploadResolution = async () => {
+    if (
+      !resolutionNumber ||
+      !resolutionTitle ||
+      !resolutionYear ||
+      !resolutionFile
+    ) {
+      showModalMsg("Please fill all fields and choose a file!", "error");
+      return;
+    }
+    if (
+      isDuplicateRecordNumber(
+        resolutions,
+        "resolution_number",
+        resolutionNumber
+      )
+    ) {
+      showModalMsg(
+        `"${resolutionNumber}" is already in use by another resolution. Please choose a different number.`,
+        "error"
+      );
+      return;
+    }
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("resolution_number", resolutionNumber);
+    fd.append("title", resolutionTitle);
+    fd.append("year", resolutionYear);
+    fd.append("file", resolutionFile);
+    fd.append("officials", JSON.stringify(selectedResolutionOfficials));
+    try {
+      const res = await authFetch(`${API}/api/resolutions/upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Resolution uploaded!");
+        setResolutionNumber("");
+        setResolutionTitle("");
+        setResolutionYear("");
+        setResolutionFile(null);
+        setSelectedResolutionOfficials([]);
+        setShowResolutionModal(false);
+        fetchResolutions();
+      } else showModalMsg(data.error || "Upload failed!", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const handleOpenEditResolution = (r) => {
     setEditingResolution(r);
     setEditResolutionNumber(r.resolution_number || "");
     setEditResolutionTitle(r.title);
     setEditResolutionYear(r.year || "");
     setEditResolutionSelectedOfficials(
-      r.officials ? r.officials.map((x) => x.id) : [],
+      r.officials ? r.officials.map((x) => x.id) : []
     );
     setEditResolutionFile(null);
     setModalMessage("");
@@ -695,11 +774,25 @@ const handleUploadResolution = async () => {
   };
   const toggleEditResolutionOfficial = (id) =>
     setEditResolutionSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
   const handleUpdateResolution = async () => {
     if (!editResolutionNumber || !editResolutionTitle || !editResolutionYear) {
       showModalMsg("All fields required!", "error");
+      return;
+    }
+    if (
+      isDuplicateRecordNumber(
+        resolutions,
+        "resolution_number",
+        editResolutionNumber,
+        editingResolution.id
+      )
+    ) {
+      showModalMsg(
+        `"${editResolutionNumber}" is already in use by another resolution. Please choose a different number.`,
+        "error"
+      );
       return;
     }
     setSubmitting(true);
@@ -712,7 +805,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/resolutions/${editingResolution.id}`,
-        { method: "PUT", body: fd },
+        { method: "PUT", body: fd }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -743,7 +836,7 @@ const handleUploadResolution = async () => {
   };
   const toggleResolutionOfficial = (id) =>
     setSelectedResolutionOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
 
   // ─── Officials ────────────────────────────────────────────────────────────────
@@ -814,7 +907,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${editingOfficial.id}`,
-        { method: "PUT", body: fd },
+        { method: "PUT", body: fd }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -846,7 +939,7 @@ const handleUploadResolution = async () => {
   };
   const getOfficialOrdinances = (id) =>
     ordinances.filter(
-      (o) => o.officials && o.officials.some((x) => x.id === id),
+      (o) => o.officials && o.officials.some((x) => x.id === id)
     );
 
   // ─── Terms ────────────────────────────────────────────────────────────────────
@@ -865,7 +958,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${termTarget.memberId}/terms`,
-        { method: "POST", body: JSON.stringify(termForm) },
+        { method: "POST", body: JSON.stringify(termForm) }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -907,7 +1000,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${termTarget.memberId}/terms/${termTarget.term.id}`,
-        { method: "PUT", body: JSON.stringify(termForm) },
+        { method: "PUT", body: JSON.stringify(termForm) }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -931,7 +1024,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/sb-council-members/${memberId}/terms/${termId}`,
-        { method: "DELETE" },
+        { method: "DELETE" }
       );
       const data = await res.json();
       if (data.success) {
@@ -950,46 +1043,65 @@ const handleUploadResolution = async () => {
   };
 
   // ─── Sessions ─────────────────────────────────────────────────────────────────
- const resetSessionForm = () => {
-  setSessionForm({
-    session_number: "",
-    session_date: "",
-    session_type: "regular",
-    venue: "",
-    agenda: "",
-    minutes_text: "",
-  });
-  setSessionFile(null);
-  setSessionInputMode("text");
-};
+  const resetSessionForm = () => {
+    const suggested = suggestSessionNumber(
+      sessionMinutes,
+      getCurrentYear(),
+      "regular"
+    );
+    lastSessionSuggestion.current = suggested;
+    setSessionForm({
+      session_number: suggested,
+      session_date: "",
+      session_type: "regular",
+      venue: "",
+      agenda: "",
+      minutes_text: "",
+    });
+    setSessionFile(null);
+    setSessionInputMode("text");
+  };
   const handleAddSession = async () => {
     if (!sessionForm.session_date) {
       showModalMsg("Session date is required!", "error");
       return;
     }
+    if (
+      isDuplicateRecordNumber(
+        sessionMinutes,
+        "session_number",
+        sessionForm.session_number
+      )
+    ) {
+      showModalMsg(
+        `"${sessionForm.session_number}" is already in use by another session. Please choose a different number.`,
+        "error"
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       if (sessionInputMode === "file") {
-  if (!sessionFile) {
-    showModalMsg("Please upload a file!", "error");
-    setSubmitting(false);
-    return;
-  }
-  const fd = new FormData();
-  Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
-  fd.append("file", sessionFile);
-  const res = await authFetch(`${API}/api/session-minutes/upload`, {
-    method: "POST",
-    body: fd,
-  });
-  const data = await res.json();
-  if (res.ok && data.success) {
-    showMsg("Session added!");
-    resetSessionForm();
-    setShowSessionModal(false);
-    fetchSessionMinutes();
-  } else showModalMsg(data.error || "Upload failed!", "error");
-} else {
+        if (!sessionFile) {
+          showModalMsg("Please upload a file!", "error");
+          setSubmitting(false);
+          return;
+        }
+        const fd = new FormData();
+        Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
+        fd.append("file", sessionFile);
+        const res = await authFetch(`${API}/api/session-minutes/upload`, {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showMsg("Session added!");
+          resetSessionForm();
+          setShowSessionModal(false);
+          fetchSessionMinutes();
+        } else showModalMsg(data.error || "Upload failed!", "error");
+      } else {
         const res = await authFetch(`${API}/api/session-minutes`, {
           method: "POST",
           body: JSON.stringify(sessionForm),
@@ -1026,11 +1138,25 @@ const handleUploadResolution = async () => {
       showModalMsg("Session date is required!", "error");
       return;
     }
+    if (
+      isDuplicateRecordNumber(
+        sessionMinutes,
+        "session_number",
+        editSessionForm.session_number,
+        editingSession.id
+      )
+    ) {
+      showModalMsg(
+        `"${editSessionForm.session_number}" is already in use by another session. Please choose a different number.`,
+        "error"
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await authFetch(
         `${API}/api/session-minutes/${editingSession.id}`,
-        { method: "PUT", body: JSON.stringify(editSessionForm) },
+        { method: "PUT", body: JSON.stringify(editSessionForm) }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1112,7 +1238,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/announcements/${editingAnnouncement.id}`,
-        { method: "PUT", body: JSON.stringify(editAnnouncementForm) },
+        { method: "PUT", body: JSON.stringify(editAnnouncementForm) }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1192,7 +1318,7 @@ const handleUploadResolution = async () => {
     try {
       const res = await authFetch(
         `${API}/api/calendar-events/${editingEvent.dbId}`,
-        { method: "PUT", body: JSON.stringify(editEventForm) },
+        { method: "PUT", body: JSON.stringify(editEventForm) }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1250,6 +1376,40 @@ const handleUploadResolution = async () => {
   const MAlert = () => (
     <ModalAlert message={modalMessage} type={modalMessageType} />
   );
+
+  // ── Quick-action openers ── shared by the sidebar "+ Add" buttons and the
+  // Dashboard's Quick Actions panel, so number-suggestion logic lives in one place.
+  const openOrdinanceModal = () => {
+    setModalMessage("");
+    const year = getCurrentYear();
+    const suggested = suggestOrdinanceNumber(ordinances, year);
+    lastOrdinanceSuggestion.current = suggested;
+    setOrdinanceYear(String(year));
+    setOrdinanceNumber(suggested);
+    setShowOrdinanceModal(true);
+  };
+  const openResolutionModal = () => {
+    setModalMessage("");
+    const year = getCurrentYear();
+    const suggested = suggestResolutionNumber(resolutions, year);
+    lastResolutionSuggestion.current = suggested;
+    setResolutionNumber(suggested);
+    setResolutionTitle("");
+    setResolutionYear(String(year));
+    setResolutionFile(null);
+    setSelectedResolutionOfficials([]);
+    setShowResolutionModal(true);
+  };
+  const openSessionModal = () => {
+    setModalMessage("");
+    resetSessionForm();
+    setShowSessionModal(true);
+  };
+  const openAnnouncementModal = () => {
+    setModalMessage("");
+    resetAnnouncementForm();
+    setShowAnnouncementModal(true);
+  };
 
   // ══════════════════════════════════════════════════════════════════════════════
   return (
@@ -1435,70 +1595,76 @@ const handleUploadResolution = async () => {
           )}
 
           {canManageUsers && (
-  <>
-    <div className={styles.navDivider} />
+            <>
+              <div className={styles.navDivider} />
 
-    {/* User Management dropdown */}
-    <div className={styles.navSection}>
-      <button
-        className={styles.navSectionHeader}
-        onClick={() =>
-          !sidebarCollapsed && setUserMgmtOpen((v) => !v)
-        }
-      >
-        <span className={styles.navSectionIcon}>
-          <Users size={14} strokeWidth={1.8} />
-        </span>
-        <span className={styles.navSectionLabel}>User Management</span>
-        {!sidebarCollapsed && (
-          <span className={styles.navSectionChevron}>
-            {userMgmtOpen ? (
-              <ChevronDown size={13} />
-            ) : (
-              <ChevronRight size={13} />
-            )}
-          </span>
-        )}
-      </button>
-      <div
-        className={`${styles.navSectionItems} ${
-          userMgmtOpen && !sidebarCollapsed
-            ? styles.navSectionItemsOpen
-            : ""
-        }`}
-      >
-        {[
-          {
-            key: "users",
-            icon: <Users size={17} strokeWidth={1.5} />,
-            label: "Manage Users",
-          },
-          {
-            key: "admins",
-            icon: <ShieldCheck size={17} strokeWidth={1.5} />,
-            label: "Manage Admins",
-          },
-          ...(canViewLogs ? [{
-            key: "logs",
-            icon: <Activity size={17} strokeWidth={1.5} />,
-            label: "Activity Logs",
-          }] : []),
-        ].map((t) => (
-          <button
-            key={t.key}
-            className={`${styles.navBtn} ${styles.navBtnIndented} ${
-              activeTab === t.key ? styles.navBtnActive : ""
-            }`}
-            onClick={() => handleTabChange(t.key)}
-          >
-            <span className={styles.navIcon}>{t.icon}</span>
-            <span className={styles.navLabel}>{t.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  </>
-)}
+              {/* User Management dropdown */}
+              <div className={styles.navSection}>
+                <button
+                  className={styles.navSectionHeader}
+                  onClick={() =>
+                    !sidebarCollapsed && setUserMgmtOpen((v) => !v)
+                  }
+                >
+                  <span className={styles.navSectionIcon}>
+                    <Users size={14} strokeWidth={1.8} />
+                  </span>
+                  <span className={styles.navSectionLabel}>
+                    User Management
+                  </span>
+                  {!sidebarCollapsed && (
+                    <span className={styles.navSectionChevron}>
+                      {userMgmtOpen ? (
+                        <ChevronDown size={13} />
+                      ) : (
+                        <ChevronRight size={13} />
+                      )}
+                    </span>
+                  )}
+                </button>
+                <div
+                  className={`${styles.navSectionItems} ${
+                    userMgmtOpen && !sidebarCollapsed
+                      ? styles.navSectionItemsOpen
+                      : ""
+                  }`}
+                >
+                  {[
+                    {
+                      key: "users",
+                      icon: <Users size={17} strokeWidth={1.5} />,
+                      label: "Manage Users",
+                    },
+                    {
+                      key: "admins",
+                      icon: <ShieldCheck size={17} strokeWidth={1.5} />,
+                      label: "Manage Admins",
+                    },
+                    ...(canViewLogs
+                      ? [
+                          {
+                            key: "logs",
+                            icon: <Activity size={17} strokeWidth={1.5} />,
+                            label: "Activity Logs",
+                          },
+                        ]
+                      : []),
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      className={`${styles.navBtn} ${styles.navBtnIndented} ${
+                        activeTab === t.key ? styles.navBtnActive : ""
+                      }`}
+                      onClick={() => handleTabChange(t.key)}
+                    >
+                      <span className={styles.navIcon}>{t.icon}</span>
+                      <span className={styles.navLabel}>{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.adminInfo}>
@@ -1506,12 +1672,18 @@ const handleUploadResolution = async () => {
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
               <div className={styles.adminRole}>
-  {position === "secretary" ? "Secretary" :
-   position === "clerk" ? "Clerk" :
-   position === "vice_mayor" ? "Vice Mayor" :
-   position === "councilor" ? "Councilor" : 
-   isAdmin ? "Administrator" : "User"}
-</div>
+                {position === "secretary"
+                  ? "Secretary"
+                  : position === "clerk"
+                  ? "Clerk"
+                  : position === "vice_mayor"
+                  ? "Vice Mayor"
+                  : position === "councilor"
+                  ? "Councilor"
+                  : isAdmin
+                  ? "Administrator"
+                  : "User"}
+              </div>
             </div>
           </div>
           <button className={styles.logoutBtn} onClick={handleLogout}>
@@ -1555,53 +1727,22 @@ const handleUploadResolution = async () => {
               </button>
             )}
             {activeTab === "ordinances" && isAdmin && (
-              <button
-                className={styles.addBtn}
-                onClick={() => {
-                  setModalMessage("");
-                  setShowOrdinanceModal(true);
-                }}
-              >
+              <button className={styles.addBtn} onClick={openOrdinanceModal}>
                 + Upload Ordinance
               </button>
             )}
             {activeTab === "resolutions" && isAdmin && (
-  <button
-    className={styles.addBtn}
-    onClick={() => {
-      setModalMessage("");
-      setResolutionNumber("");
-      setResolutionTitle("");
-      setResolutionYear("");
-      setResolutionFile(null);
-      setSelectedResolutionOfficials([]);
-      setShowResolutionModal(true);
-    }}
-  >
-    + Upload Resolution
-  </button>
-)}
+              <button className={styles.addBtn} onClick={openResolutionModal}>
+                + Upload Resolution
+              </button>
+            )}
             {activeTab === "sessions" && isAdmin && (
-              <button
-                className={styles.addBtn}
-                onClick={() => {
-                  setModalMessage("");
-                  resetSessionForm();
-                  setShowSessionModal(true);
-                }}
-              >
+              <button className={styles.addBtn} onClick={openSessionModal}>
                 + Add Session
               </button>
             )}
             {activeTab === "announcements" && isAdmin && (
-              <button
-                className={styles.addBtn}
-                onClick={() => {
-                  setModalMessage("");
-                  resetAnnouncementForm();
-                  setShowAnnouncementModal(true);
-                }}
-              >
+              <button className={styles.addBtn} onClick={openAnnouncementModal}>
                 + New Announcement
               </button>
             )}
@@ -1644,6 +1785,11 @@ const handleUploadResolution = async () => {
             sessionMinutes={sessionMinutes}
             announcements={announcements}
             onNavigate={handleTabChange}
+            canQuickAdd={isAdmin}
+            onAddOrdinance={openOrdinanceModal}
+            onAddResolution={openResolutionModal}
+            onAddSession={openSessionModal}
+            onAddAnnouncement={openAnnouncementModal}
           />
         )}
         {activeTab === "users" && !fetchingUsers && (
@@ -1654,29 +1800,29 @@ const handleUploadResolution = async () => {
         )}
         {activeTab === "ordinances" && !fetchingOrdinances && (
           <OrdinancesPage
-  ordinances={ordinances}
-  setDeleteTarget={setDeleteTarget}
-  onEdit={handleOpenEditOrdinance}
-  readOnly={!canEditLegislative}
-  canPublish={canPublishLegislative}
-  isViceMayor={isViceMayor}
-  isSecretary={isSecretary}
-  isClerk={isClerk}
-  onRefresh={fetchOrdinances}
-/>
+            ordinances={ordinances}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditOrdinance}
+            readOnly={!canEditLegislative}
+            canPublish={canPublishLegislative}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
+            onRefresh={fetchOrdinances}
+          />
         )}
         {activeTab === "resolutions" && !fetchingResolutions && (
           <ResolutionsPage
-  resolutions={resolutions}
-  setDeleteTarget={setDeleteTarget}
-  onEdit={handleOpenEditResolution}
-  readOnly={!canEditLegislative}
-  canPublish={canPublishLegislative}
-  isViceMayor={isViceMayor}
-  isSecretary={isSecretary}
-  isClerk={isClerk}
-  onRefresh={fetchResolutions}
-/>
+            resolutions={resolutions}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditResolution}
+            readOnly={!canEditLegislative}
+            canPublish={canPublishLegislative}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
+            onRefresh={fetchResolutions}
+          />
         )}
 
         {/* ── OFFICIALS PAGE — group-by-council wiring ── */}
@@ -1710,24 +1856,24 @@ const handleUploadResolution = async () => {
 
         {activeTab === "sessions" && !fetchingMinutes && (
           <SessionsPage
-  sessionMinutes={sessionMinutes}
-  setDeleteTarget={setDeleteTarget}
-  onEdit={handleOpenEditSession}
-  readOnly={!canEditLegislative}
-  canPublish={canPublishLegislative}
-  isViceMayor={isViceMayor}
-  isSecretary={isSecretary}
-  isClerk={isClerk}
-  onRefresh={fetchSessionMinutes}
-/>
+            sessionMinutes={sessionMinutes}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditSession}
+            readOnly={!canEditLegislative}
+            canPublish={canPublishLegislative}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
+            onRefresh={fetchSessionMinutes}
+          />
         )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
           <AnnouncementsPage
-  announcements={announcements}
-  setDeleteTarget={setDeleteTarget}
-  onEdit={handleOpenEditAnnouncement}
-  readOnly={false}
-/>
+            announcements={announcements}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditAnnouncement}
+            readOnly={false}
+          />
         )}
         {activeTab === "calendar" && (
           <CalendarPage
@@ -1805,42 +1951,44 @@ const handleUploadResolution = async () => {
               }
             />
             <input
-  className={styles.input}
-  type="password"
-  placeholder="Password"
-  value={newAdmin.password}
-  onChange={(e) =>
-    setNewAdmin({ ...newAdmin, password: e.target.value })
-  }
-/>
-<label className={styles.fieldLabel}>Position</label>
-<select
-  className={styles.input}
-  value={newAdmin.position}
-  onChange={(e) => setNewAdmin({ ...newAdmin, position: e.target.value })}
->
-  <option value="secretary">Secretary</option>
-  <option value="clerk">Clerk</option>
-</select>
-<MAlert />
-<div className={styles.modalBtns}>
-  <button
-    className={styles.cancelBtn}
-    onClick={() => {
-      setShowAddAdminModal(false);
-      setModalMessage("");
-    }}
-  >
-    Cancel
-  </button>
-  <button
-    className={styles.confirmBtn}
-    onClick={handleAddAdmin}
-    disabled={submitting}
-  >
-    {submitting ? "Adding..." : "Add Admin"}
-  </button>
-</div>
+              className={styles.input}
+              type="password"
+              placeholder="Password"
+              value={newAdmin.password}
+              onChange={(e) =>
+                setNewAdmin({ ...newAdmin, password: e.target.value })
+              }
+            />
+            <label className={styles.fieldLabel}>Position</label>
+            <select
+              className={styles.input}
+              value={newAdmin.position}
+              onChange={(e) =>
+                setNewAdmin({ ...newAdmin, position: e.target.value })
+              }
+            >
+              <option value="secretary">Secretary</option>
+              <option value="clerk">Clerk</option>
+            </select>
+            <MAlert />
+            <div className={styles.modalBtns}>
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowAddAdminModal(false);
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleAddAdmin}
+                disabled={submitting}
+              >
+                {submitting ? "Adding..." : "Add Admin"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1874,42 +2022,44 @@ const handleUploadResolution = async () => {
               }
             />
             <input
-  className={styles.input}
-  type="password"
-  placeholder="Password"
-  value={newUser.password}
-  onChange={(e) =>
-    setNewUser({ ...newUser, password: e.target.value })
-  }
-/>
-<label className={styles.fieldLabel}>Position</label>
-<select
-  className={styles.input}
-  value={newUser.position}
-  onChange={(e) => setNewUser({ ...newUser, position: e.target.value })}
->
-  <option value="councilor">Councilor</option>
-  <option value="vice_mayor">Vice Mayor</option>
-</select>
-<MAlert />
-<div className={styles.modalBtns}>
-  <button
-    className={styles.cancelBtn}
-    onClick={() => {
-      setShowAddUserModal(false);
-      setModalMessage("");
-    }}
-  >
-    Cancel
-  </button>
-  <button
-    className={styles.confirmBtn}
-    onClick={handleAddUser}
-    disabled={submitting}
-  >
-    {submitting ? "Adding..." : "Add User"}
-  </button>
-</div>
+              className={styles.input}
+              type="password"
+              placeholder="Password"
+              value={newUser.password}
+              onChange={(e) =>
+                setNewUser({ ...newUser, password: e.target.value })
+              }
+            />
+            <label className={styles.fieldLabel}>Position</label>
+            <select
+              className={styles.input}
+              value={newUser.position}
+              onChange={(e) =>
+                setNewUser({ ...newUser, position: e.target.value })
+              }
+            >
+              <option value="councilor">Councilor</option>
+              <option value="vice_mayor">Vice Mayor</option>
+            </select>
+            <MAlert />
+            <div className={styles.modalBtns}>
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowAddUserModal(false);
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleAddUser}
+                disabled={submitting}
+              >
+                {submitting ? "Adding..." : "Add User"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2034,14 +2184,20 @@ const handleUploadResolution = async () => {
               <label className={styles.fieldLabel}>
                 Position <span style={{ color: "#e53e3e" }}>*</span>
               </label>
-              <input
+              <select
                 className={styles.input}
-                placeholder="Position (e.g. Councilor, Vice Mayor)"
                 value={newOfficial.position}
                 onChange={(e) =>
                   setNewOfficial({ ...newOfficial, position: e.target.value })
                 }
-              />
+              >
+                <option value="">Select position...</option>
+                {OFFICIAL_POSITIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
 
               <div className={styles.fileUploadBox}>
                 <input
@@ -2163,12 +2319,18 @@ const handleUploadResolution = async () => {
             <label className={styles.fieldLabel}>
               Position <span style={{ color: "#e53e3e" }}>*</span>
             </label>
-            <input
+            <select
               className={styles.input}
-              placeholder="Position (e.g. Councilor, Vice Mayor)"
               value={editOfficialPosition}
               onChange={(e) => setEditOfficialPosition(e.target.value)}
-            />
+            >
+              <option value="">Select position...</option>
+              {OFFICIAL_POSITIONS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
             <div className={styles.fileUploadBox}>
               <input
                 type="file"
@@ -2539,6 +2701,13 @@ const handleUploadResolution = async () => {
               value={ordinanceNumber}
               onChange={(e) => setOrdinanceNumber(e.target.value)}
             />
+            <p
+              className={styles.fileHint}
+              style={{ marginTop: -6, marginBottom: 10 }}
+            >
+              Suggested automatically based on the year and existing ordinances
+              — feel free to edit it.
+            </p>
             <input
               className={styles.input}
               placeholder="Ordinance Title"
@@ -2552,32 +2721,43 @@ const handleUploadResolution = async () => {
               min="1900"
               max="2100"
               value={ordinanceYear}
-              onChange={(e) => setOrdinanceYear(e.target.value)}
+              onChange={(e) => {
+                const newYear = e.target.value;
+                setOrdinanceYear(newYear);
+                // Only refresh the suggested number if the user hasn't
+                // manually customized it away from the last suggestion.
+                if (ordinanceNumber === lastOrdinanceSuggestion.current) {
+                  const suggested = suggestOrdinanceNumber(ordinances, newYear);
+                  lastOrdinanceSuggestion.current = suggested;
+                  setOrdinanceNumber(suggested);
+                }
+              }}
             />
             <div className={styles.fileUploadBox}>
-  <input
-    type="file"
-    accept=".pdf,.doc,.docx,image/*"
-    id="fileInput"
-    style={{ display: "none" }}
-    onChange={(e) => setOrdinanceFile(e.target.files[0])}
-  />
-  <label htmlFor="fileInput" className={styles.fileLabel}>
-    {ordinanceFile ? (
-      <>
-        <CheckSquare size={14} strokeWidth={1.5} /> {ordinanceFile.name}
-      </>
-    ) : (
-      <>
-        <Upload size={14} strokeWidth={1.5} /> Click to choose file
-      </>
-    )}
-  </label>
-  <p className={styles.fileHint}>
-    Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
-  </p>
-</div>
-            
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                id="fileInput"
+                style={{ display: "none" }}
+                onChange={(e) => setOrdinanceFile(e.target.files[0])}
+              />
+              <label htmlFor="fileInput" className={styles.fileLabel}>
+                {ordinanceFile ? (
+                  <>
+                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                    {ordinanceFile.name}
+                  </>
+                ) : (
+                  <>
+                    <Upload size={14} strokeWidth={1.5} /> Click to choose file
+                  </>
+                )}
+              </label>
+              <p className={styles.fileHint}>
+                Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+              </p>
+            </div>
+
             <div className={styles.officialsSelectSection}>
               <p className={styles.officialsSelectLabel}>
                 Tag Council Members who passed this ordinance:
@@ -2602,6 +2782,7 @@ const handleUploadResolution = async () => {
                   setSelectedOfficials([]);
                   setUploadType("");
                   setModalMessage("");
+                  lastOrdinanceSuggestion.current = "";
                 }}
               >
                 Cancel
@@ -2714,95 +2895,115 @@ const handleUploadResolution = async () => {
       )}
 
       {/* Upload Resolution */}
-{showResolutionModal && (
-  <div className={styles.modalOverlay}>
-    <div className={styles.modal}>
-      <h2 className={styles.modalTitle}>
-        <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
-      </h2>
-      <input
-        className={styles.input}
-        placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
-        value={resolutionNumber}
-        onChange={(e) => setResolutionNumber(e.target.value)}
-      />
-      <input
-        className={styles.input}
-        placeholder="Resolution Title"
-        value={resolutionTitle}
-        onChange={(e) => setResolutionTitle(e.target.value)}
-      />
-      <input
-        className={styles.input}
-        placeholder="Year (e.g. 2024)"
-        type="number"
-        min="1900"
-        max="2100"
-        value={resolutionYear}
-        onChange={(e) => setResolutionYear(e.target.value)}
-      />
-      <div className={styles.fileUploadBox}>
-        <input
-          type="file"
-          accept=".pdf,.doc,.docx,image/*"
-          id="resFileInput"
-          style={{ display: "none" }}
-          onChange={(e) => setResolutionFile(e.target.files[0])}
-        />
-        <label htmlFor="resFileInput" className={styles.fileLabel}>
-          {resolutionFile ? (
-            <>
-              <CheckSquare size={14} strokeWidth={1.5} /> {resolutionFile.name}
-            </>
-          ) : (
-            <>
-              <Upload size={14} strokeWidth={1.5} /> Click to choose file
-            </>
-          )}
-        </label>
-        <p className={styles.fileHint}>
-          Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
-        </p>
-      </div>
+      {showResolutionModal && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modal}>
+            <h2 className={styles.modalTitle}>
+              <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
+            </h2>
+            <input
+              className={styles.input}
+              placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
+              value={resolutionNumber}
+              onChange={(e) => setResolutionNumber(e.target.value)}
+            />
+            <p
+              className={styles.fileHint}
+              style={{ marginTop: -6, marginBottom: 10 }}
+            >
+              Suggested automatically based on the year and existing resolutions
+              — feel free to edit it.
+            </p>
+            <input
+              className={styles.input}
+              placeholder="Resolution Title"
+              value={resolutionTitle}
+              onChange={(e) => setResolutionTitle(e.target.value)}
+            />
+            <input
+              className={styles.input}
+              placeholder="Year (e.g. 2024)"
+              type="number"
+              min="1900"
+              max="2100"
+              value={resolutionYear}
+              onChange={(e) => {
+                const newYear = e.target.value;
+                setResolutionYear(newYear);
+                if (resolutionNumber === lastResolutionSuggestion.current) {
+                  const suggested = suggestResolutionNumber(
+                    resolutions,
+                    newYear
+                  );
+                  lastResolutionSuggestion.current = suggested;
+                  setResolutionNumber(suggested);
+                }
+              }}
+            />
+            <div className={styles.fileUploadBox}>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,image/*"
+                id="resFileInput"
+                style={{ display: "none" }}
+                onChange={(e) => setResolutionFile(e.target.files[0])}
+              />
+              <label htmlFor="resFileInput" className={styles.fileLabel}>
+                {resolutionFile ? (
+                  <>
+                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                    {resolutionFile.name}
+                  </>
+                ) : (
+                  <>
+                    <Upload size={14} strokeWidth={1.5} /> Click to choose file
+                  </>
+                )}
+              </label>
+              <p className={styles.fileHint}>
+                Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+              </p>
+            </div>
 
-      <div className={styles.officialsSelectSection}>
-        <p className={styles.officialsSelectLabel}>
-          Tag Council Members who passed this resolution:
-        </p>
-        <OfficialsCheckList
-          officials={officials}
-          selected={selectedResolutionOfficials}
-          onToggle={toggleResolutionOfficial}
-          styles={styles}
-        />
-      </div>
-      <MAlert />
-      <div className={styles.modalBtns}>
-        <button
-          className={styles.cancelBtn}
-          onClick={() => {
-            setShowResolutionModal(false);
-            setResolutionFile(null);
-            setResolutionNumber("");
-            setResolutionTitle("");
-            setResolutionYear("");
-            setSelectedResolutionOfficials([]);
-            setModalMessage("");
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          className={styles.confirmBtn}
-          onClick={handleUploadResolution}
-          disabled={submitting}
-        >
-          {submitting ? "Uploading..." : "Upload"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+            <div className={styles.officialsSelectSection}>
+              <p className={styles.officialsSelectLabel}>
+                Tag Council Members who passed this resolution:
+              </p>
+              <OfficialsCheckList
+                officials={officials}
+                selected={selectedResolutionOfficials}
+                onToggle={toggleResolutionOfficial}
+                styles={styles}
+              />
+            </div>
+            <MAlert />
+            <div className={styles.modalBtns}>
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowResolutionModal(false);
+                  setResolutionFile(null);
+                  setResolutionNumber("");
+                  setResolutionTitle("");
+                  setResolutionYear("");
+                  setSelectedResolutionOfficials([]);
+                  setModalMessage("");
+                  lastResolutionSuggestion.current = "";
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleUploadResolution}
+                disabled={submitting}
+              >
+                {submitting ? "Uploading..." : "Upload"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Resolution */}
       {showEditResolutionModal && editingResolution && (
@@ -2941,29 +3142,29 @@ const handleUploadResolution = async () => {
               Agenda
             </h2>
             <div className={styles.uploadTypeRow}>
-  <button
-    className={`${styles.uploadTypeBtn} ${
-      sessionInputMode === "text" ? styles.uploadTypeBtnActive : ""
-    }`}
-    onClick={() => setSessionInputMode("text")}
-  >
-    <FileEdit size={16} strokeWidth={1.5} /> Direct Input
-    <span className={styles.uploadTypeDesc}>
-      Type or paste session minutes directly
-    </span>
-  </button>
-  <button
-    className={`${styles.uploadTypeBtn} ${
-      sessionInputMode === "file" ? styles.uploadTypeBtnActive : ""
-    }`}
-    onClick={() => setSessionInputMode("file")}
-  >
-    <Upload size={16} strokeWidth={1.5} /> Upload File
-    <span className={styles.uploadTypeDesc}>
-      PDF, Word, or Image — system auto-detects
-    </span>
-  </button>
-</div>
+              <button
+                className={`${styles.uploadTypeBtn} ${
+                  sessionInputMode === "text" ? styles.uploadTypeBtnActive : ""
+                }`}
+                onClick={() => setSessionInputMode("text")}
+              >
+                <FileEdit size={16} strokeWidth={1.5} /> Direct Input
+                <span className={styles.uploadTypeDesc}>
+                  Type or paste session minutes directly
+                </span>
+              </button>
+              <button
+                className={`${styles.uploadTypeBtn} ${
+                  sessionInputMode === "file" ? styles.uploadTypeBtnActive : ""
+                }`}
+                onClick={() => setSessionInputMode("file")}
+              >
+                <Upload size={16} strokeWidth={1.5} /> Upload File
+                <span className={styles.uploadTypeDesc}>
+                  PDF, Word, or Image — system auto-detects
+                </span>
+              </button>
+            </div>
             <div className={styles.sessionFormGrid}>
               <div className={styles.sessionFormCol}>
                 <label className={styles.fieldLabel}>Session Number</label>
@@ -2978,6 +3179,9 @@ const handleUploadResolution = async () => {
                     })
                   }
                 />
+                <p className={styles.fieldHint}>
+                  Suggested automatically — feel free to edit it.
+                </p>
               </div>
               <div className={styles.sessionFormCol}>
                 <label className={styles.fieldLabel}>
@@ -2987,12 +3191,29 @@ const handleUploadResolution = async () => {
                   className={styles.input}
                   type="date"
                   value={sessionForm.session_date}
-                  onChange={(e) =>
-                    setSessionForm({
-                      ...sessionForm,
-                      session_date: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setSessionForm((prev) => {
+                      const year = newDate
+                        ? new Date(newDate).getFullYear()
+                        : getCurrentYear();
+                      const shouldUpdate =
+                        prev.session_number === lastSessionSuggestion.current;
+                      if (!shouldUpdate)
+                        return { ...prev, session_date: newDate };
+                      const suggested = suggestSessionNumber(
+                        sessionMinutes,
+                        year,
+                        prev.session_type
+                      );
+                      lastSessionSuggestion.current = suggested;
+                      return {
+                        ...prev,
+                        session_date: newDate,
+                        session_number: suggested,
+                      };
+                    });
+                  }}
                 />
               </div>
               <div className={styles.sessionFormCol}>
@@ -3000,12 +3221,29 @@ const handleUploadResolution = async () => {
                 <select
                   className={styles.input}
                   value={sessionForm.session_type}
-                  onChange={(e) =>
-                    setSessionForm({
-                      ...sessionForm,
-                      session_type: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setSessionForm((prev) => {
+                      const year = prev.session_date
+                        ? new Date(prev.session_date).getFullYear()
+                        : getCurrentYear();
+                      const shouldUpdate =
+                        prev.session_number === lastSessionSuggestion.current;
+                      if (!shouldUpdate)
+                        return { ...prev, session_type: newType };
+                      const suggested = suggestSessionNumber(
+                        sessionMinutes,
+                        year,
+                        newType
+                      );
+                      lastSessionSuggestion.current = suggested;
+                      return {
+                        ...prev,
+                        session_type: newType,
+                        session_number: suggested,
+                      };
+                    });
+                  }}
                 >
                   <option value="regular">Regular Session</option>
                   <option value="special">Special Session</option>
@@ -3060,32 +3298,37 @@ const handleUploadResolution = async () => {
                 />
               </>
             ) : (
-  <>
-    <div className={styles.fileUploadBox}>
-      <input
-        type="file"
-        accept=".pdf,.doc,.docx,image/*"
-        id="sessionFileInput"
-        style={{ display: "none" }}
-        onChange={(e) => setSessionFile(e.target.files[0])}
-      />
-      <label htmlFor="sessionFileInput" className={styles.fileLabel}>
-        {sessionFile ? (
-          <>
-            <CheckSquare size={14} strokeWidth={1.5} /> {sessionFile.name}
-          </>
-        ) : (
-          <>
-            <Upload size={14} strokeWidth={1.5} /> Click to choose file
-          </>
-        )}
-      </label>
-      <p className={styles.fileHint}>
-        Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
-      </p>
-    </div>
-  </>
-)}
+              <>
+                <div className={styles.fileUploadBox}>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,image/*"
+                    id="sessionFileInput"
+                    style={{ display: "none" }}
+                    onChange={(e) => setSessionFile(e.target.files[0])}
+                  />
+                  <label
+                    htmlFor="sessionFileInput"
+                    className={styles.fileLabel}
+                  >
+                    {sessionFile ? (
+                      <>
+                        <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                        {sessionFile.name}
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={14} strokeWidth={1.5} /> Click to choose
+                        file
+                      </>
+                    )}
+                  </label>
+                  <p className={styles.fileHint}>
+                    Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+                  </p>
+                </div>
+              </>
+            )}
             <MAlert />
             <div className={styles.modalBtns}>
               <button
@@ -3521,7 +3764,9 @@ const handleUploadResolution = async () => {
       {/* Delete Confirm */}
       {deleteTarget && (
         <ConfirmModal
-          type={ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "warning" : "delete"}
+          type={
+            ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "warning" : "delete"
+          }
           title={
             ARCHIVABLE_TYPES.includes(deleteTarget.type)
               ? `Archive this ${deleteTarget.type}?`
@@ -3532,7 +3777,9 @@ const handleUploadResolution = async () => {
               ? `"${deleteTarget.name}" will be moved to Archives. You can restore it later.`
               : `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
           }
-          confirmLabel={ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "Archive" : "Delete"}
+          confirmLabel={
+            ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "Archive" : "Delete"
+          }
           onConfirm={() => {
             if (deleteTarget.type === "user") handleDeleteUser(deleteTarget.id);
             else if (deleteTarget.type === "ordinance")

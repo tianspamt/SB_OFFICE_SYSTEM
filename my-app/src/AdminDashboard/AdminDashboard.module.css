@@ -3075,18 +3075,227 @@
   margin-top: auto;
 }
 
-/* Main Feed */
-.dashMainFeed {
-  display: flex;
-  flex-direction: column;
-  gap: 36px;
+/* Body: two-column layout — main activity panel + sidebar */
+.dashBody {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
 }
 
-.dashFeedSection {
+.dashMainPanel {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 20px;
+  min-width: 0;
+}
+
+/* Activity tabs */
+.dashTabRow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.dashTabBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dashTabBtn:hover {
+  background: #f0fdf4;
+  border-color: #9ae6b4;
+  color: #009439;
+}
+
+.dashTabBtnActive {
+  background: #009439;
+  border-color: #009439;
+  color: #fff;
+}
+
+.dashTabBtnActive:hover {
+  background: #007a2e;
+  border-color: #007a2e;
+  color: #fff;
+}
+
+.dashTabBtnActive .dashSectionCount {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* Sidebar */
+.dashSidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.dashWidget {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.dashWidgetHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #009439;
+  margin-bottom: 12px;
+}
+
+.dashWidgetTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.dashWidgetEmpty {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.dashWidgetViewAll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #009439;
+  background: none;
+  border: none;
+  padding: 10px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid #f1f5f9;
+  cursor: pointer;
   width: 100%;
 }
 
-/* Section Header */
+.dashWidgetViewAll:hover {
+  color: #007a2e;
+}
+
+/* Quick actions */
+.dashQuickActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quickActionBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  text-align: left;
+}
+
+.quickActionBtn:hover {
+  background: #f0fdf4;
+  border-color: #9ae6b4;
+  color: #009439;
+}
+
+/* Upcoming sessions list */
+.dashUpcomingList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashUpcomingItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.dashUpcomingItem:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.dashUpcomingDate {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f57c00;
+}
+
+.dashUpcomingTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+/* Compact announcement list (sidebar) */
+.dashMiniAnnList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashMiniAnn {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.dashMiniAnn:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.dashMiniAnnTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.4;
+  margin-bottom: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dashMiniAnnDate {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+/* Section Header (used inside the active activity tab) */
 .dashSectionHeader {
   display: flex;
   align-items: center;
@@ -3152,7 +3361,7 @@
 /* Card Grid */
 .dashCardGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
 
@@ -3410,6 +3619,16 @@
   .dashStatsRow {
     grid-template-columns: repeat(2, 1fr);
   }
+  .dashBody {
+    grid-template-columns: 1fr;
+  }
+  .dashSidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .dashSidebar > * {
+    flex: 1 1 260px;
+  }
 }
 
 /* Tablet */
@@ -3459,6 +3678,15 @@
   }
   .dashSectionTitle {
     font-size: 14px;
+  }
+  .dashMainPanel {
+    padding: 16px;
+  }
+  .dashTabRow {
+    gap: 8px;
+  }
+  .dashSidebar {
+    flex-direction: column;
   }
 }
 

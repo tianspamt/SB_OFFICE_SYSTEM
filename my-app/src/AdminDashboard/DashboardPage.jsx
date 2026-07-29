@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   ScrollText,
   FileText,
@@ -12,6 +12,8 @@ import {
   ArrowUpRight,
   Clock,
   Hash,
+  Plus,
+  Gavel,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 
@@ -151,7 +153,7 @@ const SessionCard = ({ item }) => (
   </div>
 );
 
-// ─── Announcement Card ────────────────────────────────────────────────────────
+// ─── Announcement Card (full — used elsewhere if needed) ──────────────────────
 const AnnouncementCard = ({ post }) => (
   <div className={styles.dashPostCard}>
     {post.image_url && (
@@ -186,6 +188,17 @@ const AnnouncementCard = ({ post }) => (
   </div>
 );
 
+// ─── Sidebar widget shell ──────────────────────────────────────────────────────
+const DashWidget = ({ icon: Icon, title, children }) => (
+  <div className={styles.dashWidget}>
+    <div className={styles.dashWidgetHeader}>
+      <Icon size={14} strokeWidth={2} />
+      <span className={styles.dashWidgetTitle}>{title}</span>
+    </div>
+    {children}
+  </div>
+);
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DashboardPage = ({
   ordinances = [],
@@ -193,11 +206,33 @@ const DashboardPage = ({
   sessionMinutes = [],
   announcements = [],
   onNavigate,
+  canQuickAdd = false,
+  onAddOrdinance,
+  onAddResolution,
+  onAddSession,
+  onAddAnnouncement,
 }) => {
-  const latestOrdinances = ordinances.slice(0, 3);
-  const latestResolutions = resolutions.slice(0, 3);
-  const latestSessions = sessionMinutes.slice(0, 3);
+  const [activityTab, setActivityTab] = useState("ordinances");
+
+  const latestOrdinances = ordinances.slice(0, 6);
+  const latestResolutions = resolutions.slice(0, 6);
+  const latestSessions = sessionMinutes.slice(0, 6);
   const latestAnnouncements = announcements.slice(0, 3);
+
+  // Upcoming sessions: soonest future session first; if none are upcoming,
+  // fall back to the most recently held ones so the widget isn't empty.
+  const today = new Date().toISOString().split("T")[0];
+  const upcomingSessions = [...sessionMinutes]
+    .filter((s) => s.session_date && s.session_date >= today)
+    .sort((a, b) => (a.session_date < b.session_date ? -1 : 1))
+    .slice(0, 3);
+  const recentSessionsFallback =
+    upcomingSessions.length > 0
+      ? upcomingSessions
+      : [...sessionMinutes]
+          .filter((s) => s.session_date)
+          .sort((a, b) => (a.session_date > b.session_date ? -1 : 1))
+          .slice(0, 3);
 
   const stats = [
     {
@@ -233,6 +268,45 @@ const DashboardPage = ({
       trend: "Active posts",
     },
   ];
+
+  const ACTIVITY_TABS = [
+    {
+      id: "ordinances",
+      label: "Ordinances",
+      icon: ScrollText,
+      color: "#1976d2",
+      count: ordinances.length,
+      items: latestOrdinances,
+      emptyIcon: ScrollText,
+      emptyLabel: "ordinances",
+      renderItem: (item) => <OrdinanceCard key={item.id} item={item} />,
+    },
+    {
+      id: "resolutions",
+      label: "Resolutions",
+      icon: FileText,
+      color: "#388e3c",
+      count: resolutions.length,
+      items: latestResolutions,
+      emptyIcon: FileText,
+      emptyLabel: "resolutions",
+      renderItem: (item) => <ResolutionCard key={item.id} item={item} />,
+    },
+    {
+      id: "sessions",
+      label: "Sessions",
+      icon: BookOpen,
+      color: "#f57c00",
+      count: sessionMinutes.length,
+      items: latestSessions,
+      emptyIcon: ClipboardList,
+      emptyLabel: "session minutes",
+      renderItem: (item) => <SessionCard key={item.id} item={item} />,
+    },
+  ];
+
+  const activeTabConfig =
+    ACTIVITY_TABS.find((t) => t.id === activityTab) || ACTIVITY_TABS[0];
 
   return (
     <div className={styles.dashboardContainer}>
@@ -279,87 +353,134 @@ const DashboardPage = ({
         ))}
       </div>
 
-      {/* ── Main Feed ── */}
-      <div className={styles.dashMainFeed}>
-        {/* Ordinances */}
-        <section className={styles.dashFeedSection}>
+      {/* ── Body: main activity feed + sidebar ── */}
+      <div className={styles.dashBody}>
+        {/* Main — tabbed recent activity */}
+        <div className={styles.dashMainPanel}>
+          <div className={styles.dashTabRow}>
+            {ACTIVITY_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                className={`${styles.dashTabBtn} ${
+                  activityTab === tab.id ? styles.dashTabBtnActive : ""
+                }`}
+                onClick={() => setActivityTab(tab.id)}
+              >
+                <tab.icon size={14} strokeWidth={2} />
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className={styles.dashSectionCount}>{tab.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
           <SectionHeader
-            icon={ScrollText}
-            title="Latest Approved Ordinances"
-            color="#1976d2"
-            count={ordinances.length}
-            onViewAll={onNavigate ? () => onNavigate("ordinances") : null}
+            icon={activeTabConfig.icon}
+            title={`Latest ${activeTabConfig.label}`}
+            color={activeTabConfig.color}
+            count={0}
+            onViewAll={onNavigate ? () => onNavigate(activeTabConfig.id) : null}
           />
-          {latestOrdinances.length === 0 ? (
-            <EmptyState icon={ScrollText} label="ordinances" />
+
+          {activeTabConfig.items.length === 0 ? (
+            <EmptyState
+              icon={activeTabConfig.emptyIcon}
+              label={activeTabConfig.emptyLabel}
+            />
           ) : (
             <div className={styles.dashCardGrid}>
-              {latestOrdinances.map((item) => (
-                <OrdinanceCard key={item.id} item={item} />
-              ))}
+              {activeTabConfig.items.map(activeTabConfig.renderItem)}
             </div>
           )}
-        </section>
+        </div>
 
-        {/* Resolutions */}
-        <section className={styles.dashFeedSection}>
-          <SectionHeader
-            icon={FileText}
-            title="Latest Approved Resolutions"
-            color="#388e3c"
-            count={resolutions.length}
-            onViewAll={onNavigate ? () => onNavigate("resolutions") : null}
-          />
-          {latestResolutions.length === 0 ? (
-            <EmptyState icon={FileText} label="resolutions" />
-          ) : (
-            <div className={styles.dashCardGrid}>
-              {latestResolutions.map((item) => (
-                <ResolutionCard key={item.id} item={item} />
-              ))}
-            </div>
+        {/* Sidebar */}
+        <div className={styles.dashSidebar}>
+          {canQuickAdd && (
+            <DashWidget icon={Plus} title="Quick actions">
+              <div className={styles.dashQuickActions}>
+                <button
+                  className={styles.quickActionBtn}
+                  onClick={onAddOrdinance}
+                >
+                  <ScrollText size={14} /> Upload ordinance
+                </button>
+                <button
+                  className={styles.quickActionBtn}
+                  onClick={onAddResolution}
+                >
+                  <Gavel size={14} /> Upload resolution
+                </button>
+                <button
+                  className={styles.quickActionBtn}
+                  onClick={onAddSession}
+                >
+                  <BookOpen size={14} /> Add session
+                </button>
+                <button
+                  className={styles.quickActionBtn}
+                  onClick={onAddAnnouncement}
+                >
+                  <Megaphone size={14} /> Post announcement
+                </button>
+              </div>
+            </DashWidget>
           )}
-        </section>
 
-        {/* Session Minutes */}
-        <section className={styles.dashFeedSection}>
-          <SectionHeader
-            icon={BookOpen}
-            title="Recent Session Minutes"
-            color="#f57c00"
-            count={sessionMinutes.length}
-            onViewAll={onNavigate ? () => onNavigate("sessions") : null}
-          />
-          {latestSessions.length === 0 ? (
-            <EmptyState icon={ClipboardList} label="session minutes" />
-          ) : (
-            <div className={styles.dashCardGrid}>
-              {latestSessions.map((item) => (
-                <SessionCard key={item.id} item={item} />
-              ))}
-            </div>
-          )}
-        </section>
+          <DashWidget icon={Clock} title="Upcoming sessions">
+            {recentSessionsFallback.length === 0 ? (
+              <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
+            ) : (
+              <div className={styles.dashUpcomingList}>
+                {recentSessionsFallback.map((s) => (
+                  <div key={s.id} className={styles.dashUpcomingItem}>
+                    <div className={styles.dashUpcomingDate}>
+                      {formatDate(s.session_date)}
+                    </div>
+                    <div className={styles.dashUpcomingTitle}>
+                      {s.title || s.session_type || "Session"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {onNavigate && (
+              <button
+                className={styles.dashWidgetViewAll}
+                onClick={() => onNavigate("sessions")}
+              >
+                View all sessions <ArrowUpRight size={12} />
+              </button>
+            )}
+          </DashWidget>
 
-        {/* Announcements */}
-        <section className={styles.dashFeedSection}>
-          <SectionHeader
-            icon={Megaphone}
-            title="Recent Announcements"
-            color="#c2185b"
-            count={announcements.length}
-            onViewAll={onNavigate ? () => onNavigate("announcements") : null}
-          />
-          {latestAnnouncements.length === 0 ? (
-            <EmptyState icon={Megaphone} label="announcements" />
-          ) : (
-            <div className={styles.dashPostFeed}>
-              {latestAnnouncements.map((post) => (
-                <AnnouncementCard key={post.id} post={post} />
-              ))}
-            </div>
-          )}
-        </section>
+          <DashWidget icon={Megaphone} title="Announcements">
+            {latestAnnouncements.length === 0 ? (
+              <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
+            ) : (
+              <div className={styles.dashMiniAnnList}>
+                {latestAnnouncements.map((post) => (
+                  <div key={post.id} className={styles.dashMiniAnn}>
+                    <div className={styles.dashMiniAnnTitle}>{post.title}</div>
+                    <div className={styles.dashMiniAnnDate}>
+                      <Calendar size={10} />
+                      {formatDate(post.date_published)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {onNavigate && (
+              <button
+                className={styles.dashWidgetViewAll}
+                onClick={() => onNavigate("announcements")}
+              >
+                View all announcements <ArrowUpRight size={12} />
+              </button>
+            )}
+          </DashWidget>
+        </div>
       </div>
     </div>
   );
