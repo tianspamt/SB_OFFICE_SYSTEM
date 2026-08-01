@@ -100,6 +100,10 @@ export default function AdminDashboard() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [legislativeOpen, setLegislativeOpen] = useState(false);
   const [userMgmtOpen, setUserMgmtOpen] = useState(false);
+  // Set when navigating from the dashboard's "Needs your review" widget so
+  // the destination module (Ordinances / Resolutions / Sessions) can open
+  // directly on its Pending tab instead of the default Published tab.
+  const [subTabRequest, setSubTabRequest] = useState(null);
 
   // ── PH Holidays ──
   const [phHolidays, setPhHolidays] = useState({});
@@ -170,7 +174,7 @@ export default function AdminDashboard() {
   const [ordinances, setOrdinances] = useState([]);
   const [ordinanceNumber, setOrdinanceNumber] = useState("");
   const [ordinanceTitle, setOrdinanceTitle] = useState("");
-  const [ordinanceYear, setOrdinanceYear] = useState("");
+  const [ordinanceDate, setOrdinanceDate] = useState("");
   const [ordinanceFile, setOrdinanceFile] = useState(null);
   const [uploadType, setUploadType] = useState("");
   const [selectedOfficials, setSelectedOfficials] = useState([]);
@@ -178,7 +182,7 @@ export default function AdminDashboard() {
   const [editingOrdinance, setEditingOrdinance] = useState(null);
   const [editOrdinanceNumber, setEditOrdinanceNumber] = useState("");
   const [editOrdinanceTitle, setEditOrdinanceTitle] = useState("");
-  const [editOrdinanceYear, setEditOrdinanceYear] = useState("");
+  const [editOrdinanceDate, setEditOrdinanceDate] = useState("");
   const [editSelectedOfficials, setEditSelectedOfficials] = useState([]);
   const [editOrdinanceFile, setEditOrdinanceFile] = useState(null);
 
@@ -186,14 +190,14 @@ export default function AdminDashboard() {
   const [resolutions, setResolutions] = useState([]);
   const [resolutionNumber, setResolutionNumber] = useState("");
   const [resolutionTitle, setResolutionTitle] = useState("");
-  const [resolutionYear, setResolutionYear] = useState("");
+  const [resolutionDate, setResolutionDate] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
   const [selectedResolutionOfficials, setSelectedResolutionOfficials] =
     useState([]);
   const [editingResolution, setEditingResolution] = useState(null);
   const [editResolutionNumber, setEditResolutionNumber] = useState("");
   const [editResolutionTitle, setEditResolutionTitle] = useState("");
-  const [editResolutionYear, setEditResolutionYear] = useState("");
+  const [editResolutionDate, setEditResolutionDate] = useState("");
   const [editResolutionSelectedOfficials, setEditResolutionSelectedOfficials] =
     useState([]);
   const [editResolutionFile, setEditResolutionFile] = useState(null);
@@ -350,9 +354,10 @@ export default function AdminDashboard() {
     localStorage.removeItem("user");
     window.location.replace("/");
   };
-  const handleTabChange = (key) => {
+  const handleTabChange = (key, subTab = null) => {
     if (!isAdmin && ADMIN_ONLY_TABS.includes(key)) return;
     setActiveTab(key);
+    setSubTabRequest(subTab);
     setMobileOpen(false);
   };
   // Only laptops/PCs with a real mouse get hover-to-expand; touch devices keep manual toggle.
@@ -581,7 +586,7 @@ export default function AdminDashboard() {
     if (
       !ordinanceNumber ||
       !ordinanceTitle ||
-      !ordinanceYear ||
+      !ordinanceDate ||
       !ordinanceFile
     ) {
       showModalMsg("Please fill all fields and choose a file!", "error");
@@ -600,7 +605,8 @@ export default function AdminDashboard() {
     const fd = new FormData();
     fd.append("ordinance_number", ordinanceNumber);
     fd.append("title", ordinanceTitle);
-    fd.append("year", ordinanceYear);
+    fd.append("date", ordinanceDate);
+    fd.append("year", ordinanceDate.split("-")[0]);
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
     try {
@@ -617,7 +623,7 @@ export default function AdminDashboard() {
         }
         setOrdinanceNumber("");
         setOrdinanceTitle("");
-        setOrdinanceYear("");
+        setOrdinanceDate("");
         setOrdinanceFile(null);
         setSelectedOfficials([]);
         setUploadType("");
@@ -634,7 +640,7 @@ export default function AdminDashboard() {
     setEditingOrdinance(o);
     setEditOrdinanceNumber(o.ordinance_number || "");
     setEditOrdinanceTitle(o.title);
-    setEditOrdinanceYear(o.year || "");
+    setEditOrdinanceDate(o.date || (o.year ? `${o.year}-01-01` : ""));
     setEditSelectedOfficials(o.officials ? o.officials.map((x) => x.id) : []);
     setEditOrdinanceFile(null);
     setModalMessage("");
@@ -645,7 +651,7 @@ export default function AdminDashboard() {
       p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
   const handleUpdateOrdinance = async () => {
-    if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceYear) {
+    if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceDate) {
       showModalMsg("All fields required!", "error");
       return;
     }
@@ -667,7 +673,8 @@ export default function AdminDashboard() {
     const fd = new FormData();
     fd.append("ordinance_number", editOrdinanceNumber);
     fd.append("title", editOrdinanceTitle);
-    fd.append("year", editOrdinanceYear);
+    fd.append("date", editOrdinanceDate);
+    fd.append("year", editOrdinanceDate.split("-")[0]);
     fd.append("officials", JSON.stringify(editSelectedOfficials));
     if (editOrdinanceFile) fd.append("file", editOrdinanceFile);
     try {
@@ -712,7 +719,7 @@ export default function AdminDashboard() {
     if (
       !resolutionNumber ||
       !resolutionTitle ||
-      !resolutionYear ||
+      !resolutionDate ||
       !resolutionFile
     ) {
       showModalMsg("Please fill all fields and choose a file!", "error");
@@ -735,7 +742,8 @@ export default function AdminDashboard() {
     const fd = new FormData();
     fd.append("resolution_number", resolutionNumber);
     fd.append("title", resolutionTitle);
-    fd.append("year", resolutionYear);
+    fd.append("date", resolutionDate);
+    fd.append("year", resolutionDate.split("-")[0]);
     fd.append("file", resolutionFile);
     fd.append("officials", JSON.stringify(selectedResolutionOfficials));
     try {
@@ -748,7 +756,7 @@ export default function AdminDashboard() {
         showMsg("Resolution uploaded!");
         setResolutionNumber("");
         setResolutionTitle("");
-        setResolutionYear("");
+        setResolutionDate("");
         setResolutionFile(null);
         setSelectedResolutionOfficials([]);
         setShowResolutionModal(false);
@@ -764,7 +772,7 @@ export default function AdminDashboard() {
     setEditingResolution(r);
     setEditResolutionNumber(r.resolution_number || "");
     setEditResolutionTitle(r.title);
-    setEditResolutionYear(r.year || "");
+    setEditResolutionDate(r.date || (r.year ? `${r.year}-01-01` : ""));
     setEditResolutionSelectedOfficials(
       r.officials ? r.officials.map((x) => x.id) : []
     );
@@ -777,7 +785,7 @@ export default function AdminDashboard() {
       p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
     );
   const handleUpdateResolution = async () => {
-    if (!editResolutionNumber || !editResolutionTitle || !editResolutionYear) {
+    if (!editResolutionNumber || !editResolutionTitle || !editResolutionDate) {
       showModalMsg("All fields required!", "error");
       return;
     }
@@ -799,7 +807,8 @@ export default function AdminDashboard() {
     const fd = new FormData();
     fd.append("resolution_number", editResolutionNumber);
     fd.append("title", editResolutionTitle);
-    fd.append("year", editResolutionYear);
+    fd.append("date", editResolutionDate);
+    fd.append("year", editResolutionDate.split("-")[0]);
     fd.append("officials", JSON.stringify(editResolutionSelectedOfficials));
     if (editResolutionFile) fd.append("file", editResolutionFile);
     try {
@@ -1384,7 +1393,7 @@ export default function AdminDashboard() {
     const year = getCurrentYear();
     const suggested = suggestOrdinanceNumber(ordinances, year);
     lastOrdinanceSuggestion.current = suggested;
-    setOrdinanceYear(String(year));
+    setOrdinanceDate(toIsoDate(new Date()));
     setOrdinanceNumber(suggested);
     setShowOrdinanceModal(true);
   };
@@ -1395,7 +1404,7 @@ export default function AdminDashboard() {
     lastResolutionSuggestion.current = suggested;
     setResolutionNumber(suggested);
     setResolutionTitle("");
-    setResolutionYear(String(year));
+    setResolutionDate(toIsoDate(new Date()));
     setResolutionFile(null);
     setSelectedResolutionOfficials([]);
     setShowResolutionModal(true);
@@ -1790,6 +1799,9 @@ export default function AdminDashboard() {
             onAddResolution={openResolutionModal}
             onAddSession={openSessionModal}
             onAddAnnouncement={openAnnouncementModal}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
           />
         )}
         {activeTab === "users" && !fetchingUsers && (
@@ -1809,6 +1821,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             onRefresh={fetchOrdinances}
+            initialSubTab={activeTab === "ordinances" ? subTabRequest : null}
           />
         )}
         {activeTab === "resolutions" && !fetchingResolutions && (
@@ -1822,6 +1835,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             onRefresh={fetchResolutions}
+            initialSubTab={activeTab === "resolutions" ? subTabRequest : null}
           />
         )}
 
@@ -1865,6 +1879,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             onRefresh={fetchSessionMinutes}
+            initialSubTab={activeTab === "sessions" ? subTabRequest : null}
           />
         )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
@@ -2714,19 +2729,18 @@ export default function AdminDashboard() {
               value={ordinanceTitle}
               onChange={(e) => setOrdinanceTitle(e.target.value)}
             />
+            <label className={styles.fieldLabel}>Date</label>
             <input
               className={styles.input}
-              placeholder="Year (e.g. 2024)"
-              type="number"
-              min="1900"
-              max="2100"
-              value={ordinanceYear}
+              type="date"
+              value={ordinanceDate}
               onChange={(e) => {
-                const newYear = e.target.value;
-                setOrdinanceYear(newYear);
+                const newDate = e.target.value;
+                setOrdinanceDate(newDate);
                 // Only refresh the suggested number if the user hasn't
                 // manually customized it away from the last suggestion.
                 if (ordinanceNumber === lastOrdinanceSuggestion.current) {
+                  const newYear = newDate ? newDate.split("-")[0] : "";
                   const suggested = suggestOrdinanceNumber(ordinances, newYear);
                   lastOrdinanceSuggestion.current = suggested;
                   setOrdinanceNumber(suggested);
@@ -2778,7 +2792,7 @@ export default function AdminDashboard() {
                   setOrdinanceFile(null);
                   setOrdinanceNumber("");
                   setOrdinanceTitle("");
-                  setOrdinanceYear("");
+                  setOrdinanceDate("");
                   setSelectedOfficials([]);
                   setUploadType("");
                   setModalMessage("");
@@ -2816,14 +2830,12 @@ export default function AdminDashboard() {
               value={editOrdinanceTitle}
               onChange={(e) => setEditOrdinanceTitle(e.target.value)}
             />
+            <label className={styles.fieldLabel}>Date</label>
             <input
               className={styles.input}
-              placeholder="Year (e.g. 2024)"
-              type="number"
-              min="1900"
-              max="2100"
-              value={editOrdinanceYear}
-              onChange={(e) => setEditOrdinanceYear(e.target.value)}
+              type="date"
+              value={editOrdinanceDate}
+              onChange={(e) => setEditOrdinanceDate(e.target.value)}
             />
             <p className={styles.officialsSelectLabel}>
               Replace file (optional):
@@ -2920,17 +2932,16 @@ export default function AdminDashboard() {
               value={resolutionTitle}
               onChange={(e) => setResolutionTitle(e.target.value)}
             />
+            <label className={styles.fieldLabel}>Date</label>
             <input
               className={styles.input}
-              placeholder="Year (e.g. 2024)"
-              type="number"
-              min="1900"
-              max="2100"
-              value={resolutionYear}
+              type="date"
+              value={resolutionDate}
               onChange={(e) => {
-                const newYear = e.target.value;
-                setResolutionYear(newYear);
+                const newDate = e.target.value;
+                setResolutionDate(newDate);
                 if (resolutionNumber === lastResolutionSuggestion.current) {
+                  const newYear = newDate ? newDate.split("-")[0] : "";
                   const suggested = suggestResolutionNumber(
                     resolutions,
                     newYear
@@ -2985,7 +2996,7 @@ export default function AdminDashboard() {
                   setResolutionFile(null);
                   setResolutionNumber("");
                   setResolutionTitle("");
-                  setResolutionYear("");
+                  setResolutionDate("");
                   setSelectedResolutionOfficials([]);
                   setModalMessage("");
                   lastResolutionSuggestion.current = "";
@@ -3024,14 +3035,12 @@ export default function AdminDashboard() {
               value={editResolutionTitle}
               onChange={(e) => setEditResolutionTitle(e.target.value)}
             />
+            <label className={styles.fieldLabel}>Date</label>
             <input
               className={styles.input}
-              placeholder="Year (e.g. 2024)"
-              type="number"
-              min="1900"
-              max="2100"
-              value={editResolutionYear}
-              onChange={(e) => setEditResolutionYear(e.target.value)}
+              type="date"
+              value={editResolutionDate}
+              onChange={(e) => setEditResolutionDate(e.target.value)}
             />
             <p className={styles.officialsSelectLabel}>
               Replace file (optional):

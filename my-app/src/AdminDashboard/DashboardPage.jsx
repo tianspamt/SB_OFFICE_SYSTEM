@@ -7,15 +7,18 @@ import {
   ExternalLink,
   Calendar,
   Megaphone,
-  TrendingUp,
   BookOpen,
   ArrowUpRight,
   Clock,
   Hash,
   Plus,
   Gavel,
+  User,
+  Tag,
+  MapPin,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
+import PendingRecordsWidget from "./PendingRecordsWidget";
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
@@ -66,12 +69,27 @@ const OrdinanceCard = ({ item }) => (
       </span>
     </div>
     <h4 className={styles.dashCardTitle}>{item.title}</h4>
+    {item.category && (
+      <span className={styles.dashCardCategory}>
+        <Tag size={10} />
+        {item.category}
+      </span>
+    )}
     {item.description && (
       <p className={styles.dashCardDesc}>
         {item.description.length > 100
           ? item.description.substring(0, 100) + "…"
           : item.description}
       </p>
+    )}
+    {(item.author || item.officials?.length > 0) && (
+      <span className={styles.dashCardAuthor}>
+        <User size={11} />
+        {item.author ||
+          (item.officials.length === 1
+            ? item.officials[0].full_name
+            : `${item.officials.length} council members`)}
+      </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
@@ -96,6 +114,12 @@ const ResolutionCard = ({ item }) => (
       </span>
     </div>
     <h4 className={styles.dashCardTitle}>{item.title}</h4>
+    {item.category && (
+      <span className={styles.dashCardCategory}>
+        <Tag size={10} />
+        {item.category}
+      </span>
+    )}
     {item.description && (
       <p className={styles.dashCardDesc}>
         {item.description.length > 100
@@ -108,6 +132,15 @@ const ResolutionCard = ({ item }) => (
         <ExternalLink size={11} />
         Based on Ordinance No. {item.linked_ordinance}
       </div>
+    )}
+    {(item.author || item.officials?.length > 0) && (
+      <span className={styles.dashCardAuthor}>
+        <User size={11} />
+        {item.author ||
+          (item.officials.length === 1
+            ? item.officials[0].full_name
+            : `${item.officials.length} council members`)}
+      </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
@@ -134,12 +167,18 @@ const SessionCard = ({ item }) => (
       </span>
     </div>
     <h4 className={styles.dashCardTitle}>{item.title}</h4>
+    {item.venue && (
+      <span className={styles.dashCardCategory}>
+        <MapPin size={10} />
+        {item.venue}
+      </span>
+    )}
     {item.agenda && (
-      <p className={styles.dashCardDesc}>
-        {item.agenda.length > 100
-          ? item.agenda.substring(0, 100) + "…"
-          : item.agenda}
-      </p>
+      <span className={styles.dashCardAuthor}>
+        <ClipboardList size={11} />
+        {item.agenda.split("\n").filter(Boolean).length} agenda item
+        {item.agenda.split("\n").filter(Boolean).length !== 1 ? "s" : ""}
+      </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
@@ -211,13 +250,16 @@ const DashboardPage = ({
   onAddResolution,
   onAddSession,
   onAddAnnouncement,
+  isViceMayor = false,
+  isSecretary = false,
+  isClerk = false,
 }) => {
   const [activityTab, setActivityTab] = useState("ordinances");
 
   const latestOrdinances = ordinances.slice(0, 6);
   const latestResolutions = resolutions.slice(0, 6);
   const latestSessions = sessionMinutes.slice(0, 6);
-  const latestAnnouncements = announcements.slice(0, 3);
+  const latestAnnouncements = announcements.slice(0, 2);
 
   // Upcoming sessions: soonest future session first; if none are upcoming,
   // fall back to the most recently held ones so the widget isn't empty.
@@ -225,14 +267,14 @@ const DashboardPage = ({
   const upcomingSessions = [...sessionMinutes]
     .filter((s) => s.session_date && s.session_date >= today)
     .sort((a, b) => (a.session_date < b.session_date ? -1 : 1))
-    .slice(0, 3);
+    .slice(0, 2);
   const recentSessionsFallback =
     upcomingSessions.length > 0
       ? upcomingSessions
       : [...sessionMinutes]
           .filter((s) => s.session_date)
           .sort((a, b) => (a.session_date > b.session_date ? -1 : 1))
-          .slice(0, 3);
+          .slice(0, 2);
 
   const stats = [
     {
@@ -310,47 +352,23 @@ const DashboardPage = ({
 
   return (
     <div className={styles.dashboardContainer}>
-      {/* ── Welcome Banner ── */}
-      <div className={styles.dashWelcomeBanner}>
+      {/* ── Top bar: greeting + inline stat chips combined ── */}
+      <div className={styles.dashTopBar}>
         <div className={styles.dashWelcomeText}>
           <h2 className={styles.dashWelcomeTitle}>Welcome back 👋</h2>
           <p className={styles.dashWelcomeSub}>
             Here's what's happening in the Sangguniang Bayan Office today.
           </p>
         </div>
-        <div className={styles.dashWelcomeDate}>
-          <Calendar size={14} />
-          {new Date().toLocaleDateString("en-PH", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          })}
+        <div className={styles.dashTopBarStats}>
+          {stats.map((s) => (
+            <div key={s.label} className={styles.dashStatChip}>
+              <s.icon size={14} strokeWidth={2} />
+              <span className={styles.dashStatChipValue}>{s.value}</span>
+              <span className={styles.dashStatChipLabel}>{s.label}</span>
+            </div>
+          ))}
         </div>
-      </div>
-
-      {/* ── Stats Row ── */}
-      <div className={styles.dashStatsRow}>
-        {stats.map((s) => (
-          <div key={s.label} className={styles.dashStatCard}>
-            <div className={styles.dashStatTop}>
-              <div
-                className={styles.dashStatIconWrap}
-                style={{ background: s.iconBg }}
-              >
-                <s.icon size={22} color={s.iconColor} strokeWidth={1.8} />
-              </div>
-              <div className={styles.dashStatBody}>
-                <span className={styles.dashStatValue}>{s.value}</span>
-                <span className={styles.dashStatLabel}>{s.label}</span>
-              </div>
-            </div>
-            <div className={styles.dashStatTrend}>
-              <TrendingUp size={10} />
-              {s.trend}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* ── Body: main activity feed + sidebar ── */}
@@ -395,92 +413,105 @@ const DashboardPage = ({
           )}
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar: Quick actions on top, Pending Review fills the rest */}
         <div className={styles.dashSidebar}>
           {canQuickAdd && (
             <DashWidget icon={Plus} title="Quick actions">
-              <div className={styles.dashQuickActions}>
+              <div className={styles.dashQuickActionsGrid}>
                 <button
-                  className={styles.quickActionBtn}
+                  className={styles.quickActionIconBtn}
                   onClick={onAddOrdinance}
                 >
-                  <ScrollText size={14} /> Upload ordinance
+                  <ScrollText size={16} /> Ordinance
                 </button>
                 <button
-                  className={styles.quickActionBtn}
+                  className={styles.quickActionIconBtn}
                   onClick={onAddResolution}
                 >
-                  <Gavel size={14} /> Upload resolution
+                  <Gavel size={16} /> Resolution
                 </button>
                 <button
-                  className={styles.quickActionBtn}
+                  className={styles.quickActionIconBtn}
                   onClick={onAddSession}
                 >
-                  <BookOpen size={14} /> Add session
+                  <BookOpen size={16} /> Session
                 </button>
                 <button
-                  className={styles.quickActionBtn}
+                  className={styles.quickActionIconBtn}
                   onClick={onAddAnnouncement}
                 >
-                  <Megaphone size={14} /> Post announcement
+                  <Megaphone size={16} /> Announce
                 </button>
               </div>
             </DashWidget>
           )}
 
-          <DashWidget icon={Clock} title="Upcoming sessions">
-            {recentSessionsFallback.length === 0 ? (
-              <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
-            ) : (
-              <div className={styles.dashUpcomingList}>
-                {recentSessionsFallback.map((s) => (
-                  <div key={s.id} className={styles.dashUpcomingItem}>
-                    <div className={styles.dashUpcomingDate}>
-                      {formatDate(s.session_date)}
-                    </div>
-                    <div className={styles.dashUpcomingTitle}>
-                      {s.title || s.session_type || "Session"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {onNavigate && (
-              <button
-                className={styles.dashWidgetViewAll}
-                onClick={() => onNavigate("sessions")}
-              >
-                View all sessions <ArrowUpRight size={12} />
-              </button>
-            )}
-          </DashWidget>
-
-          <DashWidget icon={Megaphone} title="Announcements">
-            {latestAnnouncements.length === 0 ? (
-              <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
-            ) : (
-              <div className={styles.dashMiniAnnList}>
-                {latestAnnouncements.map((post) => (
-                  <div key={post.id} className={styles.dashMiniAnn}>
-                    <div className={styles.dashMiniAnnTitle}>{post.title}</div>
-                    <div className={styles.dashMiniAnnDate}>
-                      <Calendar size={10} />
-                      {formatDate(post.date_published)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {onNavigate && (
-              <button
-                className={styles.dashWidgetViewAll}
-                onClick={() => onNavigate("announcements")}
-              >
-                View all announcements <ArrowUpRight size={12} />
-              </button>
-            )}
-          </DashWidget>
+          {(isViceMayor || isSecretary || isClerk) && (
+            <PendingRecordsWidget
+              isViceMayor={isViceMayor}
+              isSecretary={isSecretary}
+              isClerk={isClerk}
+              onNavigate={onNavigate}
+              style={{ flex: 1, minHeight: 0 }}
+            />
+          )}
         </div>
+      </div>
+
+      {/* ── Bottom row: Announcements + Upcoming session, side by side ── */}
+      <div className={styles.dashBottomRow}>
+        <DashWidget icon={Megaphone} title="Latest announcements">
+          {latestAnnouncements.length === 0 ? (
+            <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
+          ) : (
+            <div className={styles.dashMiniAnnList}>
+              {latestAnnouncements.map((post) => (
+                <div key={post.id} className={styles.dashMiniAnn}>
+                  <div className={styles.dashMiniAnnTitle}>{post.title}</div>
+                  <div className={styles.dashMiniAnnDate}>
+                    <Calendar size={10} />
+                    {formatDate(post.date_published)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {onNavigate && (
+            <button
+              className={styles.dashWidgetViewAll}
+              onClick={() => onNavigate("announcements")}
+            >
+              View all announcements <ArrowUpRight size={12} />
+            </button>
+          )}
+        </DashWidget>
+
+        <DashWidget icon={Clock} title="Upcoming sessions">
+          {recentSessionsFallback.length === 0 ? (
+            <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
+          ) : (
+            <div className={styles.dashUpcomingList}>
+              {recentSessionsFallback.map((s) => (
+                <div key={s.id} className={styles.dashUpcomingItem}>
+                  <div className={styles.dashUpcomingDate}>
+                    {formatDate(s.session_date)}
+                  </div>
+                  <div className={styles.dashUpcomingTitle}>
+                    {s.title || s.session_type || "Session"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {onNavigate && (
+            <button
+              className={styles.dashWidgetViewAll}
+              onClick={() => onNavigate("sessions")}
+            >
+              View all sessions <ArrowUpRight size={12} />
+            </button>
+          )}
+        </DashWidget>
       </div>
     </div>
   );

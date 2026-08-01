@@ -7,17 +7,18 @@
 import { useState } from "react";
 import { Search, Filter, X, Upload, Send } from "lucide-react";
 import styles from "./LegislativeModule.module.css";
+import { toIsoDate } from "./AdminContext";
 
 // ─── STATUS BADGE ────────────────────────────────────────────────────────────
 
 export function StatusBadge({ status }) {
   const map = {
-  pending: { label: "● Pending Review", cls: styles.statusPending },
-  needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
-  ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
-  approved: { label: "VM Approved", cls: styles.statusApproved },
-  published: { label: "● Published", cls: styles.statusPublished },
-};
+    pending: { label: "● Pending Review", cls: styles.statusPending },
+    needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
+    ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
+    approved: { label: "VM Approved", cls: styles.statusApproved },
+    published: { label: "● Published", cls: styles.statusPublished },
+  };
   const s = map[status] || map.pending;
   return <span className={`${styles.statusBadge} ${s.cls}`}>{s.label}</span>;
 }
@@ -204,25 +205,23 @@ export function ActionButtons({
         View Draft
       </button>
 
-      {isViceMayor ? (
-        status === "pending" && (
-          <button
-            className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
-            onClick={onApprove}
-          >
-            Mark Ready
-          </button>
-        )
-      ) : (
-        status === "ready_to_publish" && (
-          <button
-            className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
-            onClick={onApprove}
-          >
-            ✅ Publish
-          </button>
-        )
-      )}
+      {isViceMayor
+        ? status === "pending" && (
+            <button
+              className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
+              onClick={onApprove}
+            >
+              Mark Ready
+            </button>
+          )
+        : status === "ready_to_publish" && (
+            <button
+              className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
+              onClick={onApprove}
+            >
+              ✅ Publish
+            </button>
+          )}
 
       {!isViceMayor && (
         <button className={`${styles.btn} ${styles.btnSm}`} onClick={onComment}>
@@ -270,13 +269,13 @@ export function PendingRecordCard({
         </div>
       </div>
       <ActionButtons
-  status={status}
-  onApprove={onApprove}
-  onReject={onReject}
-  onViewDraft={onViewDraft}
-  onComment={onComment}
-  isViceMayor={isViceMayor}
-/>
+        status={status}
+        onApprove={onApprove}
+        onReject={onReject}
+        onViewDraft={onViewDraft}
+        onComment={onComment}
+        isViceMayor={isViceMayor}
+      />
     </div>
   );
 }
@@ -343,7 +342,10 @@ export function UploadModal({
     code: codePrefix ? `${codePrefix}-2026-XXX-001` : "",
     author: "",
     coauthor: "",
-    date: "",
+    // Defaults to today so staff aren't forced to look up the date, but it
+    // stays a plain editable input — if the record was approved earlier and
+    // only uploaded today, they can change it to the real date.
+    date: toIsoDate(new Date()),
     notes: "",
     description: "",
     file: null,
@@ -450,6 +452,10 @@ export function UploadModal({
             value={form.date}
             onChange={(e) => set("date", e.target.value)}
           />
+          <span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
+            Defaults to today. Change it if this record was actually approved or
+            published on an earlier date.
+          </span>
         </div>
 
         <div className={styles.formGroup}>

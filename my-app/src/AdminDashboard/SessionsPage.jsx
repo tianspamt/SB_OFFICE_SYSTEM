@@ -4,7 +4,16 @@
  */
 
 import { useState, useEffect } from "react";
-import { Printer, Eye, Pencil, Archive, CalendarDays, X, Upload, Send } from "lucide-react";
+import {
+  Printer,
+  Eye,
+  Pencil,
+  Archive,
+  CalendarDays,
+  X,
+  Upload,
+  Send,
+} from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
 import { API, MONTHS, authFetch } from "./AdminContext";
 
@@ -20,7 +29,14 @@ import {
 
 // ─── SESSION CARD (Published) ─────────────────────────────────────────────────
 
-function SessionPublishedCard({ session, onEdit, onDelete, onView, MONTHS, readOnly }) {
+function SessionPublishedCard({
+  session,
+  onEdit,
+  onDelete,
+  onView,
+  MONTHS,
+  readOnly,
+}) {
   const date = session.session_date
     ? new Date(session.session_date + "T00:00:00")
     : null;
@@ -175,8 +191,15 @@ export default function SessionsPage({
   isSecretary = false,
   isClerk = false,
   onRefresh,
+  initialSubTab = null,
 }) {
   const [activeTab, setActiveTab] = useState("published");
+
+  // Lets the dashboard's "Needs your review" widget deep-link straight into
+  // the Pending tab instead of landing on the default Published tab.
+  useEffect(() => {
+    if (initialSubTab) setActiveTab(initialSubTab);
+  }, [initialSubTab]);
   const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
@@ -208,21 +231,23 @@ export default function SessionsPage({
     ),
   ].sort((a, b) => b - a);
 
-  const filteredPublished = sessionMinutes.filter((s) => {
-    const ms =
-      !search ||
-      (s.session_number || "").toLowerCase().includes(search.toLowerCase()) ||
-      (s.venue || "").toLowerCase().includes(search.toLowerCase()) ||
-      (s.agenda || "").toLowerCase().includes(search.toLowerCase());
-    const t =
-      minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
-    const y =
-      minutesYearFilter === "all" ||
-      (s.session_date &&
-        new Date(s.session_date).getFullYear().toString() ===
-          minutesYearFilter);
-    return ms && t && y;
-  }).filter((s) => s.status === "published" || !s.status);
+  const filteredPublished = sessionMinutes
+    .filter((s) => {
+      const ms =
+        !search ||
+        (s.session_number || "").toLowerCase().includes(search.toLowerCase()) ||
+        (s.venue || "").toLowerCase().includes(search.toLowerCase()) ||
+        (s.agenda || "").toLowerCase().includes(search.toLowerCase());
+      const t =
+        minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
+      const y =
+        minutesYearFilter === "all" ||
+        (s.session_date &&
+          new Date(s.session_date).getFullYear().toString() ===
+            minutesYearFilter);
+      return ms && t && y;
+    })
+    .filter((s) => s.status === "published" || !s.status);
 
   useEffect(() => {
     if (activeTab === "pending" && canPublish) {
@@ -241,7 +266,9 @@ export default function SessionsPage({
   const fetchPendingSessions = async () => {
     setFetchingPending(true);
     try {
-      const res = await fetch(`${API}/api/session-minutes?status=${pendingStatusesForRole()}`);
+      const res = await fetch(
+        `${API}/api/session-minutes?status=${pendingStatusesForRole()}`
+      );
       const data = await res.json();
       setPendingSessions(Array.isArray(data) ? data : []);
     } catch {
@@ -260,7 +287,9 @@ export default function SessionsPage({
   const fetchComments = async (sessionId) => {
     setLoadingComments(true);
     try {
-      const res = await authFetch(`${API}/api/comments?entity_type=session_minutes&entity_id=${sessionId}`);
+      const res = await authFetch(
+        `${API}/api/comments?entity_type=session_minutes&entity_id=${sessionId}`
+      );
       const data = await res.json();
       setReviewComments(Array.isArray(data) ? data : []);
     } catch {
@@ -286,7 +315,11 @@ export default function SessionsPage({
     try {
       const res = await authFetch(`${API}/api/comments`, {
         method: "POST",
-        body: JSON.stringify({ entity_type: "session_minutes", entity_id: viewTarget.id, text: reviewCommentText.trim() }),
+        body: JSON.stringify({
+          entity_type: "session_minutes",
+          entity_id: viewTarget.id,
+          text: reviewCommentText.trim(),
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -308,7 +341,9 @@ export default function SessionsPage({
       const res = await authFetch(`${API}${url}`, options);
       const data = await res.json();
       if (res.ok && data.success) {
-        setViewTarget((prev) => (prev ? { ...prev, ...successUpdate(data.data) } : prev));
+        setViewTarget((prev) =>
+          prev ? { ...prev, ...successUpdate(data.data) } : prev
+        );
         refreshAll();
         return true;
       }
@@ -323,13 +358,20 @@ export default function SessionsPage({
   };
 
   const handleAccept = (id) =>
-    runReviewAction(`/api/session-minutes/${id}/accept`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/session-minutes/${id}/accept`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
 
   const handleRequestChanges = async () => {
     if (!reviewCommentText.trim() || !viewTarget) return;
     const ok = await runReviewAction(
       `/api/session-minutes/${viewTarget.id}/request-changes`,
-      { method: "PUT", body: JSON.stringify({ comment: reviewCommentText.trim() }) },
+      {
+        method: "PUT",
+        body: JSON.stringify({ comment: reviewCommentText.trim() }),
+      },
       (d) => ({ status: d.status })
     );
     if (ok) {
@@ -339,28 +381,50 @@ export default function SessionsPage({
   };
 
   const handleVMApprove = (id) =>
-    runReviewAction(`/api/session-minutes/${id}/vm-approve`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/session-minutes/${id}/vm-approve`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
 
   const handlePublish = (id) =>
-    runReviewAction(`/api/session-minutes/${id}/publish`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/session-minutes/${id}/publish`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
 
   const handleReviseSession = async (id) => {
     let ok;
     if (reviseFile) {
       const fd = new FormData();
       fd.append("file", reviseFile);
-      ok = await runReviewAction(`/api/session-minutes/${id}/revise`, { method: "PUT", body: fd }, (d) => ({
-        filename: d.filename,
-        filetype: d.filetype,
-        minutes_text: d.minutes_text,
-        revision_count: d.revision_count,
-      }));
+      ok = await runReviewAction(
+        `/api/session-minutes/${id}/revise`,
+        { method: "PUT", body: fd },
+        (d) => ({
+          filename: d.filename,
+          filetype: d.filetype,
+          minutes_text: d.minutes_text,
+          revision_count: d.revision_count,
+        })
+      );
       if (ok) setReviseFile(null);
     } else {
       ok = await runReviewAction(
         `/api/session-minutes/${id}/revise`,
-        { method: "PUT", body: JSON.stringify({ agenda: reviseAgenda, minutes_text: reviseMinutes }) },
-        (d) => ({ agenda: d.agenda, minutes_text: d.minutes_text, revision_count: d.revision_count })
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            agenda: reviseAgenda,
+            minutes_text: reviseMinutes,
+          }),
+        },
+        (d) => ({
+          agenda: d.agenda,
+          minutes_text: d.minutes_text,
+          revision_count: d.revision_count,
+        })
       );
     }
     return ok;
@@ -369,12 +433,18 @@ export default function SessionsPage({
   const handleResubmit = async (id) => {
     const revised = await handleReviseSession(id);
     if (!revised) return;
-    runReviewAction(`/api/session-minutes/${id}/resubmit`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/session-minutes/${id}/resubmit`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
   };
 
   const pendingFiltered = pendingSessions.filter((s) => {
-    return !search ||
-      (s.session_number || "").toLowerCase().includes(search.toLowerCase());
+    return (
+      !search ||
+      (s.session_number || "").toLowerCase().includes(search.toLowerCase())
+    );
   });
   const pendingCount = pendingSessions.length;
 
@@ -382,18 +452,24 @@ export default function SessionsPage({
     <>
       {/* STATS */}
       <StatsRow
-  stats={[
-    { value: filteredPublished.length, label: "Total Sessions" },
-    { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
-  ]}
-/>
+        stats={[
+          { value: filteredPublished.length, label: "Total Sessions" },
+          {
+            value: pendingCount,
+            label: "Pending Review",
+            colorClass: lStyles.statCardAmber,
+          },
+        ]}
+      />
 
       {/* TABS */}
       <TabNavigation
-  tabs={[
-    { id: "published", label: "Published" },
-    ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
-  ]}
+        tabs={[
+          { id: "published", label: "Published" },
+          ...(canPublish
+            ? [{ id: "pending", label: "Pending", badge: pendingCount }]
+            : []),
+        ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
@@ -459,14 +535,14 @@ export default function SessionsPage({
             ) : (
               filteredPublished.map((s) => (
                 <SessionPublishedCard
-  key={s.id}
-  session={s}
-  onEdit={onEdit}
-  onDelete={setDeleteTarget}
-  onView={handleOpenView}
-  MONTHS={MONTHS}
-  readOnly={readOnly}
-/>
+                  key={s.id}
+                  session={s}
+                  onEdit={onEdit}
+                  onDelete={setDeleteTarget}
+                  onView={handleOpenView}
+                  MONTHS={MONTHS}
+                  readOnly={readOnly}
+                />
               ))
             )}
           </div>
@@ -477,8 +553,8 @@ export default function SessionsPage({
       {activeTab === "pending" && (
         <>
           <div className={lStyles.resultCount}>
-  Showing {pendingFiltered.length} drafts
-</div>
+            Showing {pendingFiltered.length} drafts
+          </div>
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -496,11 +572,14 @@ export default function SessionsPage({
                   </div>
                   <div className={lStyles.recordBody}>
                     <div className={lStyles.recordTitle}>
-                      {item.session_number || new Date(item.session_date).toLocaleDateString("en-PH")}
+                      {item.session_number ||
+                        new Date(item.session_date).toLocaleDateString("en-PH")}
                     </div>
                     <div className={lStyles.recordMeta}>
                       {item.venue && <span>{item.venue}</span>}
-                      {item.revision_count > 0 && <span>Revision #{item.revision_count}</span>}
+                      {item.revision_count > 0 && (
+                        <span>Revision #{item.revision_count}</span>
+                      )}
                       <StatusBadge status={item.status} />
                     </div>
                   </div>
@@ -533,8 +612,14 @@ export default function SessionsPage({
 
       {/* ── VIEW SESSION MODAL ───────────────────────────────────────────────── */}
       {viewTarget && (
-        <div className={lStyles.viewModalOverlay} onClick={() => setViewTarget(null)}>
-          <div className={lStyles.viewModal} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={lStyles.viewModalOverlay}
+          onClick={() => setViewTarget(null)}
+        >
+          <div
+            className={lStyles.viewModal}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className={lStyles.viewModalHeader}>
               <div className={lStyles.viewModalHeaderTop}>
                 <div className={lStyles.viewModalHeaderInfo}>
@@ -545,7 +630,9 @@ export default function SessionsPage({
                     </div>
                   )}
                   <h2 className={lStyles.viewModalTitle}>
-                    {viewTarget.session_type === "special" ? "Special Session" : "Regular Session"}
+                    {viewTarget.session_type === "special"
+                      ? "Special Session"
+                      : "Regular Session"}
                   </h2>
                 </div>
                 <button
@@ -561,37 +648,52 @@ export default function SessionsPage({
             <div className={lStyles.viewModalBody}>
               <div className={lStyles.viewModalMeta}>
                 <div className={lStyles.viewModalMetaItem}>
-                  <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}>
+                  <div
+                    className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}
+                  >
                     <CalendarDays size={16} />
                   </div>
                   <div>
                     <div className={lStyles.viewModalMetaLabel}>Date</div>
                     <div className={lStyles.viewModalMetaValue}>
-                      {new Date(viewTarget.session_date + "T00:00:00").toLocaleDateString("en-PH", {
-                        year: "numeric", month: "short", day: "numeric",
+                      {new Date(
+                        viewTarget.session_date + "T00:00:00"
+                      ).toLocaleDateString("en-PH", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
                       })}
                     </div>
                   </div>
                 </div>
                 {viewTarget.venue && (
                   <div className={lStyles.viewModalMetaItem}>
-                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}>
+                    <div
+                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}
+                    >
                       <CalendarDays size={16} />
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Venue</div>
-                      <div className={lStyles.viewModalMetaValue}>{viewTarget.venue}</div>
+                      <div className={lStyles.viewModalMetaValue}>
+                        {viewTarget.venue}
+                      </div>
                     </div>
                   </div>
                 )}
                 {viewTarget.status && (
                   <div className={lStyles.viewModalMetaItem}>
-                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}>
+                    <div
+                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}
+                    >
                       <Eye size={16} />
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Status</div>
-                      <div className={lStyles.viewModalMetaValue} style={{ textTransform: "capitalize" }}>
+                      <div
+                        className={lStyles.viewModalMetaValue}
+                        style={{ textTransform: "capitalize" }}
+                      >
                         {viewTarget.status}
                       </div>
                     </div>
@@ -603,10 +705,18 @@ export default function SessionsPage({
 
               {/* ── Agenda + minutes (editable while under review, read-only once published) ── */}
               {(() => {
-                const isReviewer = (isSecretary || isClerk) && viewTarget.status && viewTarget.status !== "published";
+                const isReviewer =
+                  (isSecretary || isClerk) &&
+                  viewTarget.status &&
+                  viewTarget.status !== "published";
                 return (
                   <>
-                    <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>Agenda</div>
+                    <div
+                      className={lStyles.viewModalCouncilTitle}
+                      style={{ marginBottom: 8 }}
+                    >
+                      Agenda
+                    </div>
                     {isReviewer ? (
                       <textarea
                         className={lStyles.viewModalOcrText}
@@ -616,12 +726,23 @@ export default function SessionsPage({
                         placeholder="One agenda item per line..."
                       />
                     ) : (
-                      <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          whiteSpace: "pre-wrap",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         {viewTarget.agenda || "No agenda recorded."}
                       </div>
                     )}
 
-                    <div className={lStyles.viewModalCouncilTitle} style={{ margin: "16px 0 8px" }}>Minutes</div>
+                    <div
+                      className={lStyles.viewModalCouncilTitle}
+                      style={{ margin: "16px 0 8px" }}
+                    >
+                      Minutes
+                    </div>
                     {isReviewer ? (
                       <textarea
                         className={lStyles.viewModalOcrText}
@@ -631,7 +752,13 @@ export default function SessionsPage({
                         placeholder="Minutes of the session..."
                       />
                     ) : (
-                      <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          whiteSpace: "pre-wrap",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         {viewTarget.minutes_text || "No minutes recorded."}
                       </div>
                     )}
@@ -646,20 +773,32 @@ export default function SessionsPage({
 
                   {(isSecretary || isClerk) && (
                     <div style={{ marginBottom: 16 }}>
-                      <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>
+                      <div
+                        className={lStyles.viewModalCouncilTitle}
+                        style={{ marginBottom: 8 }}
+                      >
                         Or Replace With a File (re-runs text extraction)
                       </div>
-                      <div className={lStyles.uploadZone} onClick={() => document.getElementById("reviseFileInputSes")?.click()}>
+                      <div
+                        className={lStyles.uploadZone}
+                        onClick={() =>
+                          document.getElementById("reviseFileInputSes")?.click()
+                        }
+                      >
                         <div className={lStyles.uploadIcon}>📎</div>
                         <div className={lStyles.uploadText}>
-                          {reviseFile ? reviseFile.name : "Click to choose a replacement file"}
+                          {reviseFile
+                            ? reviseFile.name
+                            : "Click to choose a replacement file"}
                         </div>
                         <input
                           id="reviseFileInputSes"
                           type="file"
                           accept=".pdf,.doc,.docx,image/*"
                           style={{ display: "none" }}
-                          onChange={(e) => setReviseFile(e.target.files?.[0] || null)}
+                          onChange={(e) =>
+                            setReviseFile(e.target.files?.[0] || null)
+                          }
                         />
                       </div>
                       {viewTarget.status !== "needs_revision" && (
@@ -678,21 +817,40 @@ export default function SessionsPage({
                   <div className={lStyles.commentsLabel}>Comments</div>
                   <div className={lStyles.commentsThread}>
                     {loadingComments ? (
-                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          textAlign: "center",
+                          padding: "1rem",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         Loading comments...
                       </div>
                     ) : reviewComments.length === 0 ? (
-                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          textAlign: "center",
+                          padding: "1rem",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         No comments yet
                       </div>
                     ) : (
                       reviewComments.map((c) => (
                         <div key={c.id} className={lStyles.comment}>
                           <div className={lStyles.commentMeta}>
-                            <span className={lStyles.commentAuthor}>{c.author?.name || c.author_role}</span>
+                            <span className={lStyles.commentAuthor}>
+                              {c.author?.name || c.author_role}
+                            </span>
                             <span>
                               {new Date(c.created_at).toLocaleString("en-PH", {
-                                month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
                               })}
                             </span>
                           </div>
@@ -722,10 +880,17 @@ export default function SessionsPage({
                   )}
 
                   {reviewError && (
-                    <div style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}>{reviewError}</div>
+                    <div
+                      style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}
+                    >
+                      {reviewError}
+                    </div>
                   )}
 
-                  <div className={lStyles.viewModalFileActions} style={{ marginTop: 16 }}>
+                  <div
+                    className={lStyles.viewModalFileActions}
+                    style={{ marginTop: 16 }}
+                  >
                     {isSecretary && viewTarget.status === "pending" && (
                       <>
                         <button
@@ -737,8 +902,14 @@ export default function SessionsPage({
                         </button>
                         <button
                           className={`${lStyles.btn} ${lStyles.btnDanger}`}
-                          disabled={reviewSubmitting || !reviewCommentText.trim()}
-                          title={!reviewCommentText.trim() ? "Enter a comment above explaining the requested changes" : ""}
+                          disabled={
+                            reviewSubmitting || !reviewCommentText.trim()
+                          }
+                          title={
+                            !reviewCommentText.trim()
+                              ? "Enter a comment above explaining the requested changes"
+                              : ""
+                          }
                           onClick={handleRequestChanges}
                         >
                           Request Changes
@@ -756,15 +927,16 @@ export default function SessionsPage({
                       </button>
                     )}
 
-                    {isViceMayor && viewTarget.status === "ready_to_publish" && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleVMApprove(viewTarget.id)}
-                      >
-                        ✅ Approve
-                      </button>
-                    )}
+                    {isViceMayor &&
+                      viewTarget.status === "ready_to_publish" && (
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleVMApprove(viewTarget.id)}
+                        >
+                          ✅ Approve
+                        </button>
+                      )}
 
                     {isSecretary && viewTarget.status === "approved" && (
                       <button

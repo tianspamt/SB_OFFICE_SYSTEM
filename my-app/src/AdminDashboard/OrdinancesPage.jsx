@@ -38,8 +38,6 @@ import {
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
 // Remove when wiring to backend — replace with props or API calls
 
-
-
 const CATEGORIES = [
   "All",
   "Tax",
@@ -63,8 +61,15 @@ export default function OrdinancesPage({
   isSecretary = false,
   isClerk = false,
   onRefresh,
+  initialSubTab = null,
 }) {
   const [activeTab, setActiveTab] = useState("published");
+
+  // Lets the dashboard's "Needs your review" widget deep-link straight into
+  // the Pending tab instead of landing on the default Published tab.
+  useEffect(() => {
+    if (initialSubTab) setActiveTab(initialSubTab);
+  }, [initialSubTab]);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
@@ -89,12 +94,15 @@ export default function OrdinancesPage({
     `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
 
   // ── Split ordinances by actual status from the backend ─────────────────────
-  const publishedOrdinances = ordinances.filter((o) => o.status === "published");
-
+  const publishedOrdinances = ordinances.filter(
+    (o) => o.status === "published"
+  );
 
   // ── Derive available years from published ordinances ───────────────────────
   const availableYears = [
-    ...new Set(publishedOrdinances.map((o) => o.year?.toString()).filter(Boolean)),
+    ...new Set(
+      publishedOrdinances.map((o) => o.year?.toString()).filter(Boolean)
+    ),
   ].sort((a, b) => b - a);
 
   // ── Filter helpers ──────────────────────────────────────────────────────────
@@ -120,7 +128,9 @@ export default function OrdinancesPage({
       const s =
         !search ||
         (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-        (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase()) ||
+        (o.ordinance_number || "")
+          .toLowerCase()
+          .includes(search.toLowerCase()) ||
         (o.author || "").toLowerCase().includes(search.toLowerCase());
       const c = catFilter === "All" || o.category === catFilter;
       const a =
@@ -154,7 +164,9 @@ export default function OrdinancesPage({
   const fetchPendingOrdinances = async () => {
     setFetchingPending(true);
     try {
-      const res = await fetch(`${API}/api/ordinances?status=${pendingStatusesForRole()}`);
+      const res = await fetch(
+        `${API}/api/ordinances?status=${pendingStatusesForRole()}`
+      );
       const data = await res.json();
       setPendingOrdinances(Array.isArray(data) ? data : []);
     } catch {
@@ -173,7 +185,9 @@ export default function OrdinancesPage({
   const fetchComments = async (ordinanceId) => {
     setLoadingComments(true);
     try {
-      const res = await authFetch(`${API}/api/comments?entity_type=ordinance&entity_id=${ordinanceId}`);
+      const res = await authFetch(
+        `${API}/api/comments?entity_type=ordinance&entity_id=${ordinanceId}`
+      );
       const data = await res.json();
       setReviewComments(Array.isArray(data) ? data : []);
     } catch {
@@ -198,7 +212,11 @@ export default function OrdinancesPage({
     try {
       const res = await authFetch(`${API}/api/comments`, {
         method: "POST",
-        body: JSON.stringify({ entity_type: "ordinance", entity_id: viewTarget.id, text: reviewCommentText.trim() }),
+        body: JSON.stringify({
+          entity_type: "ordinance",
+          entity_id: viewTarget.id,
+          text: reviewCommentText.trim(),
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -220,7 +238,9 @@ export default function OrdinancesPage({
       const res = await authFetch(`${API}${url}`, options);
       const data = await res.json();
       if (res.ok && data.success) {
-        setViewTarget((prev) => (prev ? { ...prev, ...successUpdate(data.data) } : prev));
+        setViewTarget((prev) =>
+          prev ? { ...prev, ...successUpdate(data.data) } : prev
+        );
         refreshAll();
         return true;
       }
@@ -235,13 +255,18 @@ export default function OrdinancesPage({
   };
 
   const handleAccept = (id) =>
-    runReviewAction(`/api/ordinances/${id}/accept`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(`/api/ordinances/${id}/accept`, { method: "PUT" }, (d) => ({
+      status: d.status,
+    }));
 
   const handleRequestChanges = async () => {
     if (!reviewCommentText.trim() || !viewTarget) return;
     const ok = await runReviewAction(
       `/api/ordinances/${viewTarget.id}/request-changes`,
-      { method: "PUT", body: JSON.stringify({ comment: reviewCommentText.trim() }) },
+      {
+        method: "PUT",
+        body: JSON.stringify({ comment: reviewCommentText.trim() }),
+      },
       (d) => ({ status: d.status })
     );
     if (ok) {
@@ -251,22 +276,34 @@ export default function OrdinancesPage({
   };
 
   const handleVMApprove = (id) =>
-    runReviewAction(`/api/ordinances/${id}/vm-approve`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/ordinances/${id}/vm-approve`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
 
   const handlePublish = (id) =>
-    runReviewAction(`/api/ordinances/${id}/publish`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/ordinances/${id}/publish`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
 
   const handleReplaceFile = async (id) => {
     if (!reviewFile) return;
     const fd = new FormData();
     fd.append("file", reviewFile);
-    const ok = await runReviewAction(`/api/ordinances/${id}/replace-file`, { method: "PUT", body: fd }, (d) => ({
-      filename: d.filename,
-      filetype: d.filetype,
-      filepath: d.filepath,
-      extracted_text: d.extracted_text,
-      revision_count: d.revision_count,
-    }));
+    const ok = await runReviewAction(
+      `/api/ordinances/${id}/replace-file`,
+      { method: "PUT", body: fd },
+      (d) => ({
+        filename: d.filename,
+        filetype: d.filetype,
+        filepath: d.filepath,
+        extracted_text: d.extracted_text,
+        revision_count: d.revision_count,
+      })
+    );
     if (ok) setReviewFile(null);
     return ok;
   };
@@ -276,15 +313,21 @@ export default function OrdinancesPage({
       const replaced = await handleReplaceFile(id);
       if (!replaced) return;
     }
-    runReviewAction(`/api/ordinances/${id}/resubmit`, { method: "PUT" }, (d) => ({ status: d.status }));
+    runReviewAction(
+      `/api/ordinances/${id}/resubmit`,
+      { method: "PUT" },
+      (d) => ({ status: d.status })
+    );
   };
 
   // ── Pending count for badge ─────────────────────────────────────────────────
 
   const pendingFiltered = pendingOrdinances.filter((o) => {
-    return !search ||
+    return (
+      !search ||
       (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-      (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase());
+      (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase())
+    );
   });
   const pendingCount = pendingOrdinances.length;
   const publishedFiltered = filterPublished(publishedOrdinances);
@@ -294,7 +337,11 @@ export default function OrdinancesPage({
       <StatsRow
         stats={[
           { value: publishedOrdinances.length, label: "Total Published" },
-          { value: pendingCount, label: "Pending Review", colorClass: lStyles.statCardAmber },
+          {
+            value: pendingCount,
+            label: "Pending Review",
+            colorClass: lStyles.statCardAmber,
+          },
         ]}
       />
 
@@ -302,7 +349,9 @@ export default function OrdinancesPage({
       <TabNavigation
         tabs={[
           { id: "published", label: "Published" },
-          ...(canPublish ? [{ id: "pending", label: "Pending", badge: pendingCount }] : []),
+          ...(canPublish
+            ? [{ id: "pending", label: "Pending", badge: pendingCount }]
+            : []),
         ]}
         activeTab={activeTab}
         onTabChange={(tab) => {
@@ -339,7 +388,8 @@ export default function OrdinancesPage({
       {activeTab === "published" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {publishedFiltered.length} of {publishedOrdinances.length} ordinances
+            Showing {publishedFiltered.length} of {publishedOrdinances.length}{" "}
+            ordinances
           </div>
           <div className={lStyles.recordList}>
             {publishedFiltered.length === 0 ? (
@@ -464,7 +514,8 @@ export default function OrdinancesPage({
                     <div className={lStyles.recordTitle}>{item.title}</div>
                     <div className={lStyles.recordMeta}>
                       <span>
-                        Submitted: {new Date(item.uploaded_at).toLocaleDateString("en-PH")}
+                        Submitted:{" "}
+                        {new Date(item.uploaded_at).toLocaleDateString("en-PH")}
                       </span>
                       {item.revision_count > 0 && (
                         <span>Revision #{item.revision_count}</span>
@@ -512,7 +563,10 @@ export default function OrdinancesPage({
 
       {/* ── VIEW ORDINANCE MODAL ─────────────────────────────────────────────── */}
       {viewTarget && (
-        <div className={lStyles.viewModalOverlay} onClick={() => setViewTarget(null)}>
+        <div
+          className={lStyles.viewModalOverlay}
+          onClick={() => setViewTarget(null)}
+        >
           <div
             className={lStyles.viewModal}
             onClick={(e) => e.stopPropagation()}
@@ -545,49 +599,67 @@ export default function OrdinancesPage({
               <div className={lStyles.viewModalMeta}>
                 {viewTarget.year && (
                   <div className={lStyles.viewModalMetaItem}>
-                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}>
+                    <div
+                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}
+                    >
                       <CalendarDays size={16} />
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Year</div>
-                      <div className={lStyles.viewModalMetaValue}>{viewTarget.year}</div>
+                      <div className={lStyles.viewModalMetaValue}>
+                        {viewTarget.year}
+                      </div>
                     </div>
                   </div>
                 )}
                 <div className={lStyles.viewModalMetaItem}>
-                  <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}>
+                  <div
+                    className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}
+                  >
                     <CalendarDays size={16} />
                   </div>
                   <div>
                     <div className={lStyles.viewModalMetaLabel}>Uploaded</div>
                     <div className={lStyles.viewModalMetaValue}>
-                      {new Date(viewTarget.uploaded_at).toLocaleDateString("en-PH", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
+                      {new Date(viewTarget.uploaded_at).toLocaleDateString(
+                        "en-PH",
+                        {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        }
+                      )}
                     </div>
                   </div>
                 </div>
                 {viewTarget.category && (
                   <div className={lStyles.viewModalMetaItem}>
-                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconPurple}`}>
+                    <div
+                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconPurple}`}
+                    >
                       <Filter size={16} />
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Category</div>
-                      <div className={lStyles.viewModalMetaValue}>{viewTarget.category}</div>
+                      <div className={lStyles.viewModalMetaValue}>
+                        {viewTarget.category}
+                      </div>
                     </div>
                   </div>
                 )}
                 {viewTarget.status && (
                   <div className={lStyles.viewModalMetaItem}>
-                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}>
+                    <div
+                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}
+                    >
                       <Eye size={16} />
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Status</div>
-                      <div className={lStyles.viewModalMetaValue} style={{ textTransform: "capitalize" }}>
+                      <div
+                        className={lStyles.viewModalMetaValue}
+                        style={{ textTransform: "capitalize" }}
+                      >
                         {viewTarget.status}
                       </div>
                     </div>
@@ -598,7 +670,14 @@ export default function OrdinancesPage({
               <div className={lStyles.viewModalDivider} />
 
               {/* ── File actions ── */}
-              {console.log("SUPABASE_URL:", SUPABASE_URL, "filepath:", viewTarget.filepath, "full URL:", getFileUrl(viewTarget.filepath))}
+              {console.log(
+                "SUPABASE_URL:",
+                SUPABASE_URL,
+                "filepath:",
+                viewTarget.filepath,
+                "full URL:",
+                getFileUrl(viewTarget.filepath)
+              )}
               {viewTarget.filetype === "application/pdf" && (
                 <div className={lStyles.viewModalFileActions}>
                   <a
@@ -616,33 +695,35 @@ export default function OrdinancesPage({
               {/* ── Word document download ── */}
               {(viewTarget.filetype === "application/msword" ||
                 viewTarget.filetype ===
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
-                  <div className={lStyles.viewModalFileActions}>
-                    <button
-                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(getFileUrl(viewTarget.filepath));
-                          const blob = await res.blob();
-                          const blobUrl = window.URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = blobUrl;
-                          const ext = viewTarget.filepath.split(".").pop();
-                          a.download = `${viewTarget.title}.${ext}`;
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          window.URL.revokeObjectURL(blobUrl);
-                        } catch (err) {
-                          console.error("Download failed:", err);
-                        }
-                      }}
-                    >
-                      <Download size={16} />
-                      Download Word Document
-                    </button>
-                  </div>
-                )}
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
+                <div className={lStyles.viewModalFileActions}>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(
+                          getFileUrl(viewTarget.filepath)
+                        );
+                        const blob = await res.blob();
+                        const blobUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = blobUrl;
+                        const ext = viewTarget.filepath.split(".").pop();
+                        a.download = `${viewTarget.title}.${ext}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(blobUrl);
+                      } catch (err) {
+                        console.error("Download failed:", err);
+                      }
+                    }}
+                  >
+                    <Download size={16} />
+                    Download Word Document
+                  </button>
+                </div>
+              )}
 
               {/* ── Image preview + OCR extracted text ── */}
               {viewTarget.filetype?.startsWith("image/") && (
@@ -678,12 +759,16 @@ export default function OrdinancesPage({
                         Author
                       </div>
                       <div className={lStyles.viewModalCouncilCount}>
-                        {viewTarget.officials.length} member{viewTarget.officials.length !== 1 ? "s" : ""}
+                        {viewTarget.officials.length} member
+                        {viewTarget.officials.length !== 1 ? "s" : ""}
                       </div>
                     </div>
                     <div className={lStyles.viewModalCouncilGrid}>
                       {viewTarget.officials.map((m) => (
-                        <div key={m.id} className={lStyles.viewModalCouncilCard}>
+                        <div
+                          key={m.id}
+                          className={lStyles.viewModalCouncilCard}
+                        >
                           {m.photo ? (
                             <img
                               src={m.photo}
@@ -718,20 +803,32 @@ export default function OrdinancesPage({
                   {/* Replace file — Secretary or Clerk, while the draft is still under review */}
                   {(isSecretary || isClerk) && (
                     <div style={{ marginBottom: 16 }}>
-                      <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>
+                      <div
+                        className={lStyles.viewModalCouncilTitle}
+                        style={{ marginBottom: 8 }}
+                      >
                         Replace Draft File
                       </div>
-                      <div className={lStyles.uploadZone} onClick={() => document.getElementById("reviewFileInput")?.click()}>
+                      <div
+                        className={lStyles.uploadZone}
+                        onClick={() =>
+                          document.getElementById("reviewFileInput")?.click()
+                        }
+                      >
                         <div className={lStyles.uploadIcon}>📎</div>
                         <div className={lStyles.uploadText}>
-                          {reviewFile ? reviewFile.name : "Click to choose a replacement file"}
+                          {reviewFile
+                            ? reviewFile.name
+                            : "Click to choose a replacement file"}
                         </div>
                         <input
                           id="reviewFileInput"
                           type="file"
                           accept=".pdf,.doc,.docx,image/*"
                           style={{ display: "none" }}
-                          onChange={(e) => setReviewFile(e.target.files?.[0] || null)}
+                          onChange={(e) =>
+                            setReviewFile(e.target.files?.[0] || null)
+                          }
                         />
                       </div>
                       {reviewFile && viewTarget.status !== "needs_revision" && (
@@ -751,11 +848,25 @@ export default function OrdinancesPage({
                   <div className={lStyles.commentsLabel}>Comments</div>
                   <div className={lStyles.commentsThread}>
                     {loadingComments ? (
-                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          textAlign: "center",
+                          padding: "1rem",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         Loading comments...
                       </div>
                     ) : reviewComments.length === 0 ? (
-                      <div style={{ fontSize: 13, textAlign: "center", padding: "1rem", color: "var(--color-text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          textAlign: "center",
+                          padding: "1rem",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
                         No comments yet
                       </div>
                     ) : (
@@ -767,7 +878,10 @@ export default function OrdinancesPage({
                             </span>
                             <span>
                               {new Date(c.created_at).toLocaleString("en-PH", {
-                                month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
                               })}
                             </span>
                           </div>
@@ -797,17 +911,30 @@ export default function OrdinancesPage({
                   )}
 
                   {reviewError && (
-                    <div style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}>{reviewError}</div>
+                    <div
+                      style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}
+                    >
+                      {reviewError}
+                    </div>
                   )}
 
                   {/* Status + role driven actions */}
-                  <div className={lStyles.viewModalFileActions} style={{ marginTop: 16 }}>
+                  <div
+                    className={lStyles.viewModalFileActions}
+                    style={{ marginTop: 16 }}
+                  >
                     {isSecretary && viewTarget.status === "pending" && (
                       <div className={lStyles.pendingActionsRow}>
                         <button
                           className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
-                          disabled={reviewSubmitting || !reviewCommentText.trim()}
-                          title={!reviewCommentText.trim() ? "Enter a comment above explaining the requested changes" : ""}
+                          disabled={
+                            reviewSubmitting || !reviewCommentText.trim()
+                          }
+                          title={
+                            !reviewCommentText.trim()
+                              ? "Enter a comment above explaining the requested changes"
+                              : ""
+                          }
                           onClick={handleRequestChanges}
                         >
                           <X size={16} /> Request Changes
@@ -832,15 +959,16 @@ export default function OrdinancesPage({
                       </button>
                     )}
 
-                    {isViceMayor && viewTarget.status === "ready_to_publish" && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleVMApprove(viewTarget.id)}
-                      >
-                        ✅ Approve
-                      </button>
-                    )}
+                    {isViceMayor &&
+                      viewTarget.status === "ready_to_publish" && (
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleVMApprove(viewTarget.id)}
+                        >
+                          ✅ Approve
+                        </button>
+                      )}
 
                     {isSecretary && viewTarget.status === "approved" && (
                       <button

@@ -131,6 +131,7 @@
 
 .sidebar.collapsed .navSectionLabel,
 .sidebar.collapsed .navSectionChevron {
+  flex: none;
   opacity: 0;
   width: 0;
   pointer-events: none;
@@ -139,6 +140,7 @@
 .sidebar.collapsed .navSectionHeader {
   justify-content: center;
   padding: 9px 0;
+  gap: 0;
 }
 
 /* Collapsible items container */
@@ -1486,6 +1488,7 @@
 .sidebar.collapsed .navBtn {
   justify-content: center;
   padding: 11px 0;
+  gap: 0;
 }
 
 .sidebar.collapsed .navBtn:hover::after {
@@ -3080,7 +3083,7 @@
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .dashMainPanel {
@@ -3145,6 +3148,7 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  min-height: 0;
 }
 
 .dashWidget {
@@ -3224,7 +3228,90 @@
   color: #009439;
 }
 
-/* Upcoming sessions list */
+/* Compact top bar — greeting + inline stat chips combined, replacing the
+   separate welcome banner + full stats row so the page needs less vertical
+   space before getting to the actionable content. */
+.dashTopBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: linear-gradient(135deg, #009439 0%, #005822 100%);
+  border-radius: 14px;
+  padding: 14px 22px;
+  margin-bottom: 20px;
+  color: #fff;
+}
+
+.dashTopBarStats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashStatChip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+
+.dashStatChipValue {
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.dashStatChipLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* Bottom row — Announcements + Upcoming session sit side by side instead of
+   stacking, so together with the top bar and middle row the dashboard fits
+   a normal viewport without an outer page scroll. */
+.dashBottomRow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-top: 16px;
+}
+
+/* Quick actions — compact icon grid instead of stacked full-width buttons */
+.dashQuickActionsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.quickActionIconBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #374151;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 2px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.quickActionIconBtn:hover {
+  background: #f0fdf4;
+  border-color: #9ae6b4;
+  color: #009439;
+}
+
+
 .dashUpcomingList {
   display: flex;
   flex-direction: column;
@@ -3418,6 +3505,29 @@
   font-size: 11px;
   color: #94a3b8;
   font-weight: 600;
+}
+
+.dashCardAuthor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.dashCardCategory {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #0369a1;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  padding: 2px 8px;
+  border-radius: 20px;
 }
 
 .dashCardTitle {
