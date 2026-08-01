@@ -1937,56 +1937,130 @@ export default function AdminDashboard() {
 
       {/* Add Admin */}
       {showAddAdminModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Add New Admin</h2>
-            <input
-              className={styles.input}
-              placeholder="Full Name"
-              value={newAdmin.name}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, name: e.target.value })
-              }
-            />
-            <input
-              className={styles.input}
-              placeholder="Username"
-              value={newAdmin.username}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, username: e.target.value })
-              }
-            />
-            <input
-              className={styles.input}
-              type="email"
-              placeholder="Email Address"
-              value={newAdmin.email}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, email: e.target.value })
-              }
-            />
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="Password"
-              value={newAdmin.password}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, password: e.target.value })
-              }
-            />
-            <label className={styles.fieldLabel}>Position</label>
-            <select
-              className={styles.input}
-              value={newAdmin.position}
-              onChange={(e) =>
-                setNewAdmin({ ...newAdmin, position: e.target.value })
-              }
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAddAdminModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
             >
-              <option value="secretary">Secretary</option>
-              <option value="clerk">Clerk</option>
-            </select>
-            <MAlert />
-            <div className={styles.modalBtns}>
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Add New Admin
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddAdminModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <input
+                className={styles.input}
+                placeholder="Full Name"
+                value={newAdmin.name}
+                onChange={(e) =>
+                  setNewAdmin({ ...newAdmin, name: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                placeholder="Username"
+                value={newAdmin.username}
+                onChange={(e) =>
+                  setNewAdmin({ ...newAdmin, username: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                type="email"
+                placeholder="Email Address"
+                value={newAdmin.email}
+                onChange={(e) =>
+                  setNewAdmin({ ...newAdmin, email: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                type="password"
+                placeholder="Password"
+                value={newAdmin.password}
+                onChange={(e) =>
+                  setNewAdmin({ ...newAdmin, password: e.target.value })
+                }
+              />
+              <label className={styles.fieldLabel}>Position</label>
+              <select
+                className={styles.input}
+                value={newAdmin.position}
+                onChange={(e) =>
+                  setNewAdmin({ ...newAdmin, position: e.target.value })
+                }
+              >
+                <option value="secretary">Secretary</option>
+                <option value="clerk">Clerk</option>
+              </select>
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2010,54 +2084,130 @@ export default function AdminDashboard() {
 
       {/* Add User */}
       {showAddUserModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Add New User</h2>
-            <input
-              className={styles.input}
-              placeholder="Full Name"
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            />
-            <input
-              className={styles.input}
-              placeholder="Username"
-              value={newUser.username}
-              onChange={(e) =>
-                setNewUser({ ...newUser, username: e.target.value })
-              }
-            />
-            <input
-              className={styles.input}
-              type="email"
-              placeholder="Email Address"
-              value={newUser.email}
-              onChange={(e) =>
-                setNewUser({ ...newUser, email: e.target.value })
-              }
-            />
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="Password"
-              value={newUser.password}
-              onChange={(e) =>
-                setNewUser({ ...newUser, password: e.target.value })
-              }
-            />
-            <label className={styles.fieldLabel}>Position</label>
-            <select
-              className={styles.input}
-              value={newUser.position}
-              onChange={(e) =>
-                setNewUser({ ...newUser, position: e.target.value })
-              }
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAddUserModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
             >
-              <option value="councilor">Councilor</option>
-              <option value="vice_mayor">Vice Mayor</option>
-            </select>
-            <MAlert />
-            <div className={styles.modalBtns}>
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Add New User
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddUserModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <input
+                className={styles.input}
+                placeholder="Full Name"
+                value={newUser.name}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, name: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                placeholder="Username"
+                value={newUser.username}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, username: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                type="email"
+                placeholder="Email Address"
+                value={newUser.email}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, email: e.target.value })
+                }
+              />
+              <input
+                className={styles.input}
+                type="password"
+                placeholder="Password"
+                value={newUser.password}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, password: e.target.value })
+                }
+              />
+              <label className={styles.fieldLabel}>Position</label>
+              <select
+                className={styles.input}
+                value={newUser.position}
+                onChange={(e) =>
+                  setNewUser({ ...newUser, position: e.target.value })
+                }
+              >
+                <option value="councilor">Councilor</option>
+                <option value="vice_mayor">Vice Mayor</option>
+              </select>
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2319,60 +2469,136 @@ export default function AdminDashboard() {
 
       {/* Edit Council Member */}
       {showEditOfficialModal && editingOfficial && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Edit Council Member</h2>
-            <label className={styles.fieldLabel}>
-              Full Name <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <input
-              className={styles.input}
-              placeholder="Full Name"
-              value={editOfficialName}
-              onChange={(e) => setEditOfficialName(e.target.value)}
-            />
-            <label className={styles.fieldLabel}>
-              Position <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <select
-              className={styles.input}
-              value={editOfficialPosition}
-              onChange={(e) => setEditOfficialPosition(e.target.value)}
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditOfficialModal(false);
+            setEditingOfficial(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
             >
-              <option value="">Select position...</option>
-              {OFFICIAL_POSITIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <div className={styles.fileUploadBox}>
-              <input
-                type="file"
-                accept="image/*"
-                id="editPhotoInput"
-                style={{ display: "none" }}
-                onChange={(e) => setEditOfficialPhoto(e.target.files[0])}
-              />
-              <label htmlFor="editPhotoInput" className={styles.fileLabel}>
-                {editOfficialPhoto ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {editOfficialPhoto.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} /> Click to replace
-                    photo (optional)
-                  </>
-                )}
-              </label>
-              {editingOfficial.photo && !editOfficialPhoto && (
-                <p className={styles.fileHint}>Current photo on file</p>
-              )}
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Edit Council Member
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditOfficialModal(false);
+                  setEditingOfficial(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <label className={styles.fieldLabel}>
+                Full Name <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Full Name"
+                value={editOfficialName}
+                onChange={(e) => setEditOfficialName(e.target.value)}
+              />
+              <label className={styles.fieldLabel}>
+                Position <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <select
+                className={styles.input}
+                value={editOfficialPosition}
+                onChange={(e) => setEditOfficialPosition(e.target.value)}
+              >
+                <option value="">Select position...</option>
+                {OFFICIAL_POSITIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="editPhotoInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setEditOfficialPhoto(e.target.files[0])}
+                />
+                <label htmlFor="editPhotoInput" className={styles.fileLabel}>
+                  {editOfficialPhoto ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editOfficialPhoto.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to replace
+                      photo (optional)
+                    </>
+                  )}
+                </label>
+                {editingOfficial.photo && !editOfficialPhoto && (
+                  <p className={styles.fileHint}>Current photo on file</p>
+                )}
+              </div>
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2397,8 +2623,14 @@ export default function AdminDashboard() {
 
       {/* Official Profile */}
       {showOfficialProfile && selectedOfficialProfile && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.profileModal}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setShowOfficialProfile(false)}
+        >
+          <div
+            className={styles.profileModal}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className={styles.profileHeader}>
               {selectedOfficialProfile.photo ? (
                 <img
@@ -2637,18 +2869,90 @@ export default function AdminDashboard() {
 
       {/* Add Term */}
       {showAddTermModal && termTarget && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <History size={16} /> Add Term Record
-            </h2>
-            <TermFormFields
-              form={termForm}
-              setForm={setTermForm}
-              styles={styles}
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAddTermModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <History size={16} /> Add Term Record
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddTermModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <TermFormFields
+                form={termForm}
+                setForm={setTermForm}
+                styles={styles}
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2672,18 +2976,90 @@ export default function AdminDashboard() {
 
       {/* Edit Term */}
       {showEditTermModal && termTarget && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <Pencil size={16} /> Edit Term Record
-            </h2>
-            <TermFormFields
-              form={termForm}
-              setForm={setTermForm}
-              styles={styles}
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditTermModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} /> Edit Term Record
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditTermModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <TermFormFields
+                form={termForm}
+                setForm={setTermForm}
+                styles={styles}
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2707,84 +3083,181 @@ export default function AdminDashboard() {
 
       {/* Upload Ordinance */}
       {showOrdinanceModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Upload Ordinance</h2>
-            <input
-              className={styles.input}
-              placeholder="Ordinance Number (e.g. Ordinance No. 2024-001)"
-              value={ordinanceNumber}
-              onChange={(e) => setOrdinanceNumber(e.target.value)}
-            />
-            <p
-              className={styles.fileHint}
-              style={{ marginTop: -6, marginBottom: 10 }}
-            >
-              Suggested automatically based on the year and existing ordinances
-              — feel free to edit it.
-            </p>
-            <input
-              className={styles.input}
-              placeholder="Ordinance Title"
-              value={ordinanceTitle}
-              onChange={(e) => setOrdinanceTitle(e.target.value)}
-            />
-            <label className={styles.fieldLabel}>Date</label>
-            <input
-              className={styles.input}
-              type="date"
-              value={ordinanceDate}
-              onChange={(e) => {
-                const newDate = e.target.value;
-                setOrdinanceDate(newDate);
-                // Only refresh the suggested number if the user hasn't
-                // manually customized it away from the last suggestion.
-                if (ordinanceNumber === lastOrdinanceSuggestion.current) {
-                  const newYear = newDate ? newDate.split("-")[0] : "";
-                  const suggested = suggestOrdinanceNumber(ordinances, newYear);
-                  lastOrdinanceSuggestion.current = suggested;
-                  setOrdinanceNumber(suggested);
-                }
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowOrdinanceModal(false);
+            setOrdinanceFile(null);
+            setOrdinanceNumber("");
+            setOrdinanceTitle("");
+            setOrdinanceDate("");
+            setSelectedOfficials([]);
+            setUploadType("");
+            setModalMessage("");
+            lastOrdinanceSuggestion.current = "";
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
               }}
-            />
-            <div className={styles.fileUploadBox}>
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx,image/*"
-                id="fileInput"
-                style={{ display: "none" }}
-                onChange={(e) => setOrdinanceFile(e.target.files[0])}
-              />
-              <label htmlFor="fileInput" className={styles.fileLabel}>
-                {ordinanceFile ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {ordinanceFile.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} /> Click to choose file
-                  </>
-                )}
-              </label>
-              <p className={styles.fileHint}>
-                Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
-              </p>
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Upload Ordinance
+              </h2>
+              <button
+                onClick={() => {
+                  setShowOrdinanceModal(false);
+                  setOrdinanceFile(null);
+                  setOrdinanceNumber("");
+                  setOrdinanceTitle("");
+                  setOrdinanceDate("");
+                  setSelectedOfficials([]);
+                  setUploadType("");
+                  setModalMessage("");
+                  lastOrdinanceSuggestion.current = "";
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
 
-            <div className={styles.officialsSelectSection}>
-              <p className={styles.officialsSelectLabel}>
-                Tag Council Members who passed this ordinance:
-              </p>
-              <OfficialsCheckList
-                officials={officials}
-                selected={selectedOfficials}
-                onToggle={toggleOfficial}
-                styles={styles}
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <input
+                className={styles.input}
+                placeholder="Ordinance Number (e.g. Ordinance No. 2024-001)"
+                value={ordinanceNumber}
+                onChange={(e) => setOrdinanceNumber(e.target.value)}
               />
+              <p
+                className={styles.fileHint}
+                style={{ marginTop: -6, marginBottom: 10 }}
+              >
+                Suggested automatically based on the year and existing
+                ordinances — feel free to edit it.
+              </p>
+              <input
+                className={styles.input}
+                placeholder="Ordinance Title"
+                value={ordinanceTitle}
+                onChange={(e) => setOrdinanceTitle(e.target.value)}
+              />
+              <label className={styles.fieldLabel}>Date</label>
+              <input
+                className={styles.input}
+                type="date"
+                value={ordinanceDate}
+                onChange={(e) => {
+                  const newDate = e.target.value;
+                  setOrdinanceDate(newDate);
+                  // Only refresh the suggested number if the user hasn't
+                  // manually customized it away from the last suggestion.
+                  if (ordinanceNumber === lastOrdinanceSuggestion.current) {
+                    const newYear = newDate ? newDate.split("-")[0] : "";
+                    const suggested = suggestOrdinanceNumber(
+                      ordinances,
+                      newYear
+                    );
+                    lastOrdinanceSuggestion.current = suggested;
+                    setOrdinanceNumber(suggested);
+                  }
+                }}
+              />
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,image/*"
+                  id="fileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setOrdinanceFile(e.target.files[0])}
+                />
+                <label htmlFor="fileInput" className={styles.fileLabel}>
+                  {ordinanceFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {ordinanceFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to choose
+                      file
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+                </p>
+              </div>
+
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag Council Members who passed this ordinance:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={selectedOfficials}
+                  onToggle={toggleOfficial}
+                  styles={styles}
+                />
+              </div>
+              <MAlert />
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2815,75 +3288,156 @@ export default function AdminDashboard() {
 
       {/* Edit Ordinance */}
       {showEditOrdinanceModal && editingOrdinance && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Edit Ordinance</h2>
-            <input
-              className={styles.input}
-              placeholder="Ordinance Number"
-              value={editOrdinanceNumber}
-              onChange={(e) => setEditOrdinanceNumber(e.target.value)}
-            />
-            <input
-              className={styles.input}
-              placeholder="Ordinance Title"
-              value={editOrdinanceTitle}
-              onChange={(e) => setEditOrdinanceTitle(e.target.value)}
-            />
-            <label className={styles.fieldLabel}>Date</label>
-            <input
-              className={styles.input}
-              type="date"
-              value={editOrdinanceDate}
-              onChange={(e) => setEditOrdinanceDate(e.target.value)}
-            />
-            <p className={styles.officialsSelectLabel}>
-              Replace file (optional):
-            </p>
-            <div className={styles.fileUploadBox}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditOrdinanceModal(false);
+            setEditingOrdinance(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Edit Ordinance
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditOrdinanceModal(false);
+                  setEditingOrdinance(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
               <input
-                type="file"
-                accept={
-                  editingOrdinance.filetype === "application/pdf"
-                    ? ".pdf"
-                    : "image/*"
-                }
-                id="editFileInput"
-                style={{ display: "none" }}
-                onChange={(e) => setEditOrdinanceFile(e.target.files[0])}
+                className={styles.input}
+                placeholder="Ordinance Number"
+                value={editOrdinanceNumber}
+                onChange={(e) => setEditOrdinanceNumber(e.target.value)}
               />
-              <label htmlFor="editFileInput" className={styles.fileLabel}>
-                {editOrdinanceFile ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {editOrdinanceFile.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} />{" "}
-                    {editingOrdinance.filetype === "application/pdf"
-                      ? "Click to replace PDF"
-                      : "Click to replace Image"}
-                  </>
-                )}
-              </label>
-              <p className={styles.fileHint}>
-                Current file: {editingOrdinance.filename}
-              </p>
-            </div>
-            <div className={styles.officialsSelectSection}>
+              <input
+                className={styles.input}
+                placeholder="Ordinance Title"
+                value={editOrdinanceTitle}
+                onChange={(e) => setEditOrdinanceTitle(e.target.value)}
+              />
+              <label className={styles.fieldLabel}>Date</label>
+              <input
+                className={styles.input}
+                type="date"
+                value={editOrdinanceDate}
+                onChange={(e) => setEditOrdinanceDate(e.target.value)}
+              />
               <p className={styles.officialsSelectLabel}>
-                Tag Council Members who passed this ordinance:
+                Replace file (optional):
               </p>
-              <OfficialsCheckList
-                officials={officials}
-                selected={editSelectedOfficials}
-                onToggle={toggleEditOfficial}
-                styles={styles}
-              />
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept={
+                    editingOrdinance.filetype === "application/pdf"
+                      ? ".pdf"
+                      : "image/*"
+                  }
+                  id="editFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setEditOrdinanceFile(e.target.files[0])}
+                />
+                <label htmlFor="editFileInput" className={styles.fileLabel}>
+                  {editOrdinanceFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editOrdinanceFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} />{" "}
+                      {editingOrdinance.filetype === "application/pdf"
+                        ? "Click to replace PDF"
+                        : "Click to replace Image"}
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Current file: {editingOrdinance.filename}
+                </p>
+              </div>
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag Council Members who passed this ordinance:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={editSelectedOfficials}
+                  onToggle={toggleEditOfficial}
+                  styles={styles}
+                />
+              </div>
+              <MAlert />
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -2908,87 +3462,177 @@ export default function AdminDashboard() {
 
       {/* Upload Resolution */}
       {showResolutionModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
-            </h2>
-            <input
-              className={styles.input}
-              placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
-              value={resolutionNumber}
-              onChange={(e) => setResolutionNumber(e.target.value)}
-            />
-            <p
-              className={styles.fileHint}
-              style={{ marginTop: -6, marginBottom: 10 }}
-            >
-              Suggested automatically based on the year and existing resolutions
-              — feel free to edit it.
-            </p>
-            <input
-              className={styles.input}
-              placeholder="Resolution Title"
-              value={resolutionTitle}
-              onChange={(e) => setResolutionTitle(e.target.value)}
-            />
-            <label className={styles.fieldLabel}>Date</label>
-            <input
-              className={styles.input}
-              type="date"
-              value={resolutionDate}
-              onChange={(e) => {
-                const newDate = e.target.value;
-                setResolutionDate(newDate);
-                if (resolutionNumber === lastResolutionSuggestion.current) {
-                  const newYear = newDate ? newDate.split("-")[0] : "";
-                  const suggested = suggestResolutionNumber(
-                    resolutions,
-                    newYear
-                  );
-                  lastResolutionSuggestion.current = suggested;
-                  setResolutionNumber(suggested);
-                }
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowResolutionModal(false);
+            setResolutionFile(null);
+            setResolutionNumber("");
+            setResolutionTitle("");
+            setResolutionDate("");
+            setSelectedResolutionOfficials([]);
+            setModalMessage("");
+            lastResolutionSuggestion.current = "";
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
               }}
-            />
-            <div className={styles.fileUploadBox}>
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx,image/*"
-                id="resFileInput"
-                style={{ display: "none" }}
-                onChange={(e) => setResolutionFile(e.target.files[0])}
-              />
-              <label htmlFor="resFileInput" className={styles.fileLabel}>
-                {resolutionFile ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {resolutionFile.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} /> Click to choose file
-                  </>
-                )}
-              </label>
-              <p className={styles.fileHint}>
-                Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
-              </p>
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Gavel size={18} strokeWidth={1.5} /> Upload Resolution
+              </h2>
+              <button
+                onClick={() => {
+                  setShowResolutionModal(false);
+                  setResolutionFile(null);
+                  setResolutionNumber("");
+                  setResolutionTitle("");
+                  setResolutionDate("");
+                  setSelectedResolutionOfficials([]);
+                  setModalMessage("");
+                  lastResolutionSuggestion.current = "";
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
 
-            <div className={styles.officialsSelectSection}>
-              <p className={styles.officialsSelectLabel}>
-                Tag Council Members who passed this resolution:
-              </p>
-              <OfficialsCheckList
-                officials={officials}
-                selected={selectedResolutionOfficials}
-                onToggle={toggleResolutionOfficial}
-                styles={styles}
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <input
+                className={styles.input}
+                placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
+                value={resolutionNumber}
+                onChange={(e) => setResolutionNumber(e.target.value)}
               />
+              <p
+                className={styles.fileHint}
+                style={{ marginTop: -6, marginBottom: 10 }}
+              >
+                Suggested automatically based on the year and existing
+                resolutions — feel free to edit it.
+              </p>
+              <input
+                className={styles.input}
+                placeholder="Resolution Title"
+                value={resolutionTitle}
+                onChange={(e) => setResolutionTitle(e.target.value)}
+              />
+              <label className={styles.fieldLabel}>Date</label>
+              <input
+                className={styles.input}
+                type="date"
+                value={resolutionDate}
+                onChange={(e) => {
+                  const newDate = e.target.value;
+                  setResolutionDate(newDate);
+                  if (resolutionNumber === lastResolutionSuggestion.current) {
+                    const newYear = newDate ? newDate.split("-")[0] : "";
+                    const suggested = suggestResolutionNumber(
+                      resolutions,
+                      newYear
+                    );
+                    lastResolutionSuggestion.current = suggested;
+                    setResolutionNumber(suggested);
+                  }
+                }}
+              />
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,image/*"
+                  id="resFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setResolutionFile(e.target.files[0])}
+                />
+                <label htmlFor="resFileInput" className={styles.fileLabel}>
+                  {resolutionFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {resolutionFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to choose
+                      file
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+                </p>
+              </div>
+
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag Council Members who passed this resolution:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={selectedResolutionOfficials}
+                  onToggle={toggleResolutionOfficial}
+                  styles={styles}
+                />
+              </div>
+              <MAlert />
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3018,77 +3662,156 @@ export default function AdminDashboard() {
 
       {/* Edit Resolution */}
       {showEditResolutionModal && editingResolution && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <Pencil size={16} strokeWidth={1.5} /> Edit Resolution
-            </h2>
-            <input
-              className={styles.input}
-              placeholder="Resolution Number"
-              value={editResolutionNumber}
-              onChange={(e) => setEditResolutionNumber(e.target.value)}
-            />
-            <input
-              className={styles.input}
-              placeholder="Resolution Title"
-              value={editResolutionTitle}
-              onChange={(e) => setEditResolutionTitle(e.target.value)}
-            />
-            <label className={styles.fieldLabel}>Date</label>
-            <input
-              className={styles.input}
-              type="date"
-              value={editResolutionDate}
-              onChange={(e) => setEditResolutionDate(e.target.value)}
-            />
-            <p className={styles.officialsSelectLabel}>
-              Replace file (optional):
-            </p>
-            <div className={styles.fileUploadBox}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditResolutionModal(false);
+            setEditingResolution(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} strokeWidth={1.5} /> Edit Resolution
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditResolutionModal(false);
+                  setEditingResolution(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
               <input
-                type="file"
-                accept={
-                  editingResolution.filetype === "application/pdf"
-                    ? ".pdf"
-                    : "image/*"
-                }
-                id="editResFileInput"
-                style={{ display: "none" }}
-                onChange={(e) => setEditResolutionFile(e.target.files[0])}
+                className={styles.input}
+                placeholder="Resolution Number"
+                value={editResolutionNumber}
+                onChange={(e) => setEditResolutionNumber(e.target.value)}
               />
-              <label htmlFor="editResFileInput" className={styles.fileLabel}>
-                {editResolutionFile ? (
-                  <>
-                    <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                    {editResolutionFile.name}
-                  </>
-                ) : (
-                  <>
-                    <Upload size={14} strokeWidth={1.5} />{" "}
-                    {editingResolution.filetype === "application/pdf"
-                      ? "Click to replace PDF"
-                      : "Click to replace Image"}
-                  </>
-                )}
-              </label>
-              <p className={styles.fileHint}>
-                Current file: {editingResolution.filename}
-              </p>
-            </div>
-            <div className={styles.officialsSelectSection}>
+              <input
+                className={styles.input}
+                placeholder="Resolution Title"
+                value={editResolutionTitle}
+                onChange={(e) => setEditResolutionTitle(e.target.value)}
+              />
+              <label className={styles.fieldLabel}>Date</label>
+              <input
+                className={styles.input}
+                type="date"
+                value={editResolutionDate}
+                onChange={(e) => setEditResolutionDate(e.target.value)}
+              />
               <p className={styles.officialsSelectLabel}>
-                Tag Council Members who passed this resolution:
+                Replace file (optional):
               </p>
-              <OfficialsCheckList
-                officials={officials}
-                selected={editResolutionSelectedOfficials}
-                onToggle={toggleEditResolutionOfficial}
-                styles={styles}
-              />
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept={
+                    editingResolution.filetype === "application/pdf"
+                      ? ".pdf"
+                      : "image/*"
+                  }
+                  id="editResFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setEditResolutionFile(e.target.files[0])}
+                />
+                <label htmlFor="editResFileInput" className={styles.fileLabel}>
+                  {editResolutionFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editResolutionFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} />{" "}
+                      {editingResolution.filetype === "application/pdf"
+                        ? "Click to replace PDF"
+                        : "Click to replace Image"}
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Current file: {editingResolution.filename}
+                </p>
+              </div>
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag Council Members who passed this resolution:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={editResolutionSelectedOfficials}
+                  onToggle={toggleEditResolutionOfficial}
+                  styles={styles}
+                />
+              </div>
+              <MAlert />
             </div>
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3113,15 +3836,83 @@ export default function AdminDashboard() {
 
       {/* Extracted Text */}
       {showTextModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>Extracted Text (OCR)</h2>
-            <textarea
-              className={styles.textArea}
-              value={extractedText}
-              readOnly
-            />
-            <div className={styles.modalBtns}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setShowTextModal(false)}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Extracted Text (OCR)
+              </h2>
+              <button
+                onClick={() => setShowTextModal(false)}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <textarea
+                className={styles.textArea}
+                value={extractedText}
+                readOnly
+              />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3144,202 +3935,287 @@ export default function AdminDashboard() {
 
       {/* Add Session */}
       {showSessionModal && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.sessionModal}`}>
-            <h2 className={styles.modalTitle}>
-              <BookOpen size={18} strokeWidth={1.5} /> Add Session Minutes &amp;
-              Agenda
-            </h2>
-            <div className={styles.uploadTypeRow}>
-              <button
-                className={`${styles.uploadTypeBtn} ${
-                  sessionInputMode === "text" ? styles.uploadTypeBtnActive : ""
-                }`}
-                onClick={() => setSessionInputMode("text")}
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowSessionModal(false);
+            resetSessionForm();
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
               >
-                <FileEdit size={16} strokeWidth={1.5} /> Direct Input
-                <span className={styles.uploadTypeDesc}>
-                  Type or paste session minutes directly
-                </span>
-              </button>
+                <BookOpen size={18} strokeWidth={1.5} /> Add Session Minutes
+                &amp; Agenda
+              </h2>
               <button
-                className={`${styles.uploadTypeBtn} ${
-                  sessionInputMode === "file" ? styles.uploadTypeBtnActive : ""
-                }`}
-                onClick={() => setSessionInputMode("file")}
+                onClick={() => {
+                  setShowSessionModal(false);
+                  resetSessionForm();
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
               >
-                <Upload size={16} strokeWidth={1.5} /> Upload File
-                <span className={styles.uploadTypeDesc}>
-                  PDF, Word, or Image — system auto-detects
-                </span>
+                <X size={16} />
               </button>
             </div>
-            <div className={styles.sessionFormGrid}>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Session Number</label>
-                <input
-                  className={styles.input}
-                  placeholder="e.g. 12th Regular Session"
-                  value={sessionForm.session_number}
-                  onChange={(e) =>
-                    setSessionForm({
-                      ...sessionForm,
-                      session_number: e.target.value,
-                    })
-                  }
-                />
-                <p className={styles.fieldHint}>
-                  Suggested automatically — feel free to edit it.
-                </p>
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>
-                  Session Date <span style={{ color: "#e53e3e" }}>*</span>
-                </label>
-                <input
-                  className={styles.input}
-                  type="date"
-                  value={sessionForm.session_date}
-                  onChange={(e) => {
-                    const newDate = e.target.value;
-                    setSessionForm((prev) => {
-                      const year = newDate
-                        ? new Date(newDate).getFullYear()
-                        : getCurrentYear();
-                      const shouldUpdate =
-                        prev.session_number === lastSessionSuggestion.current;
-                      if (!shouldUpdate)
-                        return { ...prev, session_date: newDate };
-                      const suggested = suggestSessionNumber(
-                        sessionMinutes,
-                        year,
-                        prev.session_type
-                      );
-                      lastSessionSuggestion.current = suggested;
-                      return {
-                        ...prev,
-                        session_date: newDate,
-                        session_number: suggested,
-                      };
-                    });
-                  }}
-                />
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Session Type</label>
-                <select
-                  className={styles.input}
-                  value={sessionForm.session_type}
-                  onChange={(e) => {
-                    const newType = e.target.value;
-                    setSessionForm((prev) => {
-                      const year = prev.session_date
-                        ? new Date(prev.session_date).getFullYear()
-                        : getCurrentYear();
-                      const shouldUpdate =
-                        prev.session_number === lastSessionSuggestion.current;
-                      if (!shouldUpdate)
-                        return { ...prev, session_type: newType };
-                      const suggested = suggestSessionNumber(
-                        sessionMinutes,
-                        year,
-                        newType
-                      );
-                      lastSessionSuggestion.current = suggested;
-                      return {
-                        ...prev,
-                        session_type: newType,
-                        session_number: suggested,
-                      };
-                    });
-                  }}
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <div className={styles.uploadTypeRow}>
+                <button
+                  className={`${styles.uploadTypeBtn} ${
+                    sessionInputMode === "text"
+                      ? styles.uploadTypeBtnActive
+                      : ""
+                  }`}
+                  onClick={() => setSessionInputMode("text")}
                 >
-                  <option value="regular">Regular Session</option>
-                  <option value="special">Special Session</option>
-                </select>
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Venue</label>
-                <input
-                  className={styles.input}
-                  placeholder="e.g. Session Hall"
-                  value={sessionForm.venue}
-                  onChange={(e) =>
-                    setSessionForm({ ...sessionForm, venue: e.target.value })
-                  }
-                />
-              </div>
-            </div>
-            {sessionInputMode === "text" ? (
-              <>
-                <label className={styles.fieldLabel}>
-                  Agenda Items{" "}
-                  <span className={styles.fieldHint}>(one item per line)</span>
-                </label>
-                <textarea
-                  className={styles.textArea}
-                  placeholder={
-                    "1. Call to order\n2. Roll call\n3. Reading of minutes\n..."
-                  }
-                  value={sessionForm.agenda}
-                  onChange={(e) =>
-                    setSessionForm({ ...sessionForm, agenda: e.target.value })
-                  }
-                  rows={5}
-                />
-                <label
-                  className={styles.fieldLabel}
-                  style={{ marginTop: "10px" }}
+                  <FileEdit size={16} strokeWidth={1.5} /> Direct Input
+                  <span className={styles.uploadTypeDesc}>
+                    Type or paste session minutes directly
+                  </span>
+                </button>
+                <button
+                  className={`${styles.uploadTypeBtn} ${
+                    sessionInputMode === "file"
+                      ? styles.uploadTypeBtnActive
+                      : ""
+                  }`}
+                  onClick={() => setSessionInputMode("file")}
                 >
-                  Minutes of the Session
-                </label>
-                <textarea
-                  className={styles.textArea}
-                  placeholder="Type the full session minutes here..."
-                  value={sessionForm.minutes_text}
-                  onChange={(e) =>
-                    setSessionForm({
-                      ...sessionForm,
-                      minutes_text: e.target.value,
-                    })
-                  }
-                  rows={8}
-                />
-              </>
-            ) : (
-              <>
-                <div className={styles.fileUploadBox}>
+                  <Upload size={16} strokeWidth={1.5} /> Upload File
+                  <span className={styles.uploadTypeDesc}>
+                    PDF, Word, or Image — system auto-detects
+                  </span>
+                </button>
+              </div>
+              <div className={styles.sessionFormGrid}>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Number</label>
                   <input
-                    type="file"
-                    accept=".pdf,.doc,.docx,image/*"
-                    id="sessionFileInput"
-                    style={{ display: "none" }}
-                    onChange={(e) => setSessionFile(e.target.files[0])}
+                    className={styles.input}
+                    placeholder="e.g. 12th Regular Session"
+                    value={sessionForm.session_number}
+                    onChange={(e) =>
+                      setSessionForm({
+                        ...sessionForm,
+                        session_number: e.target.value,
+                      })
+                    }
                   />
-                  <label
-                    htmlFor="sessionFileInput"
-                    className={styles.fileLabel}
-                  >
-                    {sessionFile ? (
-                      <>
-                        <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                        {sessionFile.name}
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={14} strokeWidth={1.5} /> Click to choose
-                        file
-                      </>
-                    )}
-                  </label>
-                  <p className={styles.fileHint}>
-                    Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+                  <p className={styles.fieldHint}>
+                    Suggested automatically — feel free to edit it.
                   </p>
                 </div>
-              </>
-            )}
-            <MAlert />
-            <div className={styles.modalBtns}>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>
+                    Session Date <span style={{ color: "#e53e3e" }}>*</span>
+                  </label>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={sessionForm.session_date}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setSessionForm((prev) => {
+                        const year = newDate
+                          ? new Date(newDate).getFullYear()
+                          : getCurrentYear();
+                        const shouldUpdate =
+                          prev.session_number === lastSessionSuggestion.current;
+                        if (!shouldUpdate)
+                          return { ...prev, session_date: newDate };
+                        const suggested = suggestSessionNumber(
+                          sessionMinutes,
+                          year,
+                          prev.session_type
+                        );
+                        lastSessionSuggestion.current = suggested;
+                        return {
+                          ...prev,
+                          session_date: newDate,
+                          session_number: suggested,
+                        };
+                      });
+                    }}
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Type</label>
+                  <select
+                    className={styles.input}
+                    value={sessionForm.session_type}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setSessionForm((prev) => {
+                        const year = prev.session_date
+                          ? new Date(prev.session_date).getFullYear()
+                          : getCurrentYear();
+                        const shouldUpdate =
+                          prev.session_number === lastSessionSuggestion.current;
+                        if (!shouldUpdate)
+                          return { ...prev, session_type: newType };
+                        const suggested = suggestSessionNumber(
+                          sessionMinutes,
+                          year,
+                          newType
+                        );
+                        lastSessionSuggestion.current = suggested;
+                        return {
+                          ...prev,
+                          session_type: newType,
+                          session_number: suggested,
+                        };
+                      });
+                    }}
+                  >
+                    <option value="regular">Regular Session</option>
+                    <option value="special">Special Session</option>
+                  </select>
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Venue</label>
+                  <input
+                    className={styles.input}
+                    placeholder="e.g. Session Hall"
+                    value={sessionForm.venue}
+                    onChange={(e) =>
+                      setSessionForm({ ...sessionForm, venue: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              {sessionInputMode === "text" ? (
+                <>
+                  <label className={styles.fieldLabel}>
+                    Agenda Items{" "}
+                    <span className={styles.fieldHint}>
+                      (one item per line)
+                    </span>
+                  </label>
+                  <textarea
+                    className={styles.textArea}
+                    placeholder={
+                      "1. Call to order\n2. Roll call\n3. Reading of minutes\n..."
+                    }
+                    value={sessionForm.agenda}
+                    onChange={(e) =>
+                      setSessionForm({ ...sessionForm, agenda: e.target.value })
+                    }
+                    rows={5}
+                  />
+                  <label
+                    className={styles.fieldLabel}
+                    style={{ marginTop: "10px" }}
+                  >
+                    Minutes of the Session
+                  </label>
+                  <textarea
+                    className={styles.textArea}
+                    placeholder="Type the full session minutes here..."
+                    value={sessionForm.minutes_text}
+                    onChange={(e) =>
+                      setSessionForm({
+                        ...sessionForm,
+                        minutes_text: e.target.value,
+                      })
+                    }
+                    rows={8}
+                  />
+                </>
+              ) : (
+                <>
+                  <div className={styles.fileUploadBox}>
+                    <input
+                      type="file"
+                      accept=".pdf,.doc,.docx,image/*"
+                      id="sessionFileInput"
+                      style={{ display: "none" }}
+                      onChange={(e) => setSessionFile(e.target.files[0])}
+                    />
+                    <label
+                      htmlFor="sessionFileInput"
+                      className={styles.fileLabel}
+                    >
+                      {sessionFile ? (
+                        <>
+                          <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                          {sessionFile.name}
+                        </>
+                      ) : (
+                        <>
+                          <Upload size={14} strokeWidth={1.5} /> Click to choose
+                          file
+                        </>
+                      )}
+                    </label>
+                    <p className={styles.fileHint}>
+                      Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
+                    </p>
+                  </div>
+                </>
+              )}
+              <MAlert />
+            </div>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3364,104 +4240,186 @@ export default function AdminDashboard() {
 
       {/* Edit Session */}
       {showEditSessionModal && editingSession && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.sessionModal}`}>
-            <h2 className={styles.modalTitle}>
-              <Pencil size={16} strokeWidth={1.5} /> Edit Session Minutes
-            </h2>
-            <div className={styles.sessionFormGrid}>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Session Number</label>
-                <input
-                  className={styles.input}
-                  placeholder="e.g. 12th Regular Session"
-                  value={editSessionForm.session_number}
-                  onChange={(e) =>
-                    setEditSessionForm({
-                      ...editSessionForm,
-                      session_number: e.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>
-                  Session Date <span style={{ color: "#e53e3e" }}>*</span>
-                </label>
-                <input
-                  className={styles.input}
-                  type="date"
-                  value={editSessionForm.session_date}
-                  onChange={(e) =>
-                    setEditSessionForm({
-                      ...editSessionForm,
-                      session_date: e.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Session Type</label>
-                <select
-                  className={styles.input}
-                  value={editSessionForm.session_type}
-                  onChange={(e) =>
-                    setEditSessionForm({
-                      ...editSessionForm,
-                      session_type: e.target.value,
-                    })
-                  }
-                >
-                  <option value="regular">Regular Session</option>
-                  <option value="special">Special Session</option>
-                </select>
-              </div>
-              <div className={styles.sessionFormCol}>
-                <label className={styles.fieldLabel}>Venue</label>
-                <input
-                  className={styles.input}
-                  placeholder="Venue"
-                  value={editSessionForm.venue}
-                  onChange={(e) =>
-                    setEditSessionForm({
-                      ...editSessionForm,
-                      venue: e.target.value,
-                    })
-                  }
-                />
-              </div>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditSessionModal(false);
+            setEditingSession(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} strokeWidth={1.5} /> Edit Session Minutes
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditSessionModal(false);
+                  setEditingSession(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
-            <label className={styles.fieldLabel}>
-              Agenda Items{" "}
-              <span className={styles.fieldHint}>(one item per line)</span>
-            </label>
-            <textarea
-              className={styles.textArea}
-              value={editSessionForm.agenda}
-              onChange={(e) =>
-                setEditSessionForm({
-                  ...editSessionForm,
-                  agenda: e.target.value,
-                })
-              }
-              rows={5}
-            />
-            <label className={styles.fieldLabel} style={{ marginTop: "10px" }}>
-              Minutes of the Session
-            </label>
-            <textarea
-              className={styles.textArea}
-              value={editSessionForm.minutes_text}
-              onChange={(e) =>
-                setEditSessionForm({
-                  ...editSessionForm,
-                  minutes_text: e.target.value,
-                })
-              }
-              rows={8}
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <div className={styles.sessionFormGrid}>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Number</label>
+                  <input
+                    className={styles.input}
+                    placeholder="e.g. 12th Regular Session"
+                    value={editSessionForm.session_number}
+                    onChange={(e) =>
+                      setEditSessionForm({
+                        ...editSessionForm,
+                        session_number: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>
+                    Session Date <span style={{ color: "#e53e3e" }}>*</span>
+                  </label>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={editSessionForm.session_date}
+                    onChange={(e) =>
+                      setEditSessionForm({
+                        ...editSessionForm,
+                        session_date: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Type</label>
+                  <select
+                    className={styles.input}
+                    value={editSessionForm.session_type}
+                    onChange={(e) =>
+                      setEditSessionForm({
+                        ...editSessionForm,
+                        session_type: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="regular">Regular Session</option>
+                    <option value="special">Special Session</option>
+                  </select>
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Venue</label>
+                  <input
+                    className={styles.input}
+                    placeholder="Venue"
+                    value={editSessionForm.venue}
+                    onChange={(e) =>
+                      setEditSessionForm({
+                        ...editSessionForm,
+                        venue: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <label className={styles.fieldLabel}>
+                Agenda Items{" "}
+                <span className={styles.fieldHint}>(one item per line)</span>
+              </label>
+              <textarea
+                className={styles.textArea}
+                value={editSessionForm.agenda}
+                onChange={(e) =>
+                  setEditSessionForm({
+                    ...editSessionForm,
+                    agenda: e.target.value,
+                  })
+                }
+                rows={5}
+              />
+              <label
+                className={styles.fieldLabel}
+                style={{ marginTop: "10px" }}
+              >
+                Minutes of the Session
+              </label>
+              <textarea
+                className={styles.textArea}
+                value={editSessionForm.minutes_text}
+                onChange={(e) =>
+                  setEditSessionForm({
+                    ...editSessionForm,
+                    minutes_text: e.target.value,
+                  })
+                }
+                rows={8}
+              />
+              <MAlert />
+            </div>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3486,90 +4444,167 @@ export default function AdminDashboard() {
 
       {/* Add Announcement */}
       {showAnnouncementModal && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.sessionModal}`}>
-            <h2 className={styles.modalTitle}>
-              <Megaphone size={18} strokeWidth={1.5} /> New Announcement
-            </h2>
-            <label className={styles.fieldLabel}>
-              Title <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <input
-              className={styles.input}
-              placeholder="Announcement title..."
-              value={announcementForm.title}
-              onChange={(e) =>
-                setAnnouncementForm({
-                  ...announcementForm,
-                  title: e.target.value,
-                })
-              }
-            />
-            <label className={styles.fieldLabel}>Priority Level</label>
-            <div className={styles.priorityRow}>
-              {["urgent", "high", "normal", "low"].map((p) => {
-                const cfg = priorityConfig[p];
-                return (
-                  <button
-                    key={p}
-                    className={`${styles.priorityBtn} ${
-                      announcementForm.priority === p
-                        ? styles.priorityBtnActive
-                        : ""
-                    }`}
-                    style={
-                      announcementForm.priority === p
-                        ? {
-                            background: cfg.bg,
-                            borderColor: cfg.border,
-                            color: cfg.color,
-                          }
-                        : {}
-                    }
-                    onClick={() =>
-                      setAnnouncementForm({ ...announcementForm, priority: p })
-                    }
-                  >
-                    {cfg.label}
-                  </button>
-                );
-              })}
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAnnouncementModal(false);
+            resetAnnouncementForm();
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Megaphone size={18} strokeWidth={1.5} /> New Announcement
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAnnouncementModal(false);
+                  resetAnnouncementForm();
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
-            <label className={styles.fieldLabel}>
-              Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <textarea
-              className={styles.textArea}
-              placeholder="Write your announcement here..."
-              value={announcementForm.body}
-              onChange={(e) =>
-                setAnnouncementForm({
-                  ...announcementForm,
-                  body: e.target.value,
-                })
-              }
-              rows={7}
-              style={{ height: "auto" }}
-            />
-            <label className={styles.fieldLabel}>
-              Expiry Date{" "}
-              <span className={styles.fieldHint}>
-                (optional — leave blank for no expiry)
-              </span>
-            </label>
-            <input
-              className={styles.input}
-              type="date"
-              value={announcementForm.expires_at}
-              onChange={(e) =>
-                setAnnouncementForm({
-                  ...announcementForm,
-                  expires_at: e.target.value,
-                })
-              }
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <label className={styles.fieldLabel}>
+                Title <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Announcement title..."
+                value={announcementForm.title}
+                onChange={(e) =>
+                  setAnnouncementForm({
+                    ...announcementForm,
+                    title: e.target.value,
+                  })
+                }
+              />
+              <label className={styles.fieldLabel}>Priority Level</label>
+              <div className={styles.priorityRow}>
+                {["urgent", "high", "normal", "low"].map((p) => {
+                  const cfg = priorityConfig[p];
+                  return (
+                    <button
+                      key={p}
+                      className={`${styles.priorityBtn} ${
+                        announcementForm.priority === p
+                          ? styles.priorityBtnActive
+                          : ""
+                      }`}
+                      style={
+                        announcementForm.priority === p
+                          ? {
+                              background: cfg.bg,
+                              borderColor: cfg.border,
+                              color: cfg.color,
+                            }
+                          : {}
+                      }
+                      onClick={() =>
+                        setAnnouncementForm({
+                          ...announcementForm,
+                          priority: p,
+                        })
+                      }
+                    >
+                      {cfg.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className={styles.fieldLabel}>
+                Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <textarea
+                className={styles.textArea}
+                placeholder="Write your announcement here..."
+                value={announcementForm.body}
+                onChange={(e) =>
+                  setAnnouncementForm({
+                    ...announcementForm,
+                    body: e.target.value,
+                  })
+                }
+                rows={7}
+                style={{ height: "auto" }}
+              />
+              <label className={styles.fieldLabel}>
+                Expiry Date{" "}
+                <span className={styles.fieldHint}>
+                  (optional — leave blank for no expiry)
+                </span>
+              </label>
+              <input
+                className={styles.input}
+                type="date"
+                value={announcementForm.expires_at}
+                onChange={(e) =>
+                  setAnnouncementForm({
+                    ...announcementForm,
+                    expires_at: e.target.value,
+                  })
+                }
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3594,89 +4629,163 @@ export default function AdminDashboard() {
 
       {/* Edit Announcement */}
       {showEditAnnouncementModal && editingAnnouncement && (
-        <div className={styles.modalOverlay}>
-          <div className={`${styles.modal} ${styles.sessionModal}`}>
-            <h2 className={styles.modalTitle}>
-              <Pencil size={16} strokeWidth={1.5} /> Edit Announcement
-            </h2>
-            <label className={styles.fieldLabel}>
-              Title <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <input
-              className={styles.input}
-              placeholder="Announcement title..."
-              value={editAnnouncementForm.title}
-              onChange={(e) =>
-                setEditAnnouncementForm({
-                  ...editAnnouncementForm,
-                  title: e.target.value,
-                })
-              }
-            />
-            <label className={styles.fieldLabel}>Priority Level</label>
-            <div className={styles.priorityRow}>
-              {["urgent", "high", "normal", "low"].map((p) => {
-                const cfg = priorityConfig[p];
-                return (
-                  <button
-                    key={p}
-                    className={`${styles.priorityBtn} ${
-                      editAnnouncementForm.priority === p
-                        ? styles.priorityBtnActive
-                        : ""
-                    }`}
-                    style={
-                      editAnnouncementForm.priority === p
-                        ? {
-                            background: cfg.bg,
-                            borderColor: cfg.border,
-                            color: cfg.color,
-                          }
-                        : {}
-                    }
-                    onClick={() =>
-                      setEditAnnouncementForm({
-                        ...editAnnouncementForm,
-                        priority: p,
-                      })
-                    }
-                  >
-                    {cfg.label}
-                  </button>
-                );
-              })}
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditAnnouncementModal(false);
+            setEditingAnnouncement(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} strokeWidth={1.5} /> Edit Announcement
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditAnnouncementModal(false);
+                  setEditingAnnouncement(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
-            <label className={styles.fieldLabel}>
-              Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
-            </label>
-            <textarea
-              className={styles.textArea}
-              value={editAnnouncementForm.body}
-              onChange={(e) =>
-                setEditAnnouncementForm({
-                  ...editAnnouncementForm,
-                  body: e.target.value,
-                })
-              }
-              rows={7}
-              style={{ height: "auto" }}
-            />
-            <label className={styles.fieldLabel}>
-              Expiry Date <span className={styles.fieldHint}>(optional)</span>
-            </label>
-            <input
-              className={styles.input}
-              type="date"
-              value={editAnnouncementForm.expires_at}
-              onChange={(e) =>
-                setEditAnnouncementForm({
-                  ...editAnnouncementForm,
-                  expires_at: e.target.value,
-                })
-              }
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <label className={styles.fieldLabel}>
+                Title <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Announcement title..."
+                value={editAnnouncementForm.title}
+                onChange={(e) =>
+                  setEditAnnouncementForm({
+                    ...editAnnouncementForm,
+                    title: e.target.value,
+                  })
+                }
+              />
+              <label className={styles.fieldLabel}>Priority Level</label>
+              <div className={styles.priorityRow}>
+                {["urgent", "high", "normal", "low"].map((p) => {
+                  const cfg = priorityConfig[p];
+                  return (
+                    <button
+                      key={p}
+                      className={`${styles.priorityBtn} ${
+                        editAnnouncementForm.priority === p
+                          ? styles.priorityBtnActive
+                          : ""
+                      }`}
+                      style={
+                        editAnnouncementForm.priority === p
+                          ? {
+                              background: cfg.bg,
+                              borderColor: cfg.border,
+                              color: cfg.color,
+                            }
+                          : {}
+                      }
+                      onClick={() =>
+                        setEditAnnouncementForm({
+                          ...editAnnouncementForm,
+                          priority: p,
+                        })
+                      }
+                    >
+                      {cfg.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className={styles.fieldLabel}>
+                Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <textarea
+                className={styles.textArea}
+                value={editAnnouncementForm.body}
+                onChange={(e) =>
+                  setEditAnnouncementForm({
+                    ...editAnnouncementForm,
+                    body: e.target.value,
+                  })
+                }
+                rows={7}
+                style={{ height: "auto" }}
+              />
+              <label className={styles.fieldLabel}>
+                Expiry Date <span className={styles.fieldHint}>(optional)</span>
+              </label>
+              <input
+                className={styles.input}
+                type="date"
+                value={editAnnouncementForm.expires_at}
+                onChange={(e) =>
+                  setEditAnnouncementForm({
+                    ...editAnnouncementForm,
+                    expires_at: e.target.value,
+                  })
+                }
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3701,18 +4810,90 @@ export default function AdminDashboard() {
 
       {/* Add Local Event */}
       {showLocalEventModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <PlusCircle size={16} /> Add Event
-            </h2>
-            <EventFormFields
-              form={localEventForm}
-              setForm={setLocalEventForm}
-              styles={styles}
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowLocalEventModal(false);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <PlusCircle size={16} /> Add Event
+              </h2>
+              <button
+                onClick={() => {
+                  setShowLocalEventModal(false);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <EventFormFields
+                form={localEventForm}
+                setForm={setLocalEventForm}
+                styles={styles}
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
@@ -3736,18 +4917,92 @@ export default function AdminDashboard() {
 
       {/* Edit Local Event */}
       {showEditEventModal && editingEvent && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modal}>
-            <h2 className={styles.modalTitle}>
-              <Pencil size={16} /> Edit Event
-            </h2>
-            <EventFormFields
-              form={editEventForm}
-              setForm={setEditEventForm}
-              styles={styles}
-            />
-            <MAlert />
-            <div className={styles.modalBtns}>
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditEventModal(false);
+            setEditingEvent(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} /> Edit Event
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditEventModal(false);
+                  setEditingEvent(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <EventFormFields
+                form={editEventForm}
+                setForm={setEditEventForm}
+                styles={styles}
+              />
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
               <button
                 className={styles.cancelBtn}
                 onClick={() => {
