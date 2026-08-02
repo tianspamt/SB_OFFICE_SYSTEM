@@ -20,7 +20,7 @@ router.get('/', verifyToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('comments')
-      .select('*, author:users!author_id(name)')
+      .select('*, author:users!author_id(name, photo)')
       .eq('entity_type', entity_type)
       .eq('entity_id', entity_id)
       .order('created_at', { ascending: true })
@@ -46,7 +46,7 @@ router.post('/', verifyToken, async (req, res) => {
         author_role: req.user.position || req.user.role,
         text: text.trim(),
       })
-      .select('*, author:users!author_id(name)')
+      .select('*, author:users!author_id(name, photo)')
       .single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'COMMENT', MODULE_LABELS[entity_type] || 'Comments', `Commented on ${entity_type} #${entity_id}`)

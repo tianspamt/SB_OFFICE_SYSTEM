@@ -9,6 +9,8 @@ const SibApiV3Sdk = require('sib-api-v3-sdk')
 const supabase = require('../config/supabase')
 const { verifyToken, adminOnly, validate } = require('../middleware/auth')
 const { loginLimiter, otpLimiter } = require('../middleware/rateLimiter')
+const { upload, handleMulterError } = require('../middleware/multer')
+const { uploadToStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { isValidEmail, getIP } = require('../helpers/utils')
 
@@ -78,7 +80,7 @@ router.post('/verify-otp', async (req, res) => {
 })
 
 // POST /api/register
-router.post('/register', [
+router.post('/register', upload.single('photo'), handleMulterError, [
   body('name').trim().escape().notEmpty().withMessage('Full name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
   body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
@@ -89,10 +91,17 @@ router.post('/register', [
 ], validate, async (req, res) => {
   const { name, username, email, password, position } = req.body
   try {
+    let photo = null
+    let photo_path = null
+    if (req.file) {
+      const { fileName, publicUrl } = await uploadToStorage(req.file, 'users')
+      photo = publicUrl
+      photo_path = fileName
+    }
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
     const { data, error } = await supabase
   .from('users')
-  .insert({ name, username, email, password: hashedPassword, role: 'user', position: position || 'councilor' })
+  .insert({ name, username, email, password: hashedPassword, role: 'user', position: position || 'councilor', photo, photo_path })
   .select().single()
     if (error) {
       if (error.code === '23505')
@@ -156,7 +165,7 @@ router.post('/login', loginLimiter, [
     })
     res.json({
   success: true, token,
-  user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, position: user.position }
+  user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, position: user.position, photo: user.photo }
 })
   } catch (err) {
     console.error('LOGIN ERROR:', err)
@@ -171,7 +180,7 @@ router.post('/logout', verifyToken, async (req, res) => {
 })
 
 // POST /api/admin/add
-router.post('/admin/add', verifyToken, adminOnly, [
+router.post('/admin/add', verifyToken, adminOnly, upload.single('photo'), handleMulterError, [
   body('name').trim().escape().notEmpty().withMessage('Name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
   body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
@@ -182,10 +191,17 @@ router.post('/admin/add', verifyToken, adminOnly, [
 ], validate, async (req, res) => {
   const { name, username, email, password, position } = req.body
 try {
+  let photo = null
+  let photo_path = null
+  if (req.file) {
+    const { fileName, publicUrl } = await uploadToStorage(req.file, 'users')
+    photo = publicUrl
+    photo_path = fileName
+  }
   const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS)
   const { data, error } = await supabase
     .from('users')
-    .insert({ name, username, email, password: hashedPassword, role: 'admin', position: position || 'secretary' })
+    .insert({ name, username, email, password: hashedPassword, role: 'admin', position: position || 'secretary', photo, photo_path })
     .select().single()
     if (error) {
       if (error.code === '23505')

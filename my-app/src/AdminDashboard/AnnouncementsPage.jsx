@@ -64,8 +64,20 @@ function timeAgo(dateStr) {
    SUB-COMPONENTS
 ───────────────────────────────────────────── */
 
-// Avatar circle
-function Avatar({ initials, size = 36, style = {} }) {
+// Avatar circle (renders a photo if provided, falls back to initials)
+function Avatar({ initials, photo, size = 36, style = {} }) {
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt=""
+        style={{
+          width: size, height: size, minWidth: size, borderRadius: "50%",
+          objectFit: "cover", flexShrink: 0, ...style,
+        }}
+      />
+    );
+  }
   return (
     <div style={{
       width: size, height: size, minWidth: size, borderRadius: "50%",
@@ -218,7 +230,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
             <div key={c.id} style={{
               display: "flex", gap: 10, alignItems: "flex-start",
             }}>
-              <Avatar initials={c.authorInitials} size={30} />
+              <Avatar initials={c.authorInitials} photo={c.authorPhoto} size={30} />
               <div style={{ flex: 1 }}>
                 <div style={{
                   background: "#f7fafc", borderRadius: 10,
@@ -285,7 +297,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
 
       {/* Comment input */}
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <Avatar initials={currentUser.initials} size={32} />
+        <Avatar initials={currentUser.initials} photo={currentUser.photo} size={32} />
         <div style={{
           flex: 1, display: "flex", alignItems: "center", gap: 6,
           background: "#f7fafc", border: "1px solid #e2e8f0",
@@ -358,7 +370,7 @@ function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteCommen
     >
       {/* ── Post Header ── */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
-        <Avatar initials={post.authorInitials} size={40} />
+        <Avatar initials={post.authorInitials} photo={post.authorPhoto} size={40} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700, fontSize: 14, color: "#1a365d" }}>{post.authorName}</span>
@@ -528,7 +540,7 @@ function CreateAnnouncementBox({ currentUser, onPost }) {
             cursor: "text",
           }}
         >
-          <Avatar initials={currentUser.initials} size={38} />
+          <Avatar initials={currentUser.initials} photo={currentUser.photo} size={38} />
           <div style={{
             flex: 1, padding: "9px 16px", background: "#f7fafc",
             border: "1px solid #e2e8f0", borderRadius: 20,
@@ -546,7 +558,7 @@ function CreateAnnouncementBox({ currentUser, onPost }) {
         <div style={{ padding: "18px 20px" }}>
           {/* Author row */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <Avatar initials={currentUser.initials} size={38} />
+            <Avatar initials={currentUser.initials} photo={currentUser.photo} size={38} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, color: "#1a365d" }}>{currentUser.name}</div>
               <RoleBadge role={currentUser.role} />
@@ -653,7 +665,9 @@ function CreateAnnouncementBox({ currentUser, onPost }) {
 /* ─────────────────────────────────────────────
    MAIN PAGE COMPONENT
 ───────────────────────────────────────────── */
-export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, readOnly = false }) {
+export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, readOnly = false, currentUser: currentUserProp }) {
+  // Falls back to the mock identity only if no logged-in admin was passed in.
+  const currentUser = currentUserProp?.id ? currentUserProp : MOCK_USER;
 
   // Feed-local state (UI only — wire to Supabase later)
   const [feedPosts, setFeedPosts] = useState(() => announcementsToFeedPosts(announcements));
@@ -672,10 +686,11 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
     // TODO: await supabase.from("announcements").insert(...)
     const newPost = {
       id: `local_${Date.now()}`,
-      authorId: MOCK_USER.id,
-      authorName: MOCK_USER.name,
-      authorRole: MOCK_USER.role,
-      authorInitials: MOCK_USER.initials,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorRole: currentUser.role,
+      authorInitials: currentUser.initials,
+      authorPhoto: currentUser.photo,
       title,
       body,
       priority,
@@ -693,14 +708,14 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
       prev.map((p) => {
         if (p.id !== postId) return p;
         const users = p.reactions[emoji] || [];
-        const already = users.includes(MOCK_USER.id);
+        const already = users.includes(currentUser.id);
         return {
           ...p,
           reactions: {
             ...p.reactions,
             [emoji]: already
-              ? users.filter((u) => u !== MOCK_USER.id)
-              : [...users, MOCK_USER.id],
+              ? users.filter((u) => u !== currentUser.id)
+              : [...users, currentUser.id],
           },
         };
       })
@@ -711,10 +726,11 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
     // TODO: await supabase.from("comments").insert(...)
     const comment = {
       id: `cmt_${Date.now()}`,
-      authorId: MOCK_USER.id,
-      authorName: MOCK_USER.name,
-      authorRole: MOCK_USER.role,
-      authorInitials: MOCK_USER.initials,
+      authorId: currentUser.id,
+      authorName: currentUser.name,
+      authorRole: currentUser.role,
+      authorInitials: currentUser.initials,
+      authorPhoto: currentUser.photo,
       text,
       createdAt: new Date().toISOString(),
     };
@@ -752,7 +768,7 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
     /* Full-width — fills the main content area, no centering cap */
     <div style={{ width: "100%" }}>
       {/* Create box */}
-      <CreateAnnouncementBox currentUser={MOCK_USER} onPost={handlePost} />
+      <CreateAnnouncementBox currentUser={currentUser} onPost={handlePost} />
 
       {/* Feed */}
       {feedPosts.length === 0 ? (
@@ -769,7 +785,7 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
             <FeedPostCard
   key={post.id}
   post={post}
-  currentUser={MOCK_USER}
+  currentUser={currentUser}
   onReact={handleReact}
   onAddComment={handleAddComment}
   onDeleteComment={handleDeleteComment}

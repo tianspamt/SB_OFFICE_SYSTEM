@@ -1,6 +1,40 @@
 import { AlertCircle, CalendarDays, Upload, CheckSquare } from "lucide-react";
 import { COLOR_SWATCHES } from "./AdminContext";
 
+// ─── User Avatar (photo if set, initials fallback) ───────────────────────────
+export const UserAvatar = ({
+  name,
+  photo,
+  size = 32,
+  fallbackBg = "linear-gradient(135deg, #009439, #005822)",
+  style = {},
+}) => {
+  const initials = (name || "?").trim().charAt(0).toUpperCase() || "?";
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt={name || "User"}
+        style={{
+          width: size, height: size, minWidth: size, borderRadius: "50%",
+          objectFit: "cover", flexShrink: 0, ...style,
+        }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size, minWidth: size, borderRadius: "50%",
+      background: fallbackBg, color: "#fff", fontWeight: 700,
+      fontSize: Math.round(size * 0.42),
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0, userSelect: "none", ...style,
+    }}>
+      {initials}
+    </div>
+  );
+};
+
 // ─── Term Status Badge ────────────────────────────────────────────────────────
 export const TermStatusBadge = ({ status }) => {
   if (!status) return null;

@@ -12,7 +12,7 @@ const SALT_ROUNDS = 10
 // GET /api/users
 router.get('/', verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
-    .from('users').select('id, name, username, email, role')
+    .from('users').select('id, name, username, email, role, position, photo')
     .eq('is_archived', false)
     .order('id', { ascending: true })
   if (error) return res.status(500).json({ error: error.message })
@@ -22,7 +22,7 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 // GET /api/users/:id
 router.get('/:id', verifyToken, adminOnly, async (req, res) => {
   const { data, error } = await supabase
-    .from('users').select('id, name, username, email, role').eq('id', req.params.id).single()
+    .from('users').select('id, name, username, email, role, position, photo').eq('id', req.params.id).single()
   if (error) return res.status(500).json({ error: error.message })
   if (!data) return res.status(404).json({ error: 'User not found.' })
   res.json(data)

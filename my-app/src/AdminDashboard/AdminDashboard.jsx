@@ -54,6 +54,7 @@ import {
   TermFormFields,
   OfficialsCheckList,
   EventFormFields,
+  UserAvatar,
 } from "./AdminComponents";
 import UsersPage from "./UsersPage";
 import AdminsPage from "./AdminsPage";
@@ -162,6 +163,8 @@ export default function AdminDashboard() {
     password: "",
     position: "secretary",
   });
+  const [newUserPhoto, setNewUserPhoto] = useState(null);
+  const [newAdminPhoto, setNewAdminPhoto] = useState(null);
 
   // ── Legislative Record Numbering: tracks the last system-suggested
   // number per record type so we know whether the user has since edited
@@ -515,15 +518,23 @@ export default function AdminDashboard() {
       return;
     }
     setSubmitting(true);
+    const fd = new FormData();
+    fd.append("name", newAdmin.name);
+    fd.append("username", newAdmin.username);
+    fd.append("email", newAdmin.email);
+    fd.append("password", newAdmin.password);
+    fd.append("position", newAdmin.position || "secretary");
+    if (newAdminPhoto) fd.append("photo", newAdminPhoto);
     try {
       const res = await authFetch(`${API}/api/admin/add`, {
         method: "POST",
-        body: JSON.stringify(newAdmin),
+        body: fd,
       });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("Admin added!");
-        setNewAdmin({ name: "", username: "", email: "", password: "" });
+        setNewAdmin({ name: "", username: "", email: "", password: "", position: "secretary" });
+        setNewAdminPhoto(null);
         setShowAddAdminModal(false);
         fetchUsers();
       } else showModalMsg(data.error || "Failed!", "error");
@@ -544,19 +555,23 @@ export default function AdminDashboard() {
       return;
     }
     setSubmitting(true);
+    const fd = new FormData();
+    fd.append("name", newUser.name);
+    fd.append("username", newUser.username);
+    fd.append("email", newUser.email);
+    fd.append("password", newUser.password);
+    fd.append("position", newUser.position || "councilor");
+    if (newUserPhoto) fd.append("photo", newUserPhoto);
     try {
       const res = await fetch(`${API}/api/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...newUser,
-          position: newUser.position || "councilor",
-        }),
+        body: fd,
       });
       const data = await res.json();
       if (res.ok && data.success) {
         showMsg("User added!");
-        setNewUser({ name: "", username: "", email: "", password: "" });
+        setNewUser({ name: "", username: "", email: "", password: "", position: "councilor" });
+        setNewUserPhoto(null);
         setShowAddUserModal(false);
         fetchUsers();
       } else showModalMsg(data.error || "Failed!", "error");
@@ -1365,6 +1380,7 @@ export default function AdminDashboard() {
 
   const canManageUsers = isSecretary || isClerk;
   const canViewLogs = isSecretary;
+  const canViewArchives = isSecretary;
   const canPublishLegislative = isSecretary || isClerk || isViceMayor;
   const canEditLegislative = isSecretary || isClerk;
   const canManageOfficials = isSecretary || isClerk;
@@ -1589,7 +1605,7 @@ export default function AdminDashboard() {
           </button>
 
           {/* Archives */}
-          {canManageUsers && (
+          {canViewArchives && (
             <button
               className={`${styles.navBtn} ${
                 activeTab === "archives" ? styles.navBtnActive : ""
@@ -1677,7 +1693,7 @@ export default function AdminDashboard() {
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.adminInfo}>
-            <div className={styles.adminAvatar}>{admin?.name?.charAt(0)}</div>
+            <UserAvatar name={admin?.name} photo={admin?.photo} size={34} fallbackBg="#c09a3c" />
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
               <div className={styles.adminRole}>
@@ -1718,6 +1734,7 @@ export default function AdminDashboard() {
                 className={styles.addBtn}
                 onClick={() => {
                   setModalMessage("");
+                  setNewUserPhoto(null);
                   setShowAddUserModal(true);
                 }}
               >
@@ -1729,6 +1746,7 @@ export default function AdminDashboard() {
                 className={styles.addBtn}
                 onClick={() => {
                   setModalMessage("");
+                  setNewAdminPhoto(null);
                   setShowAddAdminModal(true);
                 }}
               >
@@ -1888,6 +1906,13 @@ export default function AdminDashboard() {
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditAnnouncement}
             readOnly={false}
+            currentUser={{
+              id: admin?.id,
+              name: admin?.name,
+              photo: admin?.photo,
+              initials: (admin?.name || "?").trim().charAt(0).toUpperCase(),
+              role: isViceMayor || isCouncilor ? "Councilor" : isAdmin ? "Admin" : "Staff",
+            }}
           />
         )}
         {activeTab === "calendar" && (
@@ -1912,7 +1937,7 @@ export default function AdminDashboard() {
             currentUser={admin}
           />
         )}
-        {activeTab === "logs" && (
+        {activeTab === "logs" && canViewLogs && (
           <LogsPage
             logs={logs}
             logStats={logStats}
@@ -1930,7 +1955,7 @@ export default function AdminDashboard() {
         {activeTab === "content" && (
           <ContentManagementPage isAdmin={isAdmin} currentUser={admin} />
         )}
-        {activeTab === "archives" && canManageUsers && <ArchivesPage />}
+        {activeTab === "archives" && canViewArchives && <ArchivesPage />}
       </div>
 
       {/* ══════════════════ MODALS ══════════════════ */}
@@ -2048,6 +2073,28 @@ export default function AdminDashboard() {
                 <option value="secretary">Secretary</option>
                 <option value="clerk">Clerk</option>
               </select>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="newAdminPhotoInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setNewAdminPhoto(e.target.files[0])}
+                />
+                <label htmlFor="newAdminPhotoInput" className={styles.fileLabel}>
+                  {newAdminPhoto ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {newAdminPhoto.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to upload
+                      profile photo (optional)
+                    </>
+                  )}
+                </label>
+              </div>
               <MAlert />
             </div>
             <div
@@ -2195,6 +2242,28 @@ export default function AdminDashboard() {
                 <option value="councilor">Councilor</option>
                 <option value="vice_mayor">Vice Mayor</option>
               </select>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="newUserPhotoInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setNewUserPhoto(e.target.files[0])}
+                />
+                <label htmlFor="newUserPhotoInput" className={styles.fileLabel}>
+                  {newUserPhoto ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {newUserPhoto.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to upload
+                      profile photo (optional)
+                    </>
+                  )}
+                </label>
+              </div>
               <MAlert />
             </div>
             <div
