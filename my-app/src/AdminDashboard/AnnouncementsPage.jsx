@@ -5,7 +5,7 @@ import {
   SmilePlus,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
-import { priorityConfig } from "./AdminContext";
+import { API, authFetch, extractErrorMsg, priorityConfig } from "./AdminContext";
 
 /* ─────────────────────────────────────────────
    MOCK DATA — replace with Supabase queries
@@ -25,31 +25,69 @@ const ROLE_COLORS = {
   Councilor: { bg: "#faf5ff", color: "#6b46c1", border: "#d6bcfa" },
 };
 
+// Maps a joined `author` row (users.name/photo/position/role) to the
+// Admin/Staff/Councilor buckets ROLE_COLORS understands.
+function roleLabelFor(author) {
+  if (!author) return "Admin";
+  if (author.position === "vice_mayor" || author.position === "councilor") return "Councilor";
+  return author.role === "admin" ? "Admin" : "Staff";
+}
+
+function initialsFor(name) {
+  return (name || "?").trim().charAt(0).toUpperCase() || "?";
+}
+
+// Builds the { "👍": [userId, ...], ... } map ReactionBar expects out of the
+// flat announcement_reactions rows embedded by GET /api/announcements.
+function reactionsMapFor(rows) {
+  const map = {};
+  for (const r of rows || []) {
+    if (!map[r.emoji]) map[r.emoji] = [];
+    map[r.emoji].push(r.user_id);
+  }
+  return map;
+}
+
 // Convert prop announcements → feed posts format
 function announcementsToFeedPosts(announcements) {
   return announcements.map((a) => ({
     id: a.id,
-    authorId: "usr_admin",
-    authorName: "Admin",
-    authorRole: "Admin",
-    authorInitials: "AD",
+    authorId: a.created_by ?? null,
+    // Legacy rows posted before author tracking was added have no `author`
+    // relation — fall back to a generic "Admin" byline for those only.
+    authorName: a.author?.name || "Admin",
+    authorRole: roleLabelFor(a.author),
+    authorInitials: initialsFor(a.author?.name),
+    authorPhoto: a.author?.photo || null,
     title: a.title,
     body: a.body,
     priority: a.priority,
     createdAt: a.created_at,
     expiresAt: a.expires_at,
-    // Reaction map: { "👍": ["usr_001", ...], ... }
-    reactions: {
-      "👍": [],
-      "❤️": [],
-      "😂": [],
-      "😮": [],
-      "😢": [],
-      "😡": [],
-    },
+    reactions: reactionsMapFor(a.announcement_reactions),
+    // Comments aren't embedded in the announcements list response (the
+    // comments table is a polymorphic entity_type/entity_id pair, not a real
+    // FK Postgres can join on) — fetched lazily per-post on first expand,
+    // same pattern OrdinancesPage/ResolutionsPage/SessionsPage already use.
     comments: [],
-    showComments: false,
+    commentsLoaded: false,
+    loadingComments: false,
   }));
+}
+
+// Maps a /api/comments row (author: { name, photo, position, role }) to the
+// shape CommentSection renders.
+function mapCommentFromApi(c) {
+  return {
+    id: c.id,
+    authorId: c.author_id,
+    authorName: c.author?.name || "Unknown",
+    authorRole: roleLabelFor(c.author),
+    authorInitials: initialsFor(c.author?.name),
+    authorPhoto: c.author?.photo || null,
+    text: c.text,
+    createdAt: c.created_at,
+  };
 }
 
 function timeAgo(dateStr) {
@@ -207,16 +245,45 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
   const [text, setText] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [savingEditId, setSavingEditId] = useState(null);
+  const [error, setError] = useState("");
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus();
   }, []);
 
-  function handleSubmit() {
-    if (!text.trim()) return;
-    onAddComment(post.id, text.trim());
+  async function handleSubmit() {
+    if (!text.trim() || posting) return;
+    setPosting(true);
+    setError("");
+    const result = await onAddComment(post.id, text.trim());
+    setPosting(false);
+    if (!result?.success) {
+      setError(result?.error || "Failed to add comment.");
+      return;
+    }
     setText("");
+  }
+
+  async function handleSaveEdit(commentId) {
+    if (!editText.trim()) return;
+    setSavingEditId(commentId);
+    setError("");
+    const result = await onEditComment(post.id, commentId, editText.trim());
+    setSavingEditId(null);
+    if (!result?.success) {
+      setError(result?.error || "Failed to update comment.");
+      return;
+    }
+    setEditingId(null);
+  }
+
+  async function handleDelete(commentId) {
+    setError("");
+    const result = await onDeleteComment(post.id, commentId);
+    if (!result?.success) setError(result?.error || "Failed to delete comment.");
   }
 
   return (
@@ -250,18 +317,19 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
                           border: "1px solid #9ae6b4", borderRadius: 6, outline: "none",
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") { onEditComment(post.id, c.id, editText); setEditingId(null); }
+                          if (e.key === "Enter") handleSaveEdit(c.id);
                           if (e.key === "Escape") setEditingId(null);
                         }}
                         autoFocus
                       />
                       <button
-                        onClick={() => { onEditComment(post.id, c.id, editText); setEditingId(null); }}
+                        onClick={() => handleSaveEdit(c.id)}
+                        disabled={savingEditId === c.id}
                         style={{
                           background: "#009439", color: "#fff", border: "none",
                           borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11,
                         }}
-                      >Save</button>
+                      >{savingEditId === c.id ? "Saving..." : "Save"}</button>
                       <button
                         onClick={() => setEditingId(null)}
                         style={{
@@ -283,7 +351,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
                         style={{ fontSize: 10, color: "#718096", background: "none", border: "none", cursor: "pointer", padding: 0 }}
                       >Edit</button>
                       <button
-                        onClick={() => onDeleteComment(post.id, c.id)}
+                        onClick={() => handleDelete(c.id)}
                         style={{ fontSize: 10, color: "#c53030", background: "none", border: "none", cursor: "pointer", padding: 0 }}
                       >Delete</button>
                     </>
@@ -292,6 +360,13 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div style={{ fontSize: 11, color: "#c53030", marginBottom: 8, paddingLeft: 4 }}>
+          {error}
         </div>
       )}
 
@@ -313,6 +388,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
             onChange={(e) => setText(e.target.value)}
             placeholder="Write a comment…"
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            disabled={posting}
             style={{
               flex: 1, border: "none", background: "transparent",
               fontSize: 12, outline: "none", color: "#2d3748",
@@ -320,13 +396,13 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
           />
           <button
             onClick={handleSubmit}
-            disabled={!text.trim()}
+            disabled={!text.trim() || posting}
             style={{
-              background: text.trim() ? "linear-gradient(135deg,#009439,#005822)" : "#e2e8f0",
-              color: text.trim() ? "#fff" : "#a0aec0",
+              background: text.trim() && !posting ? "linear-gradient(135deg,#009439,#005822)" : "#e2e8f0",
+              color: text.trim() && !posting ? "#fff" : "#a0aec0",
               border: "none", borderRadius: "50%", width: 28, height: 28,
               display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: text.trim() ? "pointer" : "default",
+              cursor: text.trim() && !posting ? "pointer" : "default",
               transition: "all 0.2s", flexShrink: 0,
             }}
           >
@@ -339,7 +415,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
 }
 
 // Feed Post Card
-function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteComment, onEditComment, onEdit, onDelete, readOnly = false }) {
+function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComment, onDeleteComment, onEditComment, onEdit, onDelete, readOnly = false }) {
   const [showComments, setShowComments] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -467,7 +543,11 @@ function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteCommen
         paddingTop: 12, borderTop: "1px solid #edf2f7",
       }}>
         <button
-          onClick={() => setShowComments((p) => !p)}
+          onClick={() => {
+            const next = !showComments;
+            setShowComments(next);
+            if (next) onExpandComments(post.id);
+          }}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
             background: showComments ? "#f0fff4" : "none",
@@ -478,7 +558,9 @@ function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteCommen
           }}
         >
           <MessageCircle size={13} />
-          {post.comments.length > 0 ? `${post.comments.length} Comment${post.comments.length !== 1 ? "s" : ""}` : "Comment"}
+          {post.commentsLoaded && post.comments.length > 0
+            ? `${post.comments.length} Comment${post.comments.length !== 1 ? "s" : ""}`
+            : "Comment"}
           {showComments ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         {totalReactions > 0 && (
@@ -490,174 +572,53 @@ function FeedPostCard({ post, currentUser, onReact, onAddComment, onDeleteCommen
 
       {/* ── Comment Section ── */}
       {showComments && (
-        <CommentSection
-          post={post}
-          currentUser={currentUser}
-          onAddComment={onAddComment}
-          onDeleteComment={onDeleteComment}
-          onEditComment={onEditComment}
-        />
+        post.loadingComments ? (
+          <div style={{ fontSize: 12, color: "#a0aec0", padding: "14px 0", textAlign: "center" }}>
+            Loading comments...
+          </div>
+        ) : (
+          <CommentSection
+            post={post}
+            currentUser={currentUser}
+            onAddComment={onAddComment}
+            onDeleteComment={onDeleteComment}
+            onEditComment={onEditComment}
+          />
+        )
       )}
     </div>
   );
 }
 
-// Create Announcement Box (top card)
-function CreateAnnouncementBox({ currentUser, onPost }) {
-  const [expanded, setExpanded] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [priority, setPriority] = useState("normal");
-
-  function handlePost() {
-    if (!body.trim()) return;
-    onPost({ title: title.trim(), body: body.trim(), priority });
-    setTitle("");
-    setBody("");
-    setPriority("normal");
-    setExpanded(false);
-  }
-
-  function handleCancel() {
-    setTitle("");
-    setBody("");
-    setPriority("normal");
-    setExpanded(false);
-  }
-
+// Composer trigger (top card) — opens the same "+ New Announcement" modal
+// used elsewhere in the dashboard, rather than duplicating its form. The two
+// used to be separate creation paths with different fields and validation
+// (this one had no expiry field and an optional title, the modal required
+// one) — a class of bug where fixing one path silently left the other stale.
+function CreateAnnouncementBox({ currentUser, onOpenComposer }) {
   return (
-    <div style={{
-      background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0",
-      boxShadow: "0 2px 12px rgba(0,148,57,0.06)", marginBottom: 20,
-      overflow: "hidden", transition: "box-shadow 0.2s",
-    }}>
-      {/* Collapsed trigger */}
-      {!expanded ? (
-        <div
-          onClick={() => setExpanded(true)}
-          style={{
-            display: "flex", alignItems: "center", gap: 12, padding: "14px 18px",
-            cursor: "text",
-          }}
-        >
-          <Avatar initials={currentUser.initials} photo={currentUser.photo} size={38} />
-          <div style={{
-            flex: 1, padding: "9px 16px", background: "#f7fafc",
-            border: "1px solid #e2e8f0", borderRadius: 20,
-            fontSize: 13, color: "#a0aec0",
-            cursor: "text", userSelect: "none",
-            transition: "border-color 0.15s, background 0.15s",
-          }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#9ae6b4"; e.currentTarget.style.background = "#f0fff4"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#f7fafc"; }}
-          >
-            Share an announcement…
-          </div>
-        </div>
-      ) : (
-        <div style={{ padding: "18px 20px" }}>
-          {/* Author row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <Avatar initials={currentUser.initials} photo={currentUser.photo} size={38} />
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 13, color: "#1a365d" }}>{currentUser.name}</div>
-              <RoleBadge role={currentUser.role} />
-            </div>
-          </div>
-
-          {/* Title */}
-          <input
-            placeholder="Announcement title (optional)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            style={{
-              width: "100%", padding: "9px 12px", marginBottom: 10,
-              border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13,
-              fontWeight: 600, outline: "none", color: "#1a365d",
-              transition: "border-color 0.15s",
-            }}
-            onFocus={(e) => e.target.style.borderColor = "#009439"}
-            onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
-          />
-
-          {/* Body */}
-          <textarea
-            placeholder="Share an announcement with your barangay…"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={4}
-            style={{
-              width: "100%", padding: "9px 12px", marginBottom: 12,
-              border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13,
-              outline: "none", resize: "vertical", lineHeight: 1.6,
-              color: "#4a5568", fontFamily: "inherit",
-              transition: "border-color 0.15s",
-            }}
-            onFocus={(e) => e.target.style.borderColor = "#009439"}
-            onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
-          />
-
-          {/* Priority selector */}
-          <div style={{ marginBottom: 14 }}>
-            <div style={{
-              fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-              letterSpacing: "0.8px", color: "#718096", marginBottom: 7,
-            }}>
-              Priority
-            </div>
-            <div className={styles.priorityRow}>
-              {["low", "normal", "high", "urgent"].map((p) => {
-                const cfg = priorityConfig[p] || priorityConfig.normal;
-                return (
-                  <button
-                    key={p}
-                    className={`${styles.priorityBtn} ${priority === p ? styles.priorityBtnActive : ""}`}
-                    onClick={() => setPriority(p)}
-                    style={priority === p ? {
-                      background: cfg.bg, color: cfg.color,
-                      borderColor: cfg.border,
-                    } : {}}
-                  >
-                    {cfg.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button
-              onClick={handleCancel}
-              style={{
-                padding: "8px 18px", background: "#f7fafc", border: "1px solid #e2e8f0",
-                borderRadius: 8, fontSize: 13, cursor: "pointer", color: "#4a5568",
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = "#edf2f7"}
-              onMouseLeave={(e) => e.currentTarget.style.background = "#f7fafc"}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handlePost}
-              disabled={!body.trim()}
-              style={{
-                padding: "8px 22px",
-                background: body.trim() ? "linear-gradient(135deg,#009439,#005822)" : "#e2e8f0",
-                color: body.trim() ? "#fff" : "#a0aec0",
-                border: "none", borderRadius: 8, fontSize: 13,
-                fontWeight: 700, cursor: body.trim() ? "pointer" : "default",
-                display: "inline-flex", alignItems: "center", gap: 6,
-                boxShadow: body.trim() ? "0 2px 8px rgba(0,148,57,0.3)" : "none",
-                transition: "all 0.2s",
-              }}
-            >
-              <Send size={13} /> Post
-            </button>
-          </div>
-        </div>
-      )}
+    <div
+      onClick={onOpenComposer}
+      style={{
+        background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0",
+        boxShadow: "0 2px 12px rgba(0,148,57,0.06)", marginBottom: 20,
+        display: "flex", alignItems: "center", gap: 12, padding: "14px 18px",
+        cursor: "pointer",
+      }}
+    >
+      <Avatar initials={currentUser.initials} photo={currentUser.photo} size={38} />
+      <div style={{
+        flex: 1, padding: "9px 16px", background: "#f7fafc",
+        border: "1px solid #e2e8f0", borderRadius: 20,
+        fontSize: 13, color: "#a0aec0",
+        userSelect: "none",
+        transition: "border-color 0.15s, background 0.15s",
+      }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#9ae6b4"; e.currentTarget.style.background = "#f0fff4"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#f7fafc"; }}
+      >
+        Share an announcement…
+      </div>
     </div>
   );
 }
@@ -665,7 +626,7 @@ function CreateAnnouncementBox({ currentUser, onPost }) {
 /* ─────────────────────────────────────────────
    MAIN PAGE COMPONENT
 ───────────────────────────────────────────── */
-export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, readOnly = false, currentUser: currentUserProp }) {
+export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, onOpenComposer, onRefresh, readOnly = false, currentUser: currentUserProp }) {
   // Falls back to the mock identity only if no logged-in admin was passed in.
   const currentUser = currentUserProp?.id ? currentUserProp : MOCK_USER;
 
@@ -680,87 +641,121 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
     setFeedPosts(announcementsToFeedPosts(announcements));
   }
 
-  // ── Feed handlers (UI-only) — TODO: replace body with Supabase mutations ──
+  // ── Feed handlers ──
+  // Creation happens entirely through the "+ New Announcement" modal (see
+  // onOpenComposer) — the feed re-syncs from the `announcements` prop once
+  // that modal's own submit/refetch lands.
 
-  function handlePost({ title, body, priority }) {
-    // TODO: await supabase.from("announcements").insert(...)
-    const newPost = {
-      id: `local_${Date.now()}`,
-      authorId: currentUser.id,
-      authorName: currentUser.name,
-      authorRole: currentUser.role,
-      authorInitials: currentUser.initials,
-      authorPhoto: currentUser.photo,
-      title,
-      body,
-      priority,
-      createdAt: new Date().toISOString(),
-      expiresAt: null,
-      reactions: { "👍": [], "❤️": [], "😂": [], "😮": [], "😢": [], "😡": [] },
-      comments: [],
-    };
-    setFeedPosts((prev) => [newPost, ...prev]);
+  // Reactions are embedded in the `announcements` prop (announcement_reactions
+  // join), so a toggle re-fetches the whole list via onRefresh rather than
+  // patching local state — same "mutate then refetch" convention the rest of
+  // the app uses, and simple given how few announcements this office posts.
+  async function handleReact(postId, emoji) {
+    try {
+      await authFetch(`${API}/api/announcements/${postId}/reactions`, {
+        method: "POST",
+        body: JSON.stringify({ emoji }),
+      });
+      onRefresh?.();
+    } catch {
+      // Non-critical, low-stakes interaction — a failed toggle just leaves
+      // the reaction bar unchanged; nothing to surface to the user.
+    }
   }
 
-  function handleReact(postId, emoji) {
-    // TODO: await supabase.from("reactions").upsert / delete
+  // Comments are NOT embedded in the announcements list (the comments table
+  // is a polymorphic entity_type/entity_id pair, not a real FK Postgres can
+  // join on) — fetched on demand the first time a post's thread is expanded.
+  async function handleExpandComments(postId) {
+    const post = feedPosts.find((p) => p.id === postId);
+    if (post?.commentsLoaded) return;
     setFeedPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== postId) return p;
-        const users = p.reactions[emoji] || [];
-        const already = users.includes(currentUser.id);
-        return {
-          ...p,
-          reactions: {
-            ...p.reactions,
-            [emoji]: already
-              ? users.filter((u) => u !== currentUser.id)
-              : [...users, currentUser.id],
-          },
-        };
-      })
+      prev.map((p) => (p.id === postId ? { ...p, loadingComments: true } : p))
     );
+    try {
+      const res = await authFetch(
+        `${API}/api/comments?entity_type=announcement&entity_id=${postId}`
+      );
+      const data = await res.json();
+      const comments = Array.isArray(data) ? data.map(mapCommentFromApi) : [];
+      setFeedPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId ? { ...p, comments, commentsLoaded: true, loadingComments: false } : p
+        )
+      );
+    } catch {
+      setFeedPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, loadingComments: false } : p))
+      );
+    }
   }
 
-  function handleAddComment(postId, text) {
-    // TODO: await supabase.from("comments").insert(...)
-    const comment = {
-      id: `cmt_${Date.now()}`,
-      authorId: currentUser.id,
-      authorName: currentUser.name,
-      authorRole: currentUser.role,
-      authorInitials: currentUser.initials,
-      authorPhoto: currentUser.photo,
-      text,
-      createdAt: new Date().toISOString(),
-    };
-    setFeedPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId ? { ...p, comments: [...p.comments, comment] } : p
-      )
-    );
+  async function handleAddComment(postId, text) {
+    try {
+      const res = await authFetch(`${API}/api/comments`, {
+        method: "POST",
+        body: JSON.stringify({ entity_type: "announcement", entity_id: postId, text }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const comment = mapCommentFromApi(data.data);
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId
+              ? { ...p, comments: [...p.comments, comment], commentsLoaded: true }
+              : p
+          )
+        );
+        return { success: true };
+      }
+      return { success: false, error: extractErrorMsg(data, "Failed to add comment.") };
+    } catch {
+      return { success: false, error: "Server error." };
+    }
   }
 
-  function handleDeleteComment(postId, commentId) {
-    // TODO: await supabase.from("comments").delete().eq("id", commentId)
-    setFeedPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, comments: p.comments.filter((c) => c.id !== commentId) }
-          : p
-      )
-    );
+  async function handleDeleteComment(postId, commentId) {
+    try {
+      const res = await authFetch(`${API}/api/comments/${commentId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId
+              ? { ...p, comments: p.comments.filter((c) => c.id !== commentId) }
+              : p
+          )
+        );
+        return { success: true };
+      }
+      return { success: false, error: extractErrorMsg(data, "Failed to delete comment.") };
+    } catch {
+      return { success: false, error: "Server error." };
+    }
   }
 
-  function handleEditComment(postId, commentId, newText) {
-    // TODO: await supabase.from("comments").update({ text: newText }).eq("id", commentId)
-    setFeedPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, comments: p.comments.map((c) => c.id === commentId ? { ...c, text: newText } : c) }
-          : p
-      )
-    );
+  async function handleEditComment(postId, commentId, newText) {
+    try {
+      const res = await authFetch(`${API}/api/comments/${commentId}`, {
+        method: "PUT",
+        body: JSON.stringify({ text: newText }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const comment = mapCommentFromApi(data.data);
+        setFeedPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId
+              ? { ...p, comments: p.comments.map((c) => (c.id === commentId ? comment : c)) }
+              : p
+          )
+        );
+        return { success: true };
+      }
+      return { success: false, error: extractErrorMsg(data, "Failed to update comment.") };
+    } catch {
+      return { success: false, error: "Server error." };
+    }
   }
 
 
@@ -768,7 +763,7 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
     /* Full-width — fills the main content area, no centering cap */
     <div style={{ width: "100%" }}>
       {/* Create box */}
-      <CreateAnnouncementBox currentUser={currentUser} onPost={handlePost} />
+      <CreateAnnouncementBox currentUser={currentUser} onOpenComposer={onOpenComposer} />
 
       {/* Feed */}
       {feedPosts.length === 0 ? (
@@ -787,6 +782,7 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
   post={post}
   currentUser={currentUser}
   onReact={handleReact}
+  onExpandComments={handleExpandComments}
   onAddComment={handleAddComment}
   onDeleteComment={handleDeleteComment}
   onEditComment={handleEditComment}

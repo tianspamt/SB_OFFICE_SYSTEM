@@ -5,6 +5,8 @@ const { body } = require('express-validator')
 
 const supabase = require('../config/supabase')
 const { verifyToken, adminOnly, validate } = require('../middleware/auth')
+const { upload, handleMulterError } = require('../middleware/multer')
+const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 
 const SALT_ROUNDS = 10
@@ -29,20 +31,30 @@ router.get('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // PUT /api/users/:id
-router.put('/:id', verifyToken, adminOnly, [
+router.put('/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterError, [
   body('name').trim().escape().notEmpty().withMessage('Name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
   body('email').trim().normalizeEmail().isEmail().withMessage('Valid email is required.'),
   body('role').isIn(['admin', 'user']).withMessage('Role must be admin or user.'),
 ], validate, async (req, res) => {
   const { id } = req.params
-  const { name, username, email, role } = req.body
+  const { name, username, email, role, position } = req.body
   try {
     const { data: existing, error: fetchErr } = await supabase
-      .from('users').select('id').eq('id', id).single()
+      .from('users').select('id, photo_path').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'User not found.' })
+
+    const updateData = { name, username, email, role }
+    if (position) updateData.position = position
+    if (req.file) {
+      if (existing.photo_path) await deleteFromStorage(existing.photo_path)
+      const { fileName, publicUrl } = await uploadToStorage(req.file, 'users')
+      updateData.photo = publicUrl
+      updateData.photo_path = fileName
+    }
+
     const { error } = await supabase
-      .from('users').update({ name, username, email, role }).eq('id', id)
+      .from('users').update(updateData).eq('id', id)
     if (error) {
       if (error.code === '23505') return res.status(400).json({ error: 'Username or email already in use.' })
       return res.status(500).json({ error: error.message })

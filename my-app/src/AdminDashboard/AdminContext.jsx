@@ -1,6 +1,18 @@
 // ─── API Base URL ──────────────────────────────────────────────────────────────
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// ─── Error helper ──────────────────────────────────────────────────────────────
+// The backend responds with { error: "..." } for most failures, but
+// express-validator's `validate` middleware (used by register, admin/add,
+// and the users PUT routes) responds with { errors: [{ msg, ... }, ...] }
+// instead. Without this, those validation messages never reach the UI.
+export const extractErrorMsg = (data, fallback = "Something went wrong.") => {
+  if (data?.error) return data.error;
+  if (Array.isArray(data?.errors) && data.errors.length)
+    return data.errors.map((e) => e.msg).join(" ");
+  return fallback;
+};
+
 // ─── Auth helper ───────────────────────────────────────────────────────────────
 export const authFetch = (url, options = {}) => {
   const token = localStorage.getItem("token");

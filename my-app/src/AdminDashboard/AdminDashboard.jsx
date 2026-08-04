@@ -37,6 +37,7 @@ import ConfirmModal from "./ConfirmModal";
 import {
   API,
   authFetch,
+  extractErrorMsg,
   toIsoDate,
   toLocalIso,
   formatDate,
@@ -129,6 +130,7 @@ export default function AdminDashboard() {
   // ── modals ──
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
   const [showOrdinanceModal, setShowOrdinanceModal] = useState(false);
   const [showEditOrdinanceModal, setShowEditOrdinanceModal] = useState(false);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -165,6 +167,16 @@ export default function AdminDashboard() {
   });
   const [newUserPhoto, setNewUserPhoto] = useState(null);
   const [newAdminPhoto, setNewAdminPhoto] = useState(null);
+
+  // ── edit user/admin states ──
+  const [editingUser, setEditingUser] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({
+    name: "",
+    username: "",
+    email: "",
+    position: "",
+  });
+  const [editUserPhoto, setEditUserPhoto] = useState(null);
 
   // ── Legislative Record Numbering: tracks the last system-suggested
   // number per record type so we know whether the user has since edited
@@ -537,7 +549,7 @@ export default function AdminDashboard() {
         setNewAdminPhoto(null);
         setShowAddAdminModal(false);
         fetchUsers();
-      } else showModalMsg(data.error || "Failed!", "error");
+      } else showModalMsg(extractErrorMsg(data, "Failed!"), "error");
     } catch {
       showModalMsg("Server error!", "error");
     } finally {
@@ -574,7 +586,50 @@ export default function AdminDashboard() {
         setNewUserPhoto(null);
         setShowAddUserModal(false);
         fetchUsers();
-      } else showModalMsg(data.error || "Failed!", "error");
+      } else showModalMsg(extractErrorMsg(data, "Failed!"), "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const handleOpenEditUser = (u) => {
+    setEditingUser(u);
+    setEditUserForm({
+      name: u.name || "",
+      username: u.username || "",
+      email: u.email || "",
+      position: u.position || (u.role === "admin" ? "secretary" : "councilor"),
+    });
+    setEditUserPhoto(null);
+    setModalMessage("");
+    setShowEditUserModal(true);
+  };
+  const handleUpdateUser = async () => {
+    if (!editUserForm.name || !editUserForm.username || !editUserForm.email) {
+      showModalMsg("Name, username, and email are required!", "error");
+      return;
+    }
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.append("name", editUserForm.name);
+    fd.append("username", editUserForm.username);
+    fd.append("email", editUserForm.email);
+    fd.append("role", editingUser.role);
+    fd.append("position", editUserForm.position);
+    if (editUserPhoto) fd.append("photo", editUserPhoto);
+    try {
+      const res = await authFetch(`${API}/api/users/${editingUser.id}`, {
+        method: "PUT",
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg(`${editingUser.role === "admin" ? "Admin" : "User"} updated!`);
+        setShowEditUserModal(false);
+        setEditingUser(null);
+        fetchUsers();
+      } else showModalMsg(extractErrorMsg(data, "Update failed!"), "error");
     } catch {
       showModalMsg("Server error!", "error");
     } finally {
@@ -1823,10 +1878,10 @@ export default function AdminDashboard() {
           />
         )}
         {activeTab === "users" && !fetchingUsers && (
-          <UsersPage users={users} setDeleteTarget={setDeleteTarget} />
+          <UsersPage users={users} setDeleteTarget={setDeleteTarget} onEdit={handleOpenEditUser} />
         )}
         {activeTab === "admins" && !fetchingUsers && (
-          <AdminsPage users={users} setDeleteTarget={setDeleteTarget} />
+          <AdminsPage users={users} setDeleteTarget={setDeleteTarget} onEdit={handleOpenEditUser} />
         )}
         {activeTab === "ordinances" && !fetchingOrdinances && (
           <OrdinancesPage
@@ -1905,6 +1960,8 @@ export default function AdminDashboard() {
             announcements={announcements}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditAnnouncement}
+            onOpenComposer={openAnnouncementModal}
+            onRefresh={fetchAnnouncements}
             readOnly={false}
             currentUser={{
               id: admin?.id,
@@ -2292,6 +2349,190 @@ export default function AdminDashboard() {
                 disabled={submitting}
               >
                 {submitting ? "Adding..." : "Add User"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit User / Edit Admin modal (shared) ── */}
+      {showEditUserModal && editingUser && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditUserModal(false);
+            setEditingUser(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={styles.modal}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                Edit {editingUser.role === "admin" ? "Admin" : "User"}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <label className={styles.fieldLabel}>
+                Full Name <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Full Name"
+                value={editUserForm.name}
+                onChange={(e) =>
+                  setEditUserForm({ ...editUserForm, name: e.target.value })
+                }
+              />
+              <label className={styles.fieldLabel}>
+                Username <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                placeholder="Username"
+                value={editUserForm.username}
+                onChange={(e) =>
+                  setEditUserForm({ ...editUserForm, username: e.target.value })
+                }
+              />
+              <label className={styles.fieldLabel}>
+                Email Address <span style={{ color: "#e53e3e" }}>*</span>
+              </label>
+              <input
+                className={styles.input}
+                type="email"
+                placeholder="Email Address"
+                value={editUserForm.email}
+                onChange={(e) =>
+                  setEditUserForm({ ...editUserForm, email: e.target.value })
+                }
+              />
+              <label className={styles.fieldLabel}>Position</label>
+              <select
+                className={styles.input}
+                value={editUserForm.position}
+                onChange={(e) =>
+                  setEditUserForm({ ...editUserForm, position: e.target.value })
+                }
+              >
+                {editingUser.role === "admin" ? (
+                  <>
+                    <option value="secretary">Secretary</option>
+                    <option value="clerk">Clerk</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="councilor">Councilor</option>
+                    <option value="vice_mayor">Vice Mayor</option>
+                  </>
+                )}
+              </select>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="editUserPhotoInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setEditUserPhoto(e.target.files[0])}
+                />
+                <label htmlFor="editUserPhotoInput" className={styles.fileLabel}>
+                  {editUserPhoto ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editUserPhoto.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to replace
+                      photo (optional)
+                    </>
+                  )}
+                </label>
+                {editingUser.photo && !editUserPhoto && (
+                  <p className={styles.fileHint}>Current photo on file</p>
+                )}
+              </div>
+              <MAlert />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleUpdateUser}
+                disabled={submitting}
+              >
+                {submitting ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>

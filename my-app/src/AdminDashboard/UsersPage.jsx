@@ -1,8 +1,8 @@
-import { Archive } from "lucide-react";
+import { Archive, Pencil } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import { UserAvatar } from "./AdminComponents";
 
-export default function UsersPage({ users, setDeleteTarget }) {
+export default function UsersPage({ users, setDeleteTarget, onEdit }) {
   const totalUsers = users.filter((u) => u.role === "user").length;
   const totalAdmins = users.filter((u) => u.role === "admin").length;
 
@@ -28,9 +28,14 @@ export default function UsersPage({ users, setDeleteTarget }) {
                 <td className={styles.td}>{u.username}</td><td className={styles.td}>{u.email}</td>
                 <td className={styles.td}><span className={`${styles.badge} ${styles.badgeUser}`}>user</span></td>
                 <td className={styles.td}>
-                  <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: u.id, type: "user", name: u.name })}>
-                    <Archive size={13} /> Archive
-                  </button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className={styles.editBtn} onClick={() => onEdit(u)}>
+                      <Pencil size={13} /> Edit
+                    </button>
+                    <button className={styles.deleteBtn} onClick={() => setDeleteTarget({ id: u.id, type: "user", name: u.name })}>
+                      <Archive size={13} /> Archive
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
