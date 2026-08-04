@@ -272,17 +272,21 @@ export default function AdminDashboard() {
 
   // announcements
   const [announcements, setAnnouncements] = useState([]);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
+  const [totalActiveUsers, setTotalActiveUsers] = useState(0);
   const [editingAnnouncement, setEditingAnnouncement] = useState(null);
   const [announcementForm, setAnnouncementForm] = useState({
     title: "",
     body: "",
     priority: "normal",
+    pinned: false,
     expires_at: "",
   });
   const [editAnnouncementForm, setEditAnnouncementForm] = useState({
     title: "",
     body: "",
     priority: "normal",
+    pinned: false,
     expires_at: "",
   });
 
@@ -334,6 +338,8 @@ export default function AdminDashboard() {
     fetchSessionMinutes();
     fetchResolutions();
     fetchAnnouncements();
+    fetchUnreadAnnouncements();
+    fetchActiveStaffCount();
   }, []);
 
   useEffect(() => {
@@ -374,6 +380,7 @@ export default function AdminDashboard() {
     setActiveTab(key);
     setSubTabRequest(subTab);
     setMobileOpen(false);
+    if (key === "announcements") markAnnouncementsSeen();
   };
   // Only laptops/PCs with a real mouse get hover-to-expand; touch devices keep manual toggle.
   const canHoverSidebar = () =>
@@ -454,12 +461,43 @@ export default function AdminDashboard() {
   const fetchAnnouncements = async () => {
     setFetchingAnnouncements(true);
     try {
-      const d = await (await fetch(`${API}/api/announcements`)).json();
+      // GET /api/announcements now embeds per-reader names — it's
+      // auth-gated, so this must be authFetch, not a plain fetch.
+      const d = await (await authFetch(`${API}/api/announcements`)).json();
       setAnnouncements(Array.isArray(d) ? d : []);
     } catch {
       setAnnouncements([]);
     } finally {
       setFetchingAnnouncements(false);
+    }
+  };
+  const fetchUnreadAnnouncements = async () => {
+    try {
+      const d = await (await authFetch(`${API}/api/announcements/unread-count`)).json();
+      setUnreadAnnouncements(typeof d.count === "number" ? d.count : 0);
+    } catch {
+      // Non-critical — leave whatever count was already showing.
+    }
+  };
+  const fetchActiveStaffCount = async () => {
+    try {
+      const d = await (await authFetch(`${API}/api/announcements/active-staff-count`)).json();
+      setTotalActiveUsers(typeof d.count === "number" ? d.count : 0);
+    } catch {
+      // Non-critical — "seen by" denominators just won't render.
+    }
+  };
+  // Called when the Announcements tab is opened, and after posting/editing
+  // an announcement (so your own new/updated post doesn't inflate your own
+  // badge — you obviously just saw it). Also records a real per-post read
+  // receipt (announcement_reads), not just a personal last-seen timestamp.
+  const markAnnouncementsSeen = async () => {
+    try {
+      await authFetch(`${API}/api/announcements/mark-all-read`, { method: "POST" });
+      setUnreadAnnouncements(0);
+      fetchAnnouncements(); // refresh so "seen by" reflects this read immediately
+    } catch {
+      // Non-critical — badge just won't clear until the next successful call.
     }
   };
   const fetchLocalEvents = async () => {
@@ -1271,6 +1309,7 @@ export default function AdminDashboard() {
       title: "",
       body: "",
       priority: "normal",
+      pinned: false,
       expires_at: "",
     });
   const handleAddAnnouncement = async () => {
@@ -1290,6 +1329,7 @@ export default function AdminDashboard() {
         resetAnnouncementForm();
         setShowAnnouncementModal(false);
         fetchAnnouncements();
+        markAnnouncementsSeen();
       } else showModalMsg(data.error || "Failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1303,6 +1343,7 @@ export default function AdminDashboard() {
       title: a.title || "",
       body: a.body || "",
       priority: a.priority || "normal",
+      pinned: a.pinned || false,
       expires_at: a.expires_at ? a.expires_at.split("T")[0] : "",
     });
     setModalMessage("");
@@ -1325,6 +1366,7 @@ export default function AdminDashboard() {
         setShowEditAnnouncementModal(false);
         setEditingAnnouncement(null);
         fetchAnnouncements();
+        markAnnouncementsSeen();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1427,6 +1469,12 @@ export default function AdminDashboard() {
     }
   };
   const isAdmin = admin?.role === "admin";
+  const PIN_LIMIT = 3;
+  const pinnedCount = announcements.filter((a) => a.pinned).length;
+  // Editing an already-pinned post shouldn't count against its own slot.
+  const editPinnedCount = editingAnnouncement
+    ? announcements.filter((a) => a.pinned && a.id !== editingAnnouncement.id).length
+    : pinnedCount;
   const position = admin?.position;
   const isSecretary = position === "secretary";
   const isClerk = position === "clerk";
@@ -1631,6 +1679,11 @@ export default function AdminDashboard() {
               <Megaphone size={18} strokeWidth={1.5} />
             </span>
             <span className={styles.navLabel}>Announcements</span>
+            {unreadAnnouncements > 0 && (
+              <span className={styles.navBadge}>
+                {unreadAnnouncements > 9 ? "9+" : unreadAnnouncements}
+              </span>
+            )}
           </button>
 
           {/* Councilor Management */}
@@ -1866,6 +1919,7 @@ export default function AdminDashboard() {
             resolutions={resolutions}
             sessionMinutes={sessionMinutes}
             announcements={announcements}
+            unreadAnnouncements={unreadAnnouncements}
             onNavigate={handleTabChange}
             canQuickAdd={isAdmin}
             onAddOrdinance={openOrdinanceModal}
@@ -1958,6 +2012,7 @@ export default function AdminDashboard() {
         {activeTab === "announcements" && !fetchingAnnouncements && (
           <AnnouncementsPage
             announcements={announcements}
+            totalActiveUsers={totalActiveUsers}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditAnnouncement}
             onOpenComposer={openAnnouncementModal}
@@ -4836,9 +4891,9 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <label className={styles.fieldLabel}>Priority Level</label>
+              <label className={styles.fieldLabel}>Priority</label>
               <div className={styles.priorityRow}>
-                {["urgent", "high", "normal", "low"].map((p) => {
+                {["normal", "urgent"].map((p) => {
                   const cfg = priorityConfig[p];
                   return (
                     <button
@@ -4869,6 +4924,38 @@ export default function AdminDashboard() {
                   );
                 })}
               </div>
+              {announcementForm.priority === "urgent" && (
+                <p className={styles.fieldHint} style={{ marginTop: -6, marginBottom: 12 }}>
+                  Emails every other active user as soon as this is posted.
+                </p>
+              )}
+              <label
+                className={styles.fieldLabel}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  cursor: pinnedCount >= PIN_LIMIT && !announcementForm.pinned ? "default" : "pointer",
+                  marginTop: 4,
+                  opacity: pinnedCount >= PIN_LIMIT && !announcementForm.pinned ? 0.55 : 1,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={announcementForm.pinned}
+                  disabled={pinnedCount >= PIN_LIMIT && !announcementForm.pinned}
+                  onChange={(e) =>
+                    setAnnouncementForm({
+                      ...announcementForm,
+                      pinned: e.target.checked,
+                    })
+                  }
+                />{" "}
+                Pin to top of feed ({pinnedCount}/{PIN_LIMIT} pinned)
+              </label>
+              {pinnedCount >= PIN_LIMIT && !announcementForm.pinned && (
+                <p className={styles.fieldHint} style={{ marginTop: 2, marginBottom: 12 }}>
+                  Pin limit reached — unpin something first to free up a slot.
+                </p>
+              )}
               <label className={styles.fieldLabel}>
                 Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
               </label>
@@ -5021,9 +5108,9 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <label className={styles.fieldLabel}>Priority Level</label>
+              <label className={styles.fieldLabel}>Priority</label>
               <div className={styles.priorityRow}>
-                {["urgent", "high", "normal", "low"].map((p) => {
+                {["normal", "urgent"].map((p) => {
                   const cfg = priorityConfig[p];
                   return (
                     <button
@@ -5054,6 +5141,39 @@ export default function AdminDashboard() {
                   );
                 })}
               </div>
+              {editAnnouncementForm.priority === "urgent" &&
+                editingAnnouncement.priority !== "urgent" && (
+                  <p className={styles.fieldHint} style={{ marginTop: -6, marginBottom: 12 }}>
+                    Emails every other active user as soon as this is saved.
+                  </p>
+                )}
+              <label
+                className={styles.fieldLabel}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  cursor: editPinnedCount >= PIN_LIMIT && !editAnnouncementForm.pinned ? "default" : "pointer",
+                  marginTop: 4,
+                  opacity: editPinnedCount >= PIN_LIMIT && !editAnnouncementForm.pinned ? 0.55 : 1,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={editAnnouncementForm.pinned}
+                  disabled={editPinnedCount >= PIN_LIMIT && !editAnnouncementForm.pinned}
+                  onChange={(e) =>
+                    setEditAnnouncementForm({
+                      ...editAnnouncementForm,
+                      pinned: e.target.checked,
+                    })
+                  }
+                />{" "}
+                Pin to top of feed ({editPinnedCount}/{PIN_LIMIT} pinned)
+              </label>
+              {editPinnedCount >= PIN_LIMIT && !editAnnouncementForm.pinned && (
+                <p className={styles.fieldHint} style={{ marginTop: 2, marginBottom: 12 }}>
+                  Pin limit reached — unpin something first to free up a slot.
+                </p>
+              )}
               <label className={styles.fieldLabel}>
                 Announcement Body <span style={{ color: "#e53e3e" }}>*</span>
               </label>

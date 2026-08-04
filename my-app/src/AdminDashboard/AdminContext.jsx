@@ -105,6 +105,9 @@ export const ACTION_COLORS = {
   COMMENT: { bg: "#f3f4f6", color: "#374151" },
 };
 
+// Two states only: "urgent" is the one tier that does something (it emails
+// every other active user — see notifyUrgent in the backend's announcements
+// route), so there's no value in extra severity labels nobody acts on.
 export const priorityConfig = {
   urgent: {
     label: "Urgent",
@@ -112,14 +115,12 @@ export const priorityConfig = {
     bg: "#fff5f5",
     border: "#feb2b2",
   },
-  high: { label: "High", color: "#975a16", bg: "#fffbeb", border: "#f6e05e" },
   normal: {
     label: "Normal",
     color: "#276749",
     bg: "#f0fff4",
     border: "#9ae6b4",
   },
-  low: { label: "Low", color: "#4a5568", bg: "#f7fafc", border: "#cbd5e0" },
 };
 
 export const MONTHS = [

@@ -29,6 +29,18 @@ const formatDate = (dateStr) => {
   });
 };
 
+// For full ISO timestamps (e.g. announcements.created_at) — unlike formatDate
+// above, these already carry a real time/timezone, so appending "T00:00:00"
+// would corrupt the string instead of protecting against a timezone shift.
+const formatTimestamp = (dateStr) => {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
 // ─── Empty State ──────────────────────────────────────────────────────────────
 const EmptyState = ({ icon: Icon, label }) => (
   <div className={styles.dashEmptyState}>
@@ -209,7 +221,7 @@ const AnnouncementCard = ({ post }) => (
         </span>
         <span className={styles.dashCardDate}>
           <Calendar size={11} />
-          {formatDate(post.date_published)}
+          {formatTimestamp(post.created_at)}
         </span>
       </div>
       <h4 className={styles.dashPostTitle}>{post.title}</h4>
@@ -228,11 +240,16 @@ const AnnouncementCard = ({ post }) => (
 );
 
 // ─── Sidebar widget shell ──────────────────────────────────────────────────────
-const DashWidget = ({ icon: Icon, title, children }) => (
+const DashWidget = ({ icon: Icon, title, badge, children }) => (
   <div className={styles.dashWidget}>
     <div className={styles.dashWidgetHeader}>
       <Icon size={14} strokeWidth={2} />
       <span className={styles.dashWidgetTitle}>{title}</span>
+      {badge > 0 && (
+        <span className={styles.dashWidgetBadge}>
+          {badge} new
+        </span>
+      )}
     </div>
     {children}
   </div>
@@ -244,6 +261,7 @@ const DashboardPage = ({
   resolutions = [],
   sessionMinutes = [],
   announcements = [],
+  unreadAnnouncements = 0,
   onNavigate,
   canQuickAdd = false,
   onAddOrdinance,
@@ -460,7 +478,7 @@ const DashboardPage = ({
 
       {/* ── Bottom row: Announcements + Upcoming session, side by side ── */}
       <div className={styles.dashBottomRow}>
-        <DashWidget icon={Megaphone} title="Latest announcements">
+        <DashWidget icon={Megaphone} title="Latest announcements" badge={unreadAnnouncements}>
           {latestAnnouncements.length === 0 ? (
             <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
           ) : (
@@ -470,7 +488,7 @@ const DashboardPage = ({
                   <div className={styles.dashMiniAnnTitle}>{post.title}</div>
                   <div className={styles.dashMiniAnnDate}>
                     <Calendar size={10} />
-                    {formatDate(post.date_published)}
+                    {formatTimestamp(post.created_at)}
                   </div>
                 </div>
               ))}

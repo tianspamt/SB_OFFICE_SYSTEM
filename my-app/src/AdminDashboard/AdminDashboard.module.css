@@ -1484,6 +1484,27 @@
   pointer-events: none;
 }
 
+.navBadge {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: #e53e3e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar.collapsed .navBadge {
+  display: none;
+}
+
 /* Tooltip on collapsed */
 .sidebar.collapsed .navBtn {
   justify-content: center;
@@ -3170,6 +3191,17 @@
   font-size: 13px;
   font-weight: 700;
   color: #1e293b;
+}
+
+.dashWidgetBadge {
+  margin-left: auto;
+  background: #fff5f5;
+  color: #c53030;
+  border: 1px solid #feb2b2;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .dashWidgetEmpty {

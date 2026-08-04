@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Pencil, Trash2, CalendarDays, Megaphone,
   Send, MoreVertical, MessageCircle, ChevronDown, ChevronUp,
-  SmilePlus,
+  SmilePlus, Pin, Eye,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import { API, authFetch, extractErrorMsg, priorityConfig } from "./AdminContext";
@@ -48,31 +48,50 @@ function reactionsMapFor(rows) {
   return map;
 }
 
-// Convert prop announcements → feed posts format
-function announcementsToFeedPosts(announcements) {
-  return announcements.map((a) => ({
-    id: a.id,
-    authorId: a.created_by ?? null,
-    // Legacy rows posted before author tracking was added have no `author`
-    // relation — fall back to a generic "Admin" byline for those only.
-    authorName: a.author?.name || "Admin",
-    authorRole: roleLabelFor(a.author),
-    authorInitials: initialsFor(a.author?.name),
-    authorPhoto: a.author?.photo || null,
-    title: a.title,
-    body: a.body,
-    priority: a.priority,
-    createdAt: a.created_at,
-    expiresAt: a.expires_at,
-    reactions: reactionsMapFor(a.announcement_reactions),
-    // Comments aren't embedded in the announcements list response (the
-    // comments table is a polymorphic entity_type/entity_id pair, not a real
-    // FK Postgres can join on) — fetched lazily per-post on first expand,
-    // same pattern OrdinancesPage/ResolutionsPage/SessionsPage already use.
-    comments: [],
-    commentsLoaded: false,
-    loadingComments: false,
-  }));
+// Builds the "seen by" name list from the flat announcement_reads rows
+// embedded by GET /api/announcements — excludes the post's own author (they
+// obviously know about their own post; showing them adds noise, not signal),
+// matching the same exclusion the urgent-email notification already uses.
+function readByFor(rows, authorId) {
+  return (rows || [])
+    .filter((r) => r.user_id !== authorId)
+    .map((r) => r.reader?.name)
+    .filter(Boolean);
+}
+
+// Convert prop announcements → feed posts format. totalActiveUsers is the
+// denominator for "N/M seen" — also minus the author, for the same reason.
+function announcementsToFeedPosts(announcements, totalActiveUsers = 0) {
+  return announcements.map((a) => {
+    const authorId = a.created_by ?? null;
+    const readBy = readByFor(a.announcement_reads, authorId);
+    return {
+      id: a.id,
+      authorId,
+      // Legacy rows posted before author tracking was added have no `author`
+      // relation — fall back to a generic "Admin" byline for those only.
+      authorName: a.author?.name || "Admin",
+      authorRole: roleLabelFor(a.author),
+      authorInitials: initialsFor(a.author?.name),
+      authorPhoto: a.author?.photo || null,
+      title: a.title,
+      body: a.body,
+      priority: a.priority,
+      pinned: !!a.pinned,
+      createdAt: a.created_at,
+      expiresAt: a.expires_at,
+      reactions: reactionsMapFor(a.announcement_reactions),
+      readBy,
+      possibleReaders: Math.max(0, totalActiveUsers - (authorId ? 1 : 0)),
+      // Comments aren't embedded in the announcements list response (the
+      // comments table is a polymorphic entity_type/entity_id pair, not a
+      // real FK Postgres can join on) — fetched lazily per-post on first
+      // expand, same pattern OrdinancesPage/ResolutionsPage/SessionsPage use.
+      comments: [],
+      commentsLoaded: false,
+      loadingComments: false,
+    };
+  });
 }
 
 // Maps a /api/comments row (author: { name, photo, position, role }) to the
@@ -434,8 +453,9 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
 
   return (
     <div style={{
-      background: "#fff", borderRadius: 14,
+      background: post.pinned ? "#fffdf5" : "#fff", borderRadius: 14,
       border: `1px solid ${isExpired ? "#fed7d7" : "#e2e8f0"}`,
+      borderLeft: post.pinned ? "4px solid #d69e2e" : undefined,
       boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
       padding: "18px 20px",
       opacity: isExpired ? 0.75 : 1,
@@ -451,14 +471,26 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700, fontSize: 14, color: "#1a365d" }}>{post.authorName}</span>
             <RoleBadge role={post.authorRole} />
-            {/* Priority badge */}
-            <span style={{
-              fontSize: 10, fontWeight: 700, letterSpacing: "0.7px", textTransform: "uppercase",
-              padding: "2px 9px", borderRadius: 20,
-              background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
-            }}>
-              {cfg.label}
-            </span>
+            {post.pinned && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 3,
+                fontSize: 10, fontWeight: 700, letterSpacing: "0.7px", textTransform: "uppercase",
+                padding: "2px 9px", borderRadius: 20,
+                background: "#fffbeb", color: "#975a16", border: "1px solid #f6e05e",
+              }}>
+                <Pin size={10} /> Pinned
+              </span>
+            )}
+            {/* Priority badge — only shown for urgent; normal is the silent default */}
+            {post.priority === "urgent" && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: "0.7px", textTransform: "uppercase",
+                padding: "2px 9px", borderRadius: 20,
+                background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+              }}>
+                {cfg.label}
+              </span>
+            )}
             {isExpired && (
               <span style={{
                 fontSize: 10, fontWeight: 700, letterSpacing: "0.7px",
@@ -563,11 +595,21 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
             : "Comment"}
           {showComments ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
-        {totalReactions > 0 && (
-          <span style={{ fontSize: 11, color: "#a0aec0", marginLeft: "auto" }}>
-            {totalReactions} reaction{totalReactions !== 1 ? "s" : ""}
-          </span>
-        )}
+        <span style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+          {totalReactions > 0 && (
+            <span style={{ fontSize: 11, color: "#a0aec0" }}>
+              {totalReactions} reaction{totalReactions !== 1 ? "s" : ""}
+            </span>
+          )}
+          {post.possibleReaders > 0 && (
+            <span
+              title={post.readBy.length > 0 ? `Seen by: ${post.readBy.join(", ")}` : "Not seen by anyone yet"}
+              style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: "#a0aec0" }}
+            >
+              <Eye size={11} /> {post.readBy.length}/{post.possibleReaders} seen
+            </span>
+          )}
+        </span>
       </div>
 
       {/* ── Comment Section ── */}
@@ -626,20 +668,32 @@ function CreateAnnouncementBox({ currentUser, onOpenComposer }) {
 /* ─────────────────────────────────────────────
    MAIN PAGE COMPONENT
 ───────────────────────────────────────────── */
-export default function AnnouncementsPage({ announcements, setDeleteTarget, onEdit, onOpenComposer, onRefresh, readOnly = false, currentUser: currentUserProp }) {
+export default function AnnouncementsPage({ announcements, totalActiveUsers = 0, setDeleteTarget, onEdit, onOpenComposer, onRefresh, readOnly = false, currentUser: currentUserProp }) {
   // Falls back to the mock identity only if no logged-in admin was passed in.
   const currentUser = currentUserProp?.id ? currentUserProp : MOCK_USER;
 
-  // Feed-local state (UI only — wire to Supabase later)
-  const [feedPosts, setFeedPosts] = useState(() => announcementsToFeedPosts(announcements));
+  // Server-sourced fields (reactions, readBy, title, etc.) are derived
+  // directly from props — always in sync, no separate "sync effect" needed.
+  const feedPostsBase = useMemo(
+    () => announcementsToFeedPosts(announcements, totalActiveUsers),
+    [announcements, totalActiveUsers]
+  );
 
-  // Keep feed in sync when prop changes
-  // NOTE: In production, remove this and fetch directly from DB
-  const prevLength = useRef(announcements.length);
-  if (announcements.length !== prevLength.current) {
-    prevLength.current = announcements.length;
-    setFeedPosts(announcementsToFeedPosts(announcements));
-  }
+  // Comments live in their own local state, keyed by post id, because
+  // they're loaded on demand (not embedded in the announcements prop — see
+  // the comment above mapCommentFromApi) and would otherwise get wiped out
+  // every time feedPostsBase re-derives from a refetch.
+  const [commentsById, setCommentsById] = useState({});
+  const EMPTY_COMMENTS = { comments: [], commentsLoaded: false, loadingComments: false };
+  const feedPosts = feedPostsBase.map((p) => ({
+    ...p,
+    ...(commentsById[p.id] || EMPTY_COMMENTS),
+  }));
+  const patchComments = (postId, patch) =>
+    setCommentsById((prev) => ({
+      ...prev,
+      [postId]: { ...EMPTY_COMMENTS, ...prev[postId], ...patch },
+    }));
 
   // ── Feed handlers ──
   // Creation happens entirely through the "+ New Announcement" modal (see
@@ -669,24 +723,16 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
   async function handleExpandComments(postId) {
     const post = feedPosts.find((p) => p.id === postId);
     if (post?.commentsLoaded) return;
-    setFeedPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, loadingComments: true } : p))
-    );
+    patchComments(postId, { loadingComments: true });
     try {
       const res = await authFetch(
         `${API}/api/comments?entity_type=announcement&entity_id=${postId}`
       );
       const data = await res.json();
       const comments = Array.isArray(data) ? data.map(mapCommentFromApi) : [];
-      setFeedPosts((prev) =>
-        prev.map((p) =>
-          p.id === postId ? { ...p, comments, commentsLoaded: true, loadingComments: false } : p
-        )
-      );
+      patchComments(postId, { comments, commentsLoaded: true, loadingComments: false });
     } catch {
-      setFeedPosts((prev) =>
-        prev.map((p) => (p.id === postId ? { ...p, loadingComments: false } : p))
-      );
+      patchComments(postId, { loadingComments: false });
     }
   }
 
@@ -699,13 +745,8 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
       const data = await res.json();
       if (res.ok && data.success) {
         const comment = mapCommentFromApi(data.data);
-        setFeedPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId
-              ? { ...p, comments: [...p.comments, comment], commentsLoaded: true }
-              : p
-          )
-        );
+        const existing = feedPosts.find((p) => p.id === postId)?.comments || [];
+        patchComments(postId, { comments: [...existing, comment], commentsLoaded: true });
         return { success: true };
       }
       return { success: false, error: extractErrorMsg(data, "Failed to add comment.") };
@@ -719,13 +760,8 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
       const res = await authFetch(`${API}/api/comments/${commentId}`, { method: "DELETE" });
       const data = await res.json();
       if (res.ok && data.success) {
-        setFeedPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId
-              ? { ...p, comments: p.comments.filter((c) => c.id !== commentId) }
-              : p
-          )
-        );
+        const existing = feedPosts.find((p) => p.id === postId)?.comments || [];
+        patchComments(postId, { comments: existing.filter((c) => c.id !== commentId) });
         return { success: true };
       }
       return { success: false, error: extractErrorMsg(data, "Failed to delete comment.") };
@@ -743,13 +779,10 @@ export default function AnnouncementsPage({ announcements, setDeleteTarget, onEd
       const data = await res.json();
       if (res.ok && data.success) {
         const comment = mapCommentFromApi(data.data);
-        setFeedPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId
-              ? { ...p, comments: p.comments.map((c) => (c.id === commentId ? comment : c)) }
-              : p
-          )
-        );
+        const existing = feedPosts.find((p) => p.id === postId)?.comments || [];
+        patchComments(postId, {
+          comments: existing.map((c) => (c.id === commentId ? comment : c)),
+        });
         return { success: true };
       }
       return { success: false, error: extractErrorMsg(data, "Failed to update comment.") };
