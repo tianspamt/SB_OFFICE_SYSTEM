@@ -7,20 +7,18 @@ import {
   EyeOff,
   CheckCircle2,
   Clock,
-  ArrowUpRight,
   Pin,
   MoreHorizontal,
   Camera,
 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
-import { COPY } from "./constants";
+import { CATEGORY_LABELS } from "./constants";
 import { formatPostDate } from "./utils";
 import { ImageCarousel } from "./ImageCarousel";
 
 const BADGE_STYLE = {
-  background: "#f0fdf4",
-  color: "#15803d",
-  borderColor: "#bbf7d0",
+  activity: { background: "#f0fdf4", color: "#15803d", borderColor: "#bbf7d0" },
+  announcement: { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" },
 };
 
 export function ContentPostCard({
@@ -30,6 +28,7 @@ export function ContentPostCard({
   onTogglePublish,
   onPin,
   view,
+  readOnly = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -51,7 +50,7 @@ export function ContentPostCard({
     >
       {post.images?.length > 0 && (
         <div className={styles.postImgWrap}>
-          <ImageCarousel images={post.images} />
+          <ImageCarousel images={post.images.map((img) => img.url)} />
           {post.pinned && (
             <span className={styles.pinnedBadge}>
               <Pin size={10} /> Pinned
@@ -70,12 +69,12 @@ export function ContentPostCard({
           <span
             className={styles.catBadge}
             style={{
-              background: BADGE_STYLE.background,
-              color: BADGE_STYLE.color,
-              borderColor: BADGE_STYLE.borderColor,
+              background: (BADGE_STYLE[post.category] || BADGE_STYLE.activity).background,
+              color: (BADGE_STYLE[post.category] || BADGE_STYLE.activity).color,
+              borderColor: (BADGE_STYLE[post.category] || BADGE_STYLE.activity).borderColor,
             }}
           >
-            <Camera size={10} /> {COPY.badgeLabel}
+            <Camera size={10} /> {CATEGORY_LABELS[post.category] || "Activity"}
           </span>
           <div className={styles.postTopRight}>
             <span
@@ -93,6 +92,7 @@ export function ContentPostCard({
                 </>
               )}
             </span>
+            {!readOnly && (
             <div className={styles.menuWrap} ref={menuRef}>
               <button
                 type="button"
@@ -151,27 +151,21 @@ export function ContentPostCard({
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
         <h3 className={styles.postTitle}>{post.title}</h3>
 
-        {post.caption && <p className={styles.postCaption}>{post.caption}</p>}
+        {post.body && <p className={styles.postCaption}>{post.body}</p>}
 
         <div className={styles.postFooter}>
           <span className={styles.postDate}>
             <Calendar size={11} /> {formatPostDate(post.created_at)}
           </span>
-          {post.published && (
-            <a
-              className={styles.viewLiveBtn}
-              href="#"
-              target="_blank"
-              rel="noreferrer"
-            >
-              View live <ArrowUpRight size={11} />
-            </a>
-          )}
+          {/* "View live" removed — there's no public site wired up yet to
+              link to (see the Content Management critique); a fake link
+              that goes nowhere is worse than no link. */}
         </div>
       </div>
     </div>

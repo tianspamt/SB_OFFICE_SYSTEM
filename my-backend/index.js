@@ -19,6 +19,9 @@ const announcementRoutes  = require('./routes/announcements')
 const calendarEventRoutes = require('./routes/calendarEvents')
 const archiveRoutes       = require('./routes/archives')
 const commentRoutes       = require('./routes/comments')
+const contentPostRoutes   = require('./routes/contentPosts')
+const triviaRoutes        = require('./routes/trivia')
+const scheduleRoutes      = require('./routes/schedules')
 
 const app = express()
 
@@ -32,7 +35,7 @@ app.use(cors({
     'https://your-app-name.vercel.app',
     /\.vercel\.app$/,
   ],
-  methods: ['GET', 'POST', 'DELETE', 'PUT', 'OPTIONS'],
+  methods: ['GET', 'POST', 'DELETE', 'PUT', 'PATCH', 'OPTIONS'],
   credentials: true
 }))
 
@@ -56,6 +59,9 @@ app.use('/api/announcements', announcementRoutes)
 app.use('/api/calendar-events', calendarEventRoutes)
 app.use('/api/archives', archiveRoutes)
 app.use('/api/comments', commentRoutes)
+app.use('/api/content-posts', contentPostRoutes)
+app.use('/api/trivia', triviaRoutes)
+app.use('/api/schedules', scheduleRoutes)
 
 // ---- GLOBAL ERROR HANDLER ----
 app.use((err, req, res, next) => {

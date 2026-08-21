@@ -3,6 +3,11 @@ import { Upload, X } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
 import { MAX_IMAGES_PER_POST } from "./constants";
 
+// Each entry in `images` is either:
+//   { isNew: true, file, preview }   — a freshly picked file, not uploaded yet
+//   { isNew: false, url, path }      — an already-stored image (kept as-is
+//                                      unless removed; on removal the parent
+//                                      deletes it from Storage on save)
 export function ImageUploadArea({ images, setImages }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -11,22 +16,21 @@ export function ImageUploadArea({ images, setImages }) {
     const valid = Array.from(files)
       .filter((f) => f.type.startsWith("image/"))
       .slice(0, MAX_IMAGES_PER_POST - images.length);
-    const readers = valid.map(
-      (file) =>
-        new Promise((res) => {
-          const r = new FileReader();
-          r.onload = (e) =>
-            res({ preview: e.target.result, file, name: file.name });
-          r.readAsDataURL(file);
-        })
-    );
-    Promise.all(readers).then((newImgs) =>
-      setImages((prev) => [...prev, ...newImgs].slice(0, MAX_IMAGES_PER_POST))
-    );
+    const newEntries = valid.map((file) => ({
+      isNew: true,
+      file,
+      preview: URL.createObjectURL(file),
+    }));
+    setImages((prev) => [...prev, ...newEntries].slice(0, MAX_IMAGES_PER_POST));
   };
 
-  const removeImage = (idx) =>
-    setImages((prev) => prev.filter((_, i) => i !== idx));
+  const removeImage = (idx) => {
+    setImages((prev) => {
+      const target = prev[idx];
+      if (target?.isNew && target.preview) URL.revokeObjectURL(target.preview);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
 
   return (
     <div className={styles.uploadSection}>
@@ -65,7 +69,7 @@ export function ImageUploadArea({ images, setImages }) {
         <div className={styles.imageGrid}>
           {images.map((img, i) => (
             <div key={i} className={styles.imageThumb}>
-              <img src={img.preview || img} alt={`upload-${i}`} />
+              <img src={img.isNew ? img.preview : img.url} alt={`upload-${i}`} />
               <button
                 type="button"
                 className={styles.removeImg}

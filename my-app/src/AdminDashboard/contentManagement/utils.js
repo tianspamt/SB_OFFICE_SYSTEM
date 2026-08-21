@@ -1,5 +1,3 @@
-import { DEFAULT_POST_CATEGORY } from "./constants";
-
 export function formatPostDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-PH", {
@@ -9,26 +7,19 @@ export function formatPostDate(iso) {
   });
 }
 
-/** Ensure API payload always includes category for older backends. */
-export function toApiPayload(form) {
-  return {
-    ...form,
-    category: form.category || DEFAULT_POST_CATEGORY,
-  };
-}
-
-export function filterPosts(posts, { search, filterStatus }) {
+export function filterPosts(posts, { search, filterStatus, filterCategory = "all" }) {
   const q = search.trim().toLowerCase();
   return posts.filter((p) => {
     const matchStatus =
       filterStatus === "all" ||
       (filterStatus === "published" && p.published) ||
       (filterStatus === "draft" && !p.published);
+    const matchCategory = filterCategory === "all" || p.category === filterCategory;
     const matchSearch =
       !q ||
       (p.title && p.title.toLowerCase().includes(q)) ||
-      (p.caption && p.caption.toLowerCase().includes(q));
-    return matchStatus && matchSearch;
+      (p.body && p.body.toLowerCase().includes(q));
+    return matchStatus && matchCategory && matchSearch;
   });
 }
 

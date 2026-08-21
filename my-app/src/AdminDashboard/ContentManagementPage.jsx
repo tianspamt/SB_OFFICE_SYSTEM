@@ -9,17 +9,30 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  Sparkles,
+  Newspaper,
+  CalendarDays,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
-import { COPY } from "./contentManagement/constants";
+import { COPY, CATEGORY_OPTIONS } from "./contentManagement/constants";
 import { ContentEmptyState } from "./contentManagement/ContentEmptyState";
 import { ContentPostCard } from "./contentManagement/ContentPostCard";
 import { ContentPostModal } from "./contentManagement/ContentPostModal";
 import { DeleteContentPostModal } from "./contentManagement/DeleteContentPostModal";
+import { TriviaManager } from "./contentManagement/TriviaManager";
+import { ScheduleManager } from "./contentManagement/ScheduleManager";
 import { useContentPosts } from "./contentManagement/useContentPosts";
 import { filterPosts, sortPostsPinnedThenNewest } from "./contentManagement/utils";
 
-export default function ContentManagementPage() {
+const SECTIONS = [
+  { value: "posts", label: "Posts", icon: Newspaper },
+  { value: "trivia", label: "Trivia", icon: Sparkles },
+  { value: "schedules", label: "Schedules", icon: CalendarDays },
+];
+
+export default function ContentManagementPage({ isAdmin = false }) {
+  const [section, setSection] = useState("posts");
+
   const {
     posts,
     loading,
@@ -33,6 +46,7 @@ export default function ContentManagementPage() {
   const [view, setView] = useState("grid");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -40,14 +54,21 @@ export default function ContentManagementPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [modalError, setModalError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [message, setMessage] = useState("");
 
   const sorted = useMemo(() => {
-    const filtered = filterPosts(posts, { search, filterStatus });
+    const filtered = filterPosts(posts, { search, filterStatus, filterCategory });
     return sortPostsPinnedThenNewest(filtered);
-  }, [posts, search, filterStatus]);
+  }, [posts, search, filterStatus, filterCategory]);
 
   const publishedCount = posts.filter((p) => p.published).length;
   const draftCount = posts.filter((p) => !p.published).length;
+
+  const showMsg = (msg) => {
+    setMessage(msg);
+    setTimeout(() => setMessage(""), 3500);
+  };
 
   const handleSave = async (formData) => {
     setSaving(true);
@@ -66,18 +87,60 @@ export default function ContentManagementPage() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError("");
     try {
       await deletePost(deleteTarget);
       setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err.message || "Failed to delete post.");
     } finally {
       setDeleting(false);
     }
   };
 
-  const isFiltered = search.trim() !== "" || filterStatus !== "all";
+  // togglePublish/togglePin roll their own optimistic state back on failure
+  // (see useContentPosts) — this just surfaces why, instead of leaving the
+  // UI silently snap back with no explanation.
+  const handleTogglePublish = async (id) => {
+    try {
+      await togglePublish(id);
+    } catch (err) {
+      showMsg(err.message || "Failed to update post.");
+    }
+  };
+  const handleTogglePin = async (id) => {
+    try {
+      await togglePin(id);
+    } catch (err) {
+      showMsg(err.message || "Failed to update post.");
+    }
+  };
+
+  const isFiltered =
+    search.trim() !== "" || filterStatus !== "all" || filterCategory !== "all";
 
   return (
     <div className={styles.page}>
+      <div className={styles.viewToggle} style={{ marginBottom: 16, width: "fit-content" }}>
+        {SECTIONS.map((s) => (
+          <button
+            key={s.value}
+            type="button"
+            className={`${styles.viewBtn} ${section === s.value ? styles.viewBtnActive : ""}`}
+            style={{ width: "auto", padding: "6px 14px", gap: 6, display: "inline-flex", alignItems: "center" }}
+            onClick={() => setSection(s.value)}
+          >
+            <s.icon size={14} /> {s.label}
+          </button>
+        ))}
+      </div>
+
+      {section === "trivia" ? (
+        <TriviaManager isAdmin={isAdmin} />
+      ) : section === "schedules" ? (
+        <ScheduleManager isAdmin={isAdmin} />
+      ) : (
+      <>
       <p
         style={{
           fontSize: 14,
@@ -89,6 +152,12 @@ export default function ContentManagementPage() {
       >
         {COPY.pagePurpose}
       </p>
+
+      {message && (
+        <div className={styles.fetchError}>
+          <AlertCircle size={14} /> {message}
+        </div>
+      )}
 
       <div className={styles.topBar}>
         <div className={styles.topBarLeft}>
@@ -109,16 +178,18 @@ export default function ContentManagementPage() {
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          className={styles.addBtn}
-          onClick={() => {
-            setModalError("");
-            setShowAddModal(true);
-          }}
-        >
-          <PlusCircle size={16} /> {COPY.newPost}
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            className={styles.addBtn}
+            onClick={() => {
+              setModalError("");
+              setShowAddModal(true);
+            }}
+          >
+            <PlusCircle size={16} /> {COPY.newPost}
+          </button>
+        )}
       </div>
 
       <div className={styles.filtersBar}>
@@ -142,6 +213,18 @@ export default function ContentManagementPage() {
         </div>
 
         <div className={styles.rightControls}>
+          <select
+            className={styles.statusSelect}
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="all">All categories</option>
+            {CATEGORY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <select
             className={styles.statusSelect}
             value={filterStatus}
@@ -201,13 +284,17 @@ export default function ContentManagementPage() {
               key={post.id}
               post={post}
               view={view}
+              readOnly={!isAdmin}
               onEdit={(p) => {
                 setModalError("");
                 setEditTarget(p);
               }}
-              onDelete={setDeleteTarget}
-              onTogglePublish={togglePublish}
-              onPin={togglePin}
+              onDelete={(p) => {
+                setDeleteError("");
+                setDeleteTarget(p);
+              }}
+              onTogglePublish={handleTogglePublish}
+              onPin={handleTogglePin}
             />
           ))}
         </div>
@@ -233,7 +320,10 @@ export default function ContentManagementPage() {
           onCancel={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
           deleting={deleting}
+          error={deleteError}
         />
+      )}
+      </>
       )}
     </div>
   );

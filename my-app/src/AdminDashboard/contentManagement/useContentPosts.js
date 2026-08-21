@@ -1,45 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { API, authFetch } from "../AdminContext";
-import { DEFAULT_POST_CATEGORY } from "./constants";
-import { toApiPayload } from "./utils";
-
-function demoPosts() {
-  const now = Date.now();
-  return [
-    {
-      id: 1,
-      title: "Coastal cleanup — Earth Day 2026",
-      category: DEFAULT_POST_CATEGORY,
-      caption:
-        "SB members joined youth volunteers for a coastal cleanup. Photos for documentation and transparency.",
-      images: [],
-      published: true,
-      pinned: true,
-      created_at: new Date(now).toISOString(),
-    },
-    {
-      id: 2,
-      title: "Budget consultation — barangay hall",
-      category: DEFAULT_POST_CATEGORY,
-      caption:
-        "Public hearing on the annual investment plan. Community stakeholders shared priorities.",
-      images: [],
-      published: true,
-      pinned: false,
-      created_at: new Date(now - 86400000 * 2).toISOString(),
-    },
-    {
-      id: 3,
-      title: "Draft: Flag ceremony highlights",
-      category: DEFAULT_POST_CATEGORY,
-      caption: "Photos from Monday flag raising—pending final caption.",
-      images: [],
-      published: false,
-      pinned: false,
-      created_at: new Date(now - 86400000 * 5).toISOString(),
-    },
-  ];
-}
+import { API, authFetch, extractErrorMsg } from "../AdminContext";
 
 export function useContentPosts() {
   const [posts, setPosts] = useState([]);
@@ -51,12 +11,12 @@ export function useContentPosts() {
     setFetchError("");
     try {
       const res = await authFetch(`${API}/api/content-posts`);
-      if (!res.ok) throw new Error("Request failed");
       const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load posts."));
       setPosts(Array.isArray(data) ? data : []);
-    } catch {
-      setFetchError("Failed to load posts. Please refresh.");
-      setPosts(demoPosts());
+    } catch (err) {
+      setFetchError(err.message || "Failed to load posts. Please refresh.");
+      setPosts([]);
     } finally {
       setLoading(false);
     }
@@ -66,82 +26,78 @@ export function useContentPosts() {
     fetchPosts();
   }, [fetchPosts]);
 
-  const savePost = useCallback(async (editTarget, rawForm) => {
-    const formData = toApiPayload(rawForm);
+  // `formData` is a ready-to-send FormData built by ContentPostModal (title,
+  // body, category, published, pinned, existingImages, and any new image
+  // files) — passed straight through rather than re-serialized here.
+  const savePost = useCallback(async (editTarget, formData) => {
     if (editTarget) {
-      const res = await authFetch(
-        `${API}/api/content-posts/${editTarget.id}`,
-        {
-          method: "PUT",
-          body: JSON.stringify(formData),
-        }
-      );
-      if (!res.ok) throw new Error("Failed to update post.");
-      const updated = await res.json();
-      setPosts((prev) =>
-        prev.map((p) => (p.id === editTarget.id ? updated : p))
-      );
+      const res = await authFetch(`${API}/api/content-posts/${editTarget.id}`, {
+        method: "PUT",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to update post."));
+      setPosts((prev) => prev.map((p) => (p.id === editTarget.id ? data : p)));
     } else {
       const res = await authFetch(`${API}/api/content-posts`, {
         method: "POST",
-        body: JSON.stringify(formData),
+        body: formData,
       });
-      if (!res.ok) throw new Error("Failed to create post.");
-      const created = await res.json();
-      setPosts((prev) => [created, ...prev]);
+      const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to create post."));
+      setPosts((prev) => [data, ...prev]);
     }
   }, []);
 
   const deletePost = useCallback(async (post) => {
-    try {
-      await authFetch(`${API}/api/content-posts/${post.id}`, {
-        method: "DELETE",
-      });
-    } catch {
-      /* offline / demo: still drop locally */
-    }
+    const res = await authFetch(`${API}/api/content-posts/${post.id}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to delete post."));
     setPosts((prev) => prev.filter((p) => p.id !== post.id));
   }, []);
 
+  // Optimistic, but rolled back on failure — previously these silently kept
+  // the optimistic state even when the network call failed, so clicking
+  // "Publish" could look like it worked while nothing changed server-side.
   const togglePublish = useCallback(async (id) => {
-    let published;
-    setPosts((prev) => {
-      const post = prev.find((p) => p.id === id);
-      if (!post) return prev;
-      published = !post.published;
-      return prev.map((p) =>
-        p.id === id ? { ...p, published } : p
-      );
-    });
-    if (published === undefined) return;
+    const prevPost = posts.find((p) => p.id === id);
+    if (!prevPost) return;
+    const published = !prevPost.published;
+    setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, published } : p)));
     try {
-      await authFetch(`${API}/api/content-posts/${id}`, {
+      const res = await authFetch(`${API}/api/content-posts/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ published }),
       });
-    } catch {
-      /* keep optimistic state */
+      const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to update post."));
+      setPosts((prev) => prev.map((p) => (p.id === id ? data : p)));
+    } catch (err) {
+      setPosts((prev) => prev.map((p) => (p.id === id ? prevPost : p)));
+      throw err;
     }
-  }, []);
+  }, [posts]);
 
   const togglePin = useCallback(async (id) => {
-    let pinned;
-    setPosts((prev) => {
-      const post = prev.find((p) => p.id === id);
-      if (!post) return prev;
-      pinned = !post.pinned;
-      return prev.map((p) => (p.id === id ? { ...p, pinned } : p));
-    });
-    if (pinned === undefined) return;
+    const prevPost = posts.find((p) => p.id === id);
+    if (!prevPost) return;
+    const pinned = !prevPost.pinned;
+    setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, pinned } : p)));
     try {
-      await authFetch(`${API}/api/content-posts/${id}`, {
+      const res = await authFetch(`${API}/api/content-posts/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ pinned }),
       });
-    } catch {
-      /* keep optimistic state */
+      const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to update post."));
+      setPosts((prev) => prev.map((p) => (p.id === id ? data : p)));
+    } catch (err) {
+      setPosts((prev) => prev.map((p) => (p.id === id ? prevPost : p)));
+      throw err;
     }
-  }, []);
+  }, [posts]);
 
   return {
     posts,

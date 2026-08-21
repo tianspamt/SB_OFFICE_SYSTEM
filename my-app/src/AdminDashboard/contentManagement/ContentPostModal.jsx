@@ -9,7 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
-import { COPY, DEFAULT_POST_CATEGORY } from "./constants";
+import { COPY, CATEGORY_OPTIONS, DEFAULT_POST_CATEGORY } from "./constants";
 import { ImageUploadArea } from "./ImageUploadArea";
 
 const emptyForm = {
@@ -31,21 +31,32 @@ export function ContentPostModal({
   const [form, setForm] = useState(() => ({
     ...emptyForm,
     ...initial,
+    caption: initial?.body ?? initial?.caption ?? "",
     category: initial?.category || DEFAULT_POST_CATEGORY,
   }));
   const [images, setImages] = useState(
-    initial?.images ? initial.images.map((url) => ({ preview: url })) : []
+    () =>
+      initial?.images?.map((img) => ({ isNew: false, url: img.url, path: img.path })) ||
+      []
   );
 
   const handleSave = () => {
-    onSave({
-      title: form.title.trim(),
-      caption: form.caption.trim(),
-      published: form.published,
-      pinned: form.pinned,
-      category: DEFAULT_POST_CATEGORY,
-      images: images.map((img) => img.preview || img),
-    });
+    // FormData, not JSON — new images ride along as real files (see
+    // ImageUploadArea), and existingImages tells the server which
+    // already-uploaded images to keep vs. delete from Storage.
+    const fd = new FormData();
+    fd.append("title", form.title.trim());
+    fd.append("body", form.caption.trim());
+    fd.append("category", form.category);
+    fd.append("published", form.published);
+    fd.append("pinned", form.pinned);
+    fd.append(
+      "existingImages",
+      JSON.stringify(images.filter((img) => !img.isNew).map(({ url, path }) => ({ url, path })))
+    );
+    images.filter((img) => img.isNew).forEach((img) => fd.append("images", img.file));
+
+    onSave(fd);
   };
 
   return (
@@ -79,6 +90,22 @@ export function ContentPostModal({
           >
             {COPY.pagePurpose}
           </p>
+
+          <label className={styles.fieldLabel}>{COPY.categoryLabel}</label>
+          <div className={styles.priorityRow}>
+            {CATEGORY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`${styles.priorityBtn} ${
+                  form.category === opt.value ? styles.priorityBtnActive : ""
+                }`}
+                onClick={() => setForm({ ...form, category: opt.value })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
           <label className={styles.fieldLabel}>
             {COPY.titleLabel} <span className={styles.required}>*</span>
