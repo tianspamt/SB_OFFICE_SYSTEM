@@ -22,6 +22,7 @@ const commentRoutes       = require('./routes/comments')
 const contentPostRoutes   = require('./routes/contentPosts')
 const triviaRoutes        = require('./routes/trivia')
 const scheduleRoutes      = require('./routes/schedules')
+const holidayRoutes       = require('./routes/holidays')
 
 const app = express()
 
@@ -62,6 +63,7 @@ app.use('/api/comments', commentRoutes)
 app.use('/api/content-posts', contentPostRoutes)
 app.use('/api/trivia', triviaRoutes)
 app.use('/api/schedules', scheduleRoutes)
+app.use('/api/holidays', holidayRoutes)
 
 // ---- GLOBAL ERROR HANDLER ----
 app.use((err, req, res, next) => {

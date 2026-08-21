@@ -3,8 +3,6 @@ import {
   Filter,
   RotateCcw,
   Trash2,
-  AlertCircle,
-  X,
   FileText,
   Gavel,
   BookOpen,
@@ -13,6 +11,8 @@ import {
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import ConfirmModal from "./ConfirmModal";
+import { ToastContainer } from "./Toast";
+import { useToasts } from "./useToasts";
 import { API, authFetch } from "./AdminContext";
 
 const MODULE_OPTIONS = [
@@ -52,14 +52,7 @@ export default function ArchivesPage() {
   const [moduleFilter, setModuleFilter] = useState("all");
   const [confirmTarget, setConfirmTarget] = useState(null); // { row, action: "restore" | "delete" }
   const [processing, setProcessing] = useState(false);
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("success");
-
-  const showMsg = (msg, type = "success") => {
-    setMessage(msg);
-    setMessageType(type);
-    setTimeout(() => setMessage(""), 3500);
-  };
+  const { toasts, showMsg, dismissToast } = useToasts();
 
   const fetchArchives = async () => {
     setLoading(true);
@@ -115,14 +108,7 @@ export default function ArchivesPage() {
 
   return (
     <>
-      {message && (
-        <div className={`${styles.message} ${messageType === "error" ? styles.messageError : ""}`}>
-          <AlertCircle size={14} /> {message}
-          <button className={styles.closeMsg} onClick={() => setMessage("")}>
-            <X size={13} />
-          </button>
-        </div>
-      )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       <div className={styles.searchFilterBar}>
         <div className={styles.filterGroup}>

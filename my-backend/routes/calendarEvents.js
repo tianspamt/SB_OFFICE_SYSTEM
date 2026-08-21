@@ -3,12 +3,24 @@ const router = express.Router();
 const supabase = require('../config/supabase'); // adjust if filename differs
 const { verifyToken } = require('../middleware/auth');
 
+// start_date/end_date are ISO "YYYY-MM-DD" strings, so plain string
+// comparison already sorts chronologically — no need to parse into Date
+// objects. Also catches the same-day case where the event still "ends
+// before it starts" by time, when it's not an all-day event.
+const validateEventRange = ({ start_date, end_date, start_time, end_time, all_day }) => {
+  const effectiveEnd = end_date || start_date;
+  if (effectiveEnd < start_date) return 'End date cannot be before the start date.';
+  if (effectiveEnd === start_date && !all_day && start_time && end_time && end_time < start_time) {
+    return 'End time cannot be before the start time.';
+  }
+  return null;
+};
+
 // GET /api/calendar-events
 // GET /api/calendar-events
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
 
     let query = supabase.from('calendar_events').select('*');
 
@@ -33,6 +45,8 @@ router.post('/', verifyToken, async (req, res) => {
     if (!title || !start_date) {
       return res.status(400).json({ error: 'Title and start date are required' });
     }
+    const rangeError = validateEventRange({ start_date, end_date, start_time, end_time, all_day });
+    if (rangeError) return res.status(400).json({ error: rangeError });
 
     const { data, error } = await supabase
       .from('calendar_events')
@@ -74,11 +88,20 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Event not found' });
 
-    if (userRole !== 'admin' && (existing.is_admin_event || existing.created_by !== userId)) {
+    // Write scope matches read scope exactly: an official event can only be
+    // touched by an admin; a personal event can only be touched by the
+    // person who created it — no admin override on someone else's personal
+    // reminder, since admins can't even see other people's personal events
+    // through GET in the first place.
+    if (existing.is_admin_event) {
+      if (userRole !== 'admin') return res.status(403).json({ error: 'You cannot edit this event' });
+    } else if (existing.created_by !== userId) {
       return res.status(403).json({ error: 'You cannot edit this event' });
     }
 
     const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body;
+    const rangeError = validateEventRange({ start_date, end_date, start_time, end_time, all_day });
+    if (rangeError) return res.status(400).json({ error: rangeError });
 
     const { data, error } = await supabase
       .from('calendar_events')
@@ -119,7 +142,10 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Event not found' });
 
-    if (userRole !== 'admin' && (existing.is_admin_event || existing.created_by !== userId)) {
+    // Same write-matches-read scoping as PUT above.
+    if (existing.is_admin_event) {
+      if (userRole !== 'admin') return res.status(403).json({ error: 'You cannot delete this event' });
+    } else if (existing.created_by !== userId) {
       return res.status(403).json({ error: 'You cannot delete this event' });
     }
 

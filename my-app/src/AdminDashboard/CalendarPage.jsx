@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, PlusCircle, Clock, MapPin, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, PlusCircle, Clock, MapPin, Pencil, Trash2, AlertCircle } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
+import ConfirmModal from "./ConfirmModal";
 import { toIsoDate, toLocalIso, getLocalHolidays } from "./AdminContext";
 
 export default function CalendarPage({
-  localEvents, phHolidays, fetchingHolidays,
+  localEvents, phHolidays, fetchingHolidays, holidaysError,
   showHolidays, setShowHolidays,
   onAddEvent, onEditEvent, onDeleteEvent,
   isAdmin = false, currentUser = null,
@@ -13,6 +14,7 @@ export default function CalendarPage({
   const [selectedCalDay, setSelectedCalDay] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showEventDetailModal, setShowEventDetailModal] = useState(false);
+  const [deleteEventTarget, setDeleteEventTarget] = useState(null);
 
   const year = calendarViewDate.getFullYear();
   const month = calendarViewDate.getMonth();
@@ -150,6 +152,11 @@ export default function CalendarPage({
             </span>
           ))}
           {fetchingHolidays && <span style={{ color: "#94a3b8", fontSize: 11 }}>Loading holidays...</span>}
+          {holidaysError && !fetchingHolidays && (
+            <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#c53030", fontSize: 11 }}>
+              <AlertCircle size={12} /> {holidaysError}
+            </span>
+          )}
         </div>
       )}
 
@@ -273,12 +280,12 @@ export default function CalendarPage({
 
               {/* Fixed footer */}
               <div className={styles.modalBtns} style={{ flexShrink: 0, marginTop: 12 }}>
-                {ev.isLocal && (isAdmin || ev.raw?.created_by === currentUser?.id) && (
+                {ev.isLocal && (ev.isAdminEvent ? isAdmin : ev.raw?.created_by === currentUser?.id) && (
   <>
     <button className={styles.editBtn} onClick={() => { setShowEventDetailModal(false); onEditEvent(ev); }}>
       <Pencil size={13} /> Edit
     </button>
-    <button className={styles.deleteBtn} onClick={() => { if (window.confirm("Delete this event?")) { onDeleteEvent(ev.dbId); setShowEventDetailModal(false); } }}>
+    <button className={styles.deleteBtn} onClick={() => setDeleteEventTarget(ev)}>
       <Trash2 size={13} /> Delete
     </button>
   </>
@@ -290,6 +297,21 @@ export default function CalendarPage({
           </div>
         );
       })()}
+
+      {deleteEventTarget && (
+        <ConfirmModal
+          type="delete"
+          title="Delete this event?"
+          message={`"${deleteEventTarget.summary}" will be permanently removed. This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={() => {
+            onDeleteEvent(deleteEventTarget.dbId);
+            setDeleteEventTarget(null);
+            setShowEventDetailModal(false);
+          }}
+          onCancel={() => setDeleteEventTarget(null)}
+        />
+      )}
     </div>
   );
 }

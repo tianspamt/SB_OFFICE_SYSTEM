@@ -12,7 +12,7 @@ import styles from "../AdminDashboard.module.css";
 import ConfirmModal from "../ConfirmModal";
 import { useTrivia } from "./useTrivia";
 
-export function TriviaManager({ isAdmin = false }) {
+export function TriviaManager({ isAdmin = false, showMsg }) {
   const { facts, loading, fetchError, saveFact, deleteFact, toggleActive } = useTrivia();
 
   const [showModal, setShowModal] = useState(false);
@@ -23,12 +23,6 @@ export function TriviaManager({ isAdmin = false }) {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-
-  const [message, setMessage] = useState("");
-  const showMsg = (msg) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(""), 3500);
-  };
 
   const openAdd = () => {
     setEditTarget(null);
@@ -55,6 +49,7 @@ export function TriviaManager({ isAdmin = false }) {
         fact_text: factText.trim(),
         is_active: editTarget ? editTarget.is_active : true,
       });
+      showMsg?.(editTarget ? "Trivia fact updated!" : "Trivia fact added!");
       setShowModal(false);
     } catch (err) {
       setModalError(err.message || "Something went wrong.");
@@ -67,9 +62,10 @@ export function TriviaManager({ isAdmin = false }) {
     setDeleting(true);
     try {
       await deleteFact(deleteTarget);
+      showMsg?.("Trivia fact deleted!");
       setDeleteTarget(null);
     } catch (err) {
-      showMsg(err.message || "Failed to delete trivia fact.");
+      showMsg?.(err.message || "Failed to delete trivia fact.", "error");
     } finally {
       setDeleting(false);
     }
@@ -79,7 +75,7 @@ export function TriviaManager({ isAdmin = false }) {
     try {
       await toggleActive(id);
     } catch (err) {
-      showMsg(err.message || "Failed to update trivia fact.");
+      showMsg?.(err.message || "Failed to update trivia fact.", "error");
     }
   };
 
@@ -97,12 +93,6 @@ export function TriviaManager({ isAdmin = false }) {
         Rotating legislative facts shown on the public site's homepage.
         Inactive facts stay saved but won't appear there.
       </p>
-
-      {message && (
-        <div className={styles.fetchError}>
-          <AlertCircle size={14} /> {message}
-        </div>
-      )}
 
       {isAdmin && (
         <button

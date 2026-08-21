@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import PendingRecordsWidget from "./PendingRecordsWidget";
+import { ToastContainer } from "./Toast";
+import { useToasts } from "./useToasts";
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
@@ -273,6 +275,7 @@ const DashboardPage = ({
   isClerk = false,
 }) => {
   const [activityTab, setActivityTab] = useState("ordinances");
+  const { toasts, showMsg, dismissToast } = useToasts();
 
   const latestOrdinances = ordinances.slice(0, 6);
   const latestResolutions = resolutions.slice(0, 6);
@@ -470,6 +473,7 @@ const DashboardPage = ({
               isSecretary={isSecretary}
               isClerk={isClerk}
               onNavigate={onNavigate}
+              showMsg={showMsg}
               style={{ flex: 1, minHeight: 0 }}
             />
           )}
@@ -531,6 +535,7 @@ const DashboardPage = ({
           )}
         </DashWidget>
       </div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 };

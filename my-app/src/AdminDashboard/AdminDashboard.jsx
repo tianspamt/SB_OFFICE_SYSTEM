@@ -8,7 +8,6 @@ import {
   Landmark,
   X,
   LogOut,
-  AlertCircle,
   BookOpen,
   Gavel,
   Megaphone,
@@ -34,6 +33,8 @@ import {
   Archive,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
+import { ToastContainer } from "./Toast";
+import { useToasts } from "./useToasts";
 import {
   API,
   authFetch,
@@ -92,8 +93,10 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [admin, setAdmin] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("success");
+  // Floating success/error toasts for routine action confirmations (save,
+  // delete, publish, etc.) — non-blocking, unlike modalMessage below which
+  // stays anchored inside an open modal for validation feedback.
+  const { toasts, showMsg, dismissToast } = useToasts();
   const [modalMessage, setModalMessage] = useState("");
   const [modalMessageType, setModalMessageType] = useState("success");
   const [submitting, setSubmitting] = useState(false);
@@ -111,6 +114,7 @@ export default function AdminDashboard() {
   const [phHolidays, setPhHolidays] = useState({});
   const [fetchingHolidays, setFetchingHolidays] = useState(false);
   const [showHolidays, setShowHolidays] = useState(true);
+  const [holidaysError, setHolidaysError] = useState("");
 
   // ── loading flags ──
   const [fetchingUsers, setFetchingUsers] = useState(false);
@@ -360,11 +364,6 @@ export default function AdminDashboard() {
   }, [logModuleFilter, logActionFilter]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
-  const showMsg = (msg, type = "success") => {
-    setMessage(msg);
-    setMessageType(type);
-    setTimeout(() => setMessage(""), 3500);
-  };
   const showModalMsg = (msg, type = "success") => {
     setModalMessage(msg);
     setModalMessageType(type);
@@ -458,8 +457,12 @@ export default function AdminDashboard() {
       setFetchingMinutes(false);
     }
   };
-  const fetchAnnouncements = async () => {
-    setFetchingAnnouncements(true);
+  // `silent` skips the fetchingAnnouncements toggle — used for background
+  // refreshes (after marking read, after posting/editing) so the tab doesn't
+  // unmount/remount and flash every time it's reopened. Only the true first
+  // load on mount shows the loading state.
+  const fetchAnnouncements = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingAnnouncements(true);
     try {
       // GET /api/announcements now embeds per-reader names — it's
       // auth-gated, so this must be authFetch, not a plain fetch.
@@ -468,7 +471,7 @@ export default function AdminDashboard() {
     } catch {
       setAnnouncements([]);
     } finally {
-      setFetchingAnnouncements(false);
+      if (!silent) setFetchingAnnouncements(false);
     }
   };
   const fetchUnreadAnnouncements = async () => {
@@ -495,9 +498,13 @@ export default function AdminDashboard() {
     try {
       await authFetch(`${API}/api/announcements/mark-all-read`, { method: "POST" });
       setUnreadAnnouncements(0);
-      fetchAnnouncements(); // refresh so "seen by" reflects this read immediately
     } catch {
       // Non-critical — badge just won't clear until the next successful call.
+    } finally {
+      // Refetch regardless of whether marking-read succeeded — callers rely
+      // on this to pick up a just-posted/edited announcement, so a flaky
+      // mark-all-read call must not also skip refreshing the list.
+      fetchAnnouncements({ silent: true });
     }
   };
   const fetchLocalEvents = async () => {
@@ -536,11 +543,15 @@ export default function AdminDashboard() {
   const fetchPHHolidays = async (year) => {
     if (phHolidays[year]) return;
     setFetchingHolidays(true);
+    setHolidaysError("");
     try {
-      const res = await fetch(
-        `https://date.nager.at/api/v3/PublicHolidays/${year}/PH`
-      );
+      // Routed through our own backend (routes/holidays.js), which caches
+      // the upstream response for 24h — the data is identical for every
+      // user and barely ever changes, so there's no reason for each
+      // browser to hit the third-party API independently every session.
+      const res = await authFetch(`${API}/api/holidays/${year}`);
       const data = await res.json();
+      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load holidays."));
       setPhHolidays((prev) => ({
         ...prev,
         [year]: data.map((h) => ({
@@ -549,8 +560,12 @@ export default function AdminDashboard() {
           type: h.types?.includes("Public") ? "national" : "special",
         })),
       }));
-    } catch {
-      setPhHolidays((prev) => ({ ...prev, [year]: [] }));
+    } catch (err) {
+      // Deliberately NOT caching an empty result here — phHolidays[year]
+      // stays unset, so the guard above lets a later retry (revisiting the
+      // tab) try again instead of permanently remembering "no holidays"
+      // for a year that just had a transient failure.
+      setHolidaysError(err.message || "Failed to load holidays.");
     } finally {
       setFetchingHolidays(false);
     }
@@ -1328,8 +1343,7 @@ export default function AdminDashboard() {
         showMsg("Announcement posted!");
         resetAnnouncementForm();
         setShowAnnouncementModal(false);
-        fetchAnnouncements();
-        markAnnouncementsSeen();
+        markAnnouncementsSeen(); // refetches announcements + clears own unread badge
       } else showModalMsg(data.error || "Failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1365,8 +1379,7 @@ export default function AdminDashboard() {
         showMsg("Announcement updated!");
         setShowEditAnnouncementModal(false);
         setEditingAnnouncement(null);
-        fetchAnnouncements();
-        markAnnouncementsSeen();
+        markAnnouncementsSeen(); // refetches announcements + clears own unread badge
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1382,7 +1395,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showMsg("Announcement deleted!");
-        fetchAnnouncements();
+        fetchAnnouncements({ silent: true });
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1393,6 +1406,21 @@ export default function AdminDashboard() {
   const handleSaveLocalEvent = async () => {
     if (!localEventForm.title || !localEventForm.start_date) {
       showModalMsg("Title and start date are required!", "error");
+      return;
+    }
+    const localEnd = localEventForm.end_date || localEventForm.start_date;
+    if (localEnd < localEventForm.start_date) {
+      showModalMsg("End date cannot be before the start date!", "error");
+      return;
+    }
+    if (
+      localEnd === localEventForm.start_date &&
+      !localEventForm.all_day &&
+      localEventForm.start_time &&
+      localEventForm.end_time &&
+      localEventForm.end_time < localEventForm.start_time
+    ) {
+      showModalMsg("End time cannot be before the start time!", "error");
       return;
     }
     setSavingLocalEvent(true);
@@ -1433,6 +1461,21 @@ export default function AdminDashboard() {
   const handleUpdateEvent = async () => {
     if (!editEventForm.title || !editEventForm.start_date) {
       showModalMsg("Title and start date are required!", "error");
+      return;
+    }
+    const editEnd = editEventForm.end_date || editEventForm.start_date;
+    if (editEnd < editEventForm.start_date) {
+      showModalMsg("End date cannot be before the start date!", "error");
+      return;
+    }
+    if (
+      editEnd === editEventForm.start_date &&
+      !editEventForm.all_day &&
+      editEventForm.start_time &&
+      editEventForm.end_time &&
+      editEventForm.end_time < editEventForm.start_time
+    ) {
+      showModalMsg("End time cannot be before the start time!", "error");
       return;
     }
     setSavingLocalEvent(true);
@@ -1542,6 +1585,8 @@ export default function AdminDashboard() {
   // ══════════════════════════════════════════════════════════════════════════════
   return (
     <div className={styles.container}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <div
         className={`${styles.mobileBackdrop} ${
           mobileOpen ? styles.visible : ""
@@ -1896,18 +1941,6 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {message && (
-          <div
-            className={`${styles.message} ${
-              messageType === "error" ? styles.messageError : ""
-            }`}
-          >
-            <AlertCircle size={14} /> {message}
-            <button className={styles.closeMsg} onClick={() => setMessage("")}>
-              <X size={13} />
-            </button>
-          </div>
-        )}
         {pageLoading && (
           <div className={styles.loadingBar}>Loading data...</div>
         )}
@@ -2032,6 +2065,7 @@ export default function AdminDashboard() {
             localEvents={localEvents}
             phHolidays={phHolidays}
             fetchingHolidays={fetchingHolidays}
+            holidaysError={holidaysError}
             showHolidays={showHolidays}
             setShowHolidays={setShowHolidays}
             onAddEvent={(dateStr) => {

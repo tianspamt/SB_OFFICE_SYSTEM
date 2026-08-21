@@ -41,7 +41,7 @@ function formatEventTime(timeStr) {
   return `${hour12}:${m} ${period}`;
 }
 
-export function ScheduleManager({ isAdmin = false }) {
+export function ScheduleManager({ isAdmin = false, showMsg }) {
   const { schedules, loading, fetchError, saveSchedule, deleteSchedule, togglePublish } =
     useSchedules();
 
@@ -53,12 +53,6 @@ export function ScheduleManager({ isAdmin = false }) {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-
-  const [message, setMessage] = useState("");
-  const showMsg = (msg) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(""), 3500);
-  };
 
   const openAdd = () => {
     setEditTarget(null);
@@ -89,6 +83,7 @@ export function ScheduleManager({ isAdmin = false }) {
     setModalError("");
     try {
       await saveSchedule(editTarget, form);
+      showMsg?.(editTarget ? "Schedule updated!" : "Schedule added!");
       setShowModal(false);
     } catch (err) {
       setModalError(err.message || "Something went wrong.");
@@ -101,9 +96,10 @@ export function ScheduleManager({ isAdmin = false }) {
     setDeleting(true);
     try {
       await deleteSchedule(deleteTarget);
+      showMsg?.("Schedule deleted!");
       setDeleteTarget(null);
     } catch (err) {
-      showMsg(err.message || "Failed to delete schedule.");
+      showMsg?.(err.message || "Failed to delete schedule.", "error");
     } finally {
       setDeleting(false);
     }
@@ -113,7 +109,7 @@ export function ScheduleManager({ isAdmin = false }) {
     try {
       await togglePublish(id);
     } catch (err) {
-      showMsg(err.message || "Failed to update schedule.");
+      showMsg?.(err.message || "Failed to update schedule.", "error");
     }
   };
 
@@ -131,12 +127,6 @@ export function ScheduleManager({ isAdmin = false }) {
         Dated public events shown on the public site — sessions, hearings,
         community activities. Sorted soonest-first, not by post date.
       </p>
-
-      {message && (
-        <div className={styles.fetchError}>
-          <AlertCircle size={14} /> {message}
-        </div>
-      )}
 
       {isAdmin && (
         <button

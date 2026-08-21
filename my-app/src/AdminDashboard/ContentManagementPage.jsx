@@ -14,6 +14,8 @@ import {
   CalendarDays,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
+import { ToastContainer } from "./Toast";
+import { useToasts } from "./useToasts";
 import { COPY, CATEGORY_OPTIONS } from "./contentManagement/constants";
 import { ContentEmptyState } from "./contentManagement/ContentEmptyState";
 import { ContentPostCard } from "./contentManagement/ContentPostCard";
@@ -55,7 +57,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
   const [deleting, setDeleting] = useState(false);
   const [modalError, setModalError] = useState("");
   const [deleteError, setDeleteError] = useState("");
-  const [message, setMessage] = useState("");
+  const { toasts, showMsg, dismissToast } = useToasts();
 
   const sorted = useMemo(() => {
     const filtered = filterPosts(posts, { search, filterStatus, filterCategory });
@@ -65,16 +67,12 @@ export default function ContentManagementPage({ isAdmin = false }) {
   const publishedCount = posts.filter((p) => p.published).length;
   const draftCount = posts.filter((p) => !p.published).length;
 
-  const showMsg = (msg) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(""), 3500);
-  };
-
   const handleSave = async (formData) => {
     setSaving(true);
     setModalError("");
     try {
       await savePost(editTarget, formData);
+      showMsg(editTarget ? "Post updated!" : "Post published!");
       setShowAddModal(false);
       setEditTarget(null);
     } catch (err) {
@@ -90,6 +88,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
     setDeleteError("");
     try {
       await deletePost(deleteTarget);
+      showMsg("Post deleted!");
       setDeleteTarget(null);
     } catch (err) {
       setDeleteError(err.message || "Failed to delete post.");
@@ -105,14 +104,14 @@ export default function ContentManagementPage({ isAdmin = false }) {
     try {
       await togglePublish(id);
     } catch (err) {
-      showMsg(err.message || "Failed to update post.");
+      showMsg(err.message || "Failed to update post.", "error");
     }
   };
   const handleTogglePin = async (id) => {
     try {
       await togglePin(id);
     } catch (err) {
-      showMsg(err.message || "Failed to update post.");
+      showMsg(err.message || "Failed to update post.", "error");
     }
   };
 
@@ -121,6 +120,8 @@ export default function ContentManagementPage({ isAdmin = false }) {
 
   return (
     <div className={styles.page}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <div className={styles.viewToggle} style={{ marginBottom: 16, width: "fit-content" }}>
         {SECTIONS.map((s) => (
           <button
@@ -136,9 +137,9 @@ export default function ContentManagementPage({ isAdmin = false }) {
       </div>
 
       {section === "trivia" ? (
-        <TriviaManager isAdmin={isAdmin} />
+        <TriviaManager isAdmin={isAdmin} showMsg={showMsg} />
       ) : section === "schedules" ? (
-        <ScheduleManager isAdmin={isAdmin} />
+        <ScheduleManager isAdmin={isAdmin} showMsg={showMsg} />
       ) : (
       <>
       <p
@@ -152,12 +153,6 @@ export default function ContentManagementPage({ isAdmin = false }) {
       >
         {COPY.pagePurpose}
       </p>
-
-      {message && (
-        <div className={styles.fetchError}>
-          <AlertCircle size={14} /> {message}
-        </div>
-      )}
 
       <div className={styles.topBar}>
         <div className={styles.topBarLeft}>

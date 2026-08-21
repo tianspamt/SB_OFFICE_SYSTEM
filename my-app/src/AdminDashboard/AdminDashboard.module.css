@@ -1571,6 +1571,13 @@
   pointer-events: none;
 }
 
+/* Collapsed adminTextWrap shrinks to 0 width but the flex gap next to it
+   doesn't — that leftover gap was pushing the avatar off-center. */
+.sidebar.collapsed .adminInfo {
+  justify-content: center;
+  gap: 0;
+}
+
 .adminName {
   font-size: 15px;
   font-weight: bold;

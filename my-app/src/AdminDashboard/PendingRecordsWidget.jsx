@@ -92,6 +92,7 @@ export default function PendingRecordsWidget({
   isSecretary = false,
   isClerk = false,
   onNavigate,
+  showMsg,
   style,
 }) {
   const [items, setItems] = useState([]);
@@ -288,6 +289,7 @@ export default function PendingRecordsWidget({
           isViceMayor={isViceMayor}
           isSecretary={isSecretary}
           isClerk={isClerk}
+          showMsg={showMsg}
           onClose={() => setReviewTarget(null)}
           onActionComplete={() => {
             setReviewTarget(null);
@@ -314,6 +316,7 @@ function ReviewModal({
   isViceMayor,
   isSecretary,
   isClerk,
+  showMsg,
   onClose,
   onActionComplete,
   onOpenFullRecord,
@@ -345,13 +348,14 @@ function ReviewModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
-  const runAction = async (path, options = {}) => {
+  const runAction = async (path, options = {}, successMsg) => {
     setSubmitting(true);
     setError("");
     try {
       const res = await authFetch(`${API}${path}`, options);
       const data = await res.json();
       if (res.ok) {
+        if (successMsg) showMsg?.(successMsg);
         onActionComplete();
         return true;
       }
@@ -390,23 +394,37 @@ function ReviewModal({
   };
 
   const handleAccept = () =>
-    runAction(`/api/${cfg.route}/${item.id}/accept`, { method: "PUT" });
+    runAction(
+      `/api/${cfg.route}/${item.id}/accept`,
+      { method: "PUT" },
+      `${cfg.label} approved!`
+    );
 
   const handleRequestChanges = () => {
     if (!commentText.trim()) {
       setError("Add a comment above explaining the requested changes.");
       return;
     }
-    runAction(`/api/${cfg.route}/${item.id}/request-changes`, {
-      method: "PUT",
-    });
+    runAction(
+      `/api/${cfg.route}/${item.id}/request-changes`,
+      { method: "PUT" },
+      "Changes requested."
+    );
   };
 
   const handleVMApprove = () =>
-    runAction(`/api/${cfg.route}/${item.id}/vm-approve`, { method: "PUT" });
+    runAction(
+      `/api/${cfg.route}/${item.id}/vm-approve`,
+      { method: "PUT" },
+      `${cfg.label} approved!`
+    );
 
   const handlePublish = () =>
-    runAction(`/api/${cfg.route}/${item.id}/publish`, { method: "PUT" });
+    runAction(
+      `/api/${cfg.route}/${item.id}/publish`,
+      { method: "PUT" },
+      `${cfg.label} published!`
+    );
 
   const handleResubmit = async () => {
     if (!resubmitFile) {
@@ -416,10 +434,11 @@ function ReviewModal({
     const fd = new FormData();
     fd.append("file", resubmitFile);
     if (item.record_type === "session_minutes") {
-      await runAction(`/api/${cfg.route}/${item.id}/revise`, {
-        method: "PUT",
-        body: fd,
-      });
+      await runAction(
+        `/api/${cfg.route}/${item.id}/revise`,
+        { method: "PUT", body: fd },
+        `${cfg.label} resubmitted!`
+      );
       return;
     }
     const replaced = await runAction(
@@ -430,7 +449,11 @@ function ReviewModal({
       }
     );
     if (replaced)
-      runAction(`/api/${cfg.route}/${item.id}/resubmit`, { method: "PUT" });
+      runAction(
+        `/api/${cfg.route}/${item.id}/resubmit`,
+        { method: "PUT" },
+        `${cfg.label} resubmitted!`
+      );
   };
 
   return (
