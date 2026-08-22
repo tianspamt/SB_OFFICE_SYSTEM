@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt')
 const { body } = require('express-validator')
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly, validate } = require('../middleware/auth')
+const { verifyToken, adminOnly, secretaryOnly, validate } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
@@ -140,7 +140,10 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // PUT /api/users/:id/restore
-router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
+// Only reachable from the Archives page, which is secretary-gated on the
+// frontend (canViewArchives) — secretaryOnly here closes the gap where any
+// admin-role account could otherwise call this directly.
+router.put('/:id/restore', verifyToken, adminOnly, secretaryOnly, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing } = await supabase

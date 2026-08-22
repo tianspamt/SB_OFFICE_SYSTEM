@@ -171,25 +171,21 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // DELETE /api/session-minutes/:id
-// Archives the session minutes instead of a hard delete (see ordinances.js for the same pattern).
+// Archives the session minutes instead of a hard delete via
+// archive_session_minutes() (see ordinances.js and migrations/007 for the
+// same transactional pattern).
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const { data: existing, error: fetchErr } = await supabase
-      .from('session_minutes').select('*').eq('id', req.params.id).single()
-    if (fetchErr || !existing) return res.status(404).json({ error: 'Session minutes not found.' })
-
-    const { error: archiveErr } = await supabase.from('archives').insert({
-      original_id: existing.id,
-      entity_type: 'session_minutes',
-      data: existing,
-      archived_by: req.user.id,
+    const { data: snapshot, error } = await supabase.rpc('archive_session_minutes', {
+      p_id: req.params.id,
+      p_archived_by: req.user.id,
     })
-    if (archiveErr) return res.status(500).json({ error: archiveErr.message })
+    if (error) {
+      if (error.code === 'P0002') return res.status(404).json({ error: 'Session minutes not found.' })
+      return res.status(500).json({ error: error.message })
+    }
 
-    const { error } = await supabase
-      .from('session_minutes').delete().eq('id', req.params.id)
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'ARCHIVE', 'Sessions', `Archived session: ${existing.session_number || req.params.id}`)
+    await logActivity(req, 'ARCHIVE', 'Sessions', `Archived session: ${snapshot.session_number || req.params.id}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

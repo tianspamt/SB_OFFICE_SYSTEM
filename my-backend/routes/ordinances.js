@@ -457,36 +457,25 @@ router.put('/:id/resubmit', verifyToken, clerkOnly, async (req, res) => {
 })
 
 // ─── DELETE /api/ordinances/:id ───────────────────────────────────────────────
-// Archives the ordinance instead of a hard delete: snapshots the row (plus its
-// council-member links) into `archives`, then removes it from the live table.
-// The stored file is left in place until a permanent delete from the Archives page.
+// Archives the ordinance instead of a hard delete: archive_ordinance() (see
+// migrations/007) snapshots the row + its council-member links into
+// `archives` and removes them from the live tables as one Postgres
+// transaction, so a failure partway through can't leave the ordinance
+// deleted-but-unsnapshotted or stripped of its officials without being
+// deleted. The stored file is left in place until a permanent delete from
+// the Archives page.
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const { data: existing, error: fetchErr } = await supabase
-      .from('ordinances')
-      .select(`*, ordinance_officials ( official_id, term_id )`)
-      .eq('id', req.params.id)
-      .single()
-    if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
-
-    // Snapshot term_id alongside official_id so restoring from Archives
-    // recreates the historically-accurate link, not a fresh live one.
-    const official_ids = existing.ordinance_officials?.map(x => ({ official_id: x.official_id, term_id: x.term_id })) || []
-    const snapshot = { ...existing, ordinance_officials: undefined, official_ids }
-
-    const { error: archiveErr } = await supabase.from('archives').insert({
-      original_id: existing.id,
-      entity_type: 'ordinance',
-      data: snapshot,
-      archived_by: req.user.id,
+    const { data: snapshot, error } = await supabase.rpc('archive_ordinance', {
+      p_id: req.params.id,
+      p_archived_by: req.user.id,
     })
-    if (archiveErr) return res.status(500).json({ error: archiveErr.message })
+    if (error) {
+      if (error.code === 'P0002') return res.status(404).json({ error: 'Ordinance not found.' })
+      return res.status(500).json({ error: error.message })
+    }
 
-    await supabase.from('ordinance_officials').delete().eq('ordinance_id', req.params.id)
-    const { error } = await supabase.from('ordinances').delete().eq('id', req.params.id)
-    if (error) return res.status(500).json({ error: error.message })
-
-    await logActivity(req, 'ARCHIVE', 'Ordinances', `Archived ordinance: ${existing.title}`)
+    await logActivity(req, 'ARCHIVE', 'Ordinances', `Archived ordinance: ${snapshot.title}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

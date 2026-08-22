@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly } = require('../middleware/auth')
+const { verifyToken, adminOnly, secretaryOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity, autoEndTerms } = require('../helpers/logger')
@@ -221,7 +221,10 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // PUT /api/sb-council-members/:id/restore
-router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
+// Only reachable from the Archives page, which is secretary-gated on the
+// frontend (canViewArchives) — secretaryOnly here closes the gap where any
+// admin-role account could otherwise call this directly.
+router.put('/:id/restore', verifyToken, adminOnly, secretaryOnly, async (req, res) => {
   try {
     const { data: member } = await supabase
       .from('sb_council_members').select('id, full_name').eq('id', req.params.id).single()

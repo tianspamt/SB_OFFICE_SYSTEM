@@ -239,34 +239,20 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
 })
 
 // DELETE /api/resolutions/:id
-// Archives the resolution instead of a hard delete (see ordinances.js for the same pattern).
+// Archives the resolution instead of a hard delete via archive_resolution()
+// (see ordinances.js and migrations/007 for the same transactional pattern).
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const { data: existing, error: fetchErr } = await supabase
-      .from('resolutions')
-      .select(`*, resolution_officials ( official_id, term_id )`)
-      .eq('id', req.params.id)
-      .single()
-    if (fetchErr || !existing) return res.status(404).json({ error: 'Resolution not found.' })
-
-    // Snapshot term_id alongside official_id so restoring from Archives
-    // recreates the historically-accurate link, not a fresh live one.
-    const official_ids = existing.resolution_officials?.map(x => ({ official_id: x.official_id, term_id: x.term_id })) || []
-    const snapshot = { ...existing, resolution_officials: undefined, official_ids }
-
-    const { error: archiveErr } = await supabase.from('archives').insert({
-      original_id: existing.id,
-      entity_type: 'resolution',
-      data: snapshot,
-      archived_by: req.user.id,
+    const { data: snapshot, error } = await supabase.rpc('archive_resolution', {
+      p_id: req.params.id,
+      p_archived_by: req.user.id,
     })
-    if (archiveErr) return res.status(500).json({ error: archiveErr.message })
+    if (error) {
+      if (error.code === 'P0002') return res.status(404).json({ error: 'Resolution not found.' })
+      return res.status(500).json({ error: error.message })
+    }
 
-    await supabase.from('resolution_officials').delete().eq('resolution_id', req.params.id)
-    const { error } = await supabase.from('resolutions').delete().eq('id', req.params.id)
-    if (error) return res.status(500).json({ error: error.message })
-
-    await logActivity(req, 'ARCHIVE', 'Resolutions', `Archived resolution: ${existing.title}`)
+    await logActivity(req, 'ARCHIVE', 'Resolutions', `Archived resolution: ${snapshot.title}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

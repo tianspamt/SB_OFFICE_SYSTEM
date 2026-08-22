@@ -1555,10 +1555,12 @@ export default function AdminDashboard() {
   const canEditLegislative = isSecretary || isClerk;
   const canManageOfficials = isSecretary || isClerk;
 
-  const ADMIN_ONLY_TABS = canManageUsers
-    ? canViewLogs
-      ? ["users", "admins", "logs", "archives"]
-      : ["users", "admins", "archives"]
+  // "users"/"admins"/"archives" are gated for every position; "logs" is the
+  // only one that ever varies — excluded solely for clerks (canManageUsers
+  // but not canViewLogs), included for everyone else (secretaries via
+  // canViewLogs, and vice-mayors/councilors/no-position accounts by default).
+  const ADMIN_ONLY_TABS = isClerk
+    ? ["users", "admins", "archives"]
     : ["users", "admins", "logs", "archives"];
   const pageLoading =
     fetchingUsers ||

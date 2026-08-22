@@ -2,15 +2,24 @@ const express = require('express')
 const router = express.Router()
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly } = require('../middleware/auth')
+const { verifyToken, adminOnly, secretaryOnly } = require('../middleware/auth')
 const { deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 
-const CONTENT_TABLES = {
-  ordinance: 'ordinances',
-  resolution: 'resolutions',
-  session_minutes: 'session_minutes',
-}
+// ─── Retention policy ───────────────────────────────────────────────────────
+// Archived records (ordinances, resolutions, session minutes, users,
+// officials) are kept indefinitely — there is no background job that
+// auto-purges old entries. This is a deliberate choice, not an oversight:
+// ordinances/resolutions/session minutes are official legislative records,
+// and archived users/officials are kept (rather than hard-deleted) so
+// existing foreign keys — activity_logs.user_id, an ordinance's authorship
+// links — keep resolving. Silently age-based-deleting any of that could
+// destroy records the office is legally obligated to retain, and this route
+// has no visibility into what retention period, if any, actually applies.
+// Permanent deletion stays a manual, secretary-gated, per-record action
+// (DELETE /:id below). If the office later adopts an explicit retention
+// schedule, implement it as its own logged, admin-triggered batch endpoint —
+// never as silent automatic deletion.
 
 const titleOf = (entityType, data) => {
   if (entityType === 'ordinance') return data.ordinance_number || data.title
@@ -19,138 +28,58 @@ const titleOf = (entityType, data) => {
   return data.title || null
 }
 
-// ─── GET /api/archives?module=all|ordinance|resolution|session_minutes|user|official ──
-router.get('/', verifyToken, adminOnly, async (req, res) => {
+// ─── GET /api/archives?module=&search=&page=&limit=&sort= ──────────────────────
+// secretaryOnly matches the frontend gate (canViewArchives = isSecretary) —
+// restore/permanent-delete are destructive/state-changing enough that the
+// UI hiding the tab from other admin positions isn't enough on its own.
+//
+// The union/filter/sort/pagination across the three archive sources happens
+// in get_archives() (migrations/008, sort added in 009) since it isn't
+// expressible as a single Supabase JS query. total_count comes back on every
+// row (a window function's value is identical across the whole result set)
+// so the frontend can render page controls without a second request.
+router.get('/', verifyToken, adminOnly, secretaryOnly, async (req, res) => {
   const module = req.query.module || 'all'
+  const search = req.query.search ? String(req.query.search).trim() : null
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100)
+  const page = Math.max(parseInt(req.query.page) || 1, 1)
+  const offset = (page - 1) * limit
+  const sort = req.query.sort === 'asc' ? 'asc' : 'desc'
+
   try {
-    const rows = []
+    const { data, error } = await supabase.rpc('get_archives', {
+      p_module: module,
+      p_search: search,
+      p_limit: limit,
+      p_offset: offset,
+      p_sort: sort,
+    })
+    if (error) return res.status(500).json({ error: error.message })
 
-    if (module === 'all' || CONTENT_TABLES[module]) {
-      let query = supabase.from('archives').select('*').order('archived_at', { ascending: false })
-      if (module !== 'all') query = query.eq('entity_type', module)
-      const { data, error } = await query
-      if (error) return res.status(500).json({ error: error.message })
-      data.forEach(row => rows.push({
-        id: row.id,
-        source: 'content',
-        entity_type: row.entity_type,
-        original_id: row.original_id,
-        title: titleOf(row.entity_type, row.data),
-        archived_at: row.archived_at,
-        archived_by: row.archived_by,
-        data: row.data,
-      }))
-    }
+    const total = data.length > 0 ? Number(data[0].total_count) : 0
+    const rows = data.map(({ total_count, ...row }) => row)
 
-    if (module === 'all' || module === 'user') {
-      const { data, error } = await supabase
-        .from('users').select('id, name, username, email, role, is_archived, archived_at, archived_by')
-        .eq('is_archived', true)
-      if (error) return res.status(500).json({ error: error.message })
-      data.forEach(u => rows.push({
-        id: u.id,
-        source: 'user',
-        entity_type: 'user',
-        original_id: u.id,
-        title: u.name,
-        archived_at: u.archived_at,
-        archived_by: u.archived_by,
-        data: u,
-      }))
-    }
-
-    if (module === 'all' || module === 'official') {
-      // position comes from the member's terms now, not the (now-dropped)
-      // sb_council_members.position column — same active-term-or-most-recent
-      // logic as routes/councilMembers.js's own enrichment.
-      const { data, error } = await supabase
-        .from('sb_council_members')
-        .select(`
-          id, full_name, photo, is_archived, archived_at, archived_by,
-          sb_council_member_terms ( status, position, term_start )
-        `)
-        .eq('is_archived', true)
-      if (error) return res.status(500).json({ error: error.message })
-      data.forEach(o => {
-        const terms = o.sb_council_member_terms || []
-        const sorted = [...terms].sort((a, b) => new Date(b.term_start) - new Date(a.term_start))
-        const activeTerm = sorted.find(t => t.status === 'active') || sorted[0] || null
-        rows.push({
-          id: o.id,
-          source: 'official',
-          entity_type: 'official',
-          original_id: o.id,
-          title: o.full_name,
-          archived_at: o.archived_at,
-          archived_by: o.archived_by,
-          data: {
-            id: o.id,
-            full_name: o.full_name,
-            photo: o.photo,
-            is_archived: o.is_archived,
-            archived_at: o.archived_at,
-            archived_by: o.archived_by,
-            position: activeTerm?.position || null,
-          },
-        })
-      })
-    }
-
-    const archiverIds = [...new Set(rows.map(r => r.archived_by).filter(Boolean))]
-    if (archiverIds.length > 0) {
-      const { data: archivers } = await supabase.from('users').select('id, name').in('id', archiverIds)
-      const nameById = new Map((archivers || []).map(u => [u.id, u.name]))
-      rows.forEach(r => { r.archived_by_name = nameById.get(r.archived_by) || null })
-    }
-
-    rows.sort((a, b) => new Date(b.archived_at) - new Date(a.archived_at))
-    res.json(rows)
+    res.json({ rows, total, page, limit, totalPages: Math.max(Math.ceil(total / limit), 1) })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
 // ─── PUT /api/archives/:id/restore ─────────────────────────────────────────────
-// Restores a content row (ordinance/resolution/session_minutes) from its snapshot.
-router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
+// Restores a content row (ordinance/resolution/session_minutes) from its
+// snapshot. The insert + officials re-link + archive-row delete all happen
+// inside restore_archive() as one Postgres transaction (see migrations/007)
+// so a failure partway through rolls back instead of silently dropping the
+// officials links while still reporting success.
+router.put('/:id/restore', verifyToken, adminOnly, secretaryOnly, async (req, res) => {
   try {
-    const { data: archived, error: fetchErr } = await supabase
-      .from('archives').select('*').eq('id', req.params.id).single()
-    if (fetchErr || !archived) return res.status(404).json({ error: 'Archived record not found.' })
-
-    const table = CONTENT_TABLES[archived.entity_type]
-    if (!table) return res.status(400).json({ error: 'Unknown archived entity type.' })
-
-    const { official_ids, ...record } = archived.data
-
-    const { error: restoreErr } = await supabase.from(table).insert(record)
-    if (restoreErr) return res.status(500).json({ error: restoreErr.message })
-
-    // official_ids used to be a flat array of person IDs; since
-    // migrations/004 it's an array of { official_id, term_id } so a
-    // restored record keeps its historically-accurate authorship snapshot
-    // instead of falling back to a fresh live link. Archives created before
-    // that change still have the old flat shape — restoring one of those
-    // just links term_id: null, same as before this feature existed.
-    const toLinkRows = (idOrEntity) =>
-      typeof idOrEntity === 'object' && idOrEntity !== null
-        ? { official_id: idOrEntity.official_id, term_id: idOrEntity.term_id ?? null }
-        : { official_id: idOrEntity, term_id: null }
-
-    if (archived.entity_type === 'ordinance' && official_ids?.length > 0) {
-      await supabase.from('ordinance_officials').insert(
-        official_ids.map(item => ({ ordinance_id: archived.original_id, ...toLinkRows(item) }))
-      )
-    }
-    if (archived.entity_type === 'resolution' && official_ids?.length > 0) {
-      await supabase.from('resolution_officials').insert(
-        official_ids.map(item => ({ resolution_id: archived.original_id, ...toLinkRows(item) }))
-      )
+    const { data, error } = await supabase.rpc('restore_archive', { p_archive_id: req.params.id })
+    if (error) {
+      if (error.code === 'P0002') return res.status(404).json({ error: 'Archived record not found.' })
+      return res.status(500).json({ error: error.message })
     }
 
-    await supabase.from('archives').delete().eq('id', req.params.id)
-
-    await logActivity(req, 'RESTORE', 'Archives', `Restored ${archived.entity_type}: ${titleOf(archived.entity_type, record)}`)
+    await logActivity(req, 'RESTORE', 'Archives', `Restored ${data.entity_type}: ${titleOf(data.entity_type, data.record)}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -159,7 +88,7 @@ router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
 
 // ─── DELETE /api/archives/:id ──────────────────────────────────────────────────
 // Permanently deletes an archived content row (and its stored file, if any).
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
+router.delete('/:id', verifyToken, adminOnly, secretaryOnly, async (req, res) => {
   try {
     const { data: archived, error: fetchErr } = await supabase
       .from('archives').select('*').eq('id', req.params.id).single()

@@ -92,16 +92,17 @@ export default function ConfirmModal({
   cancelLabel = "Cancel",
   onConfirm,
   onCancel,
+  loading = false,
 }) {
   const cfg = CONFIGS[type] || CONFIGS.info;
   const confirm = confirmLabel || cfg.confirmLabel;
 
-  // Close on Escape
+  // Close on Escape (not while a confirm request is in flight)
   useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape" && onCancel) onCancel(); };
+    const handler = (e) => { if (e.key === "Escape" && onCancel && !loading) onCancel(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onCancel]);
+  }, [onCancel, loading]);
 
   return (
     <>
@@ -170,9 +171,12 @@ export default function ConfirmModal({
         .cm-btn:last-child { margin-bottom: 0; }
         .cm-btn:hover { opacity: 0.9; }
         .cm-btn:active { transform: scale(0.98); }
+        .cm-btn:disabled { cursor: not-allowed; opacity: 0.7; }
+        .cm-btn:disabled:active { transform: none; }
 
         .cm-btn-confirm {
           color: #fff;
+          display: flex; align-items: center; justify-content: center;
         }
 
         .cm-btn-cancel {
@@ -180,9 +184,18 @@ export default function ConfirmModal({
           color: #374151;
         }
         .cm-btn-cancel:hover { background: #e5e7eb; opacity: 1; }
+
+        .cm-spinner {
+          width: 18px; height: 18px;
+          border: 2.5px solid rgba(255,255,255,0.4);
+          border-top-color: #fff;
+          border-radius: 50%;
+          animation: cmSpin 0.6s linear infinite;
+        }
+        @keyframes cmSpin { to { transform: rotate(360deg) } }
       `}</style>
 
-      <div className="cm-overlay" onClick={(e) => { if (e.target === e.currentTarget && onCancel) onCancel(); }}>
+      <div className="cm-overlay" onClick={(e) => { if (e.target === e.currentTarget && onCancel && !loading) onCancel(); }}>
         <div className="cm-card">
           <div className="cm-icon-wrap" style={{ background: cfg.iconBg }}>
             <span style={{ color: cfg.iconColor, display: "flex" }}>{cfg.icon}</span>
@@ -194,15 +207,16 @@ export default function ConfirmModal({
           <button
             className="cm-btn cm-btn-confirm"
             style={{ background: cfg.btnColor }}
-            onMouseEnter={(e) => e.target.style.background = cfg.btnHover}
-            onMouseLeave={(e) => e.target.style.background = cfg.btnColor}
-            onClick={onConfirm}
+            onMouseEnter={(e) => { if (!loading) e.target.style.background = cfg.btnHover; }}
+            onMouseLeave={(e) => { if (!loading) e.target.style.background = cfg.btnColor; }}
+            onClick={loading ? undefined : onConfirm}
+            disabled={loading}
           >
-            {confirm}
+            {loading ? <span className="cm-spinner" aria-label="Loading" /> : confirm}
           </button>
 
           {cancelLabel !== false && (
-            <button className="cm-btn cm-btn-cancel" onClick={onCancel}>
+            <button className="cm-btn cm-btn-cancel" onClick={loading ? undefined : onCancel} disabled={loading}>
               {cancelLabel}
             </button>
           )}
