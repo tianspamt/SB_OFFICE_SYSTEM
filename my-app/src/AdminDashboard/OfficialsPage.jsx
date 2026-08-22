@@ -31,41 +31,63 @@ function initials(name = "") {
 /**
  * Build council groups from officials' terms array.
  *
- * Each official has: { id, full_name, position, photo, terms: [...] }
- * Each term has:     { id, council_member_id, term_period, term_start,
- *                      term_end, status, is_reelected, notes }
+ * Each official has: { id, full_name, photo, terms: [...] }
+ * Each term has:     { id, council_member_id, council_id, position,
+ *                      term_period, term_start, term_end, status,
+ *                      is_reelected, notes, council: { id, term_label } }
  *
- * A member who served in two councils appears in BOTH groups.
- * Members with no terms go into an 'Unknown' bucket.
+ * Grouped by council_id (a real councils row — see migrations/001 and 002)
+ * rather than matching the raw term_period string, so a typo'd label can no
+ * longer silently split one council into two visual groups. A member who
+ * served in two councils appears in BOTH groups. Members with no terms go
+ * into an 'Unknown' bucket. Falls back to matching on the raw term_period
+ * string only for a term row that somehow predates the council_id backfill.
  *
- * Returns: [{ termPeriod, entries: [{ member, term }] }]  newest-first.
+ * Returns: [{ key, councilId, termPeriod, entries: [{ member, term }] }]
+ * newest-first.
  */
 function buildCouncilGroups(officials) {
-  const map = {}; // termPeriod → [{ member, term }]
+  const groups = new Map(); // key -> { councilId, termPeriod, sortYear, entries }
+  const getYear = (s) => parseInt((s.match(/\d{4}/) || ["0"])[0]);
 
   officials.forEach((member) => {
     const terms = member.terms || [];
     if (terms.length === 0) {
-      if (!map["Unknown"]) map["Unknown"] = [];
-      map["Unknown"].push({ member, term: null });
+      if (!groups.has("unknown"))
+        groups.set("unknown", { councilId: null, termPeriod: "Unknown", sortYear: -1, entries: [] });
+      groups.get("unknown").entries.push({ member, term: null });
     } else {
       terms.forEach((term) => {
-        const key = term.term_period || "Unknown";
-        if (!map[key]) map[key] = [];
-        map[key].push({ member, term });
+        const key =
+          term.council_id != null
+            ? `council-${term.council_id}`
+            : `legacy-${term.term_period || "unknown"}`;
+        const label = term.council?.term_label || term.term_period || "Unknown";
+        if (!groups.has(key)) {
+          groups.set(key, {
+            councilId: term.council_id ?? null,
+            termPeriod: label,
+            sortYear: getYear(label),
+            entries: [],
+          });
+        }
+        groups.get(key).entries.push({ member, term });
       });
     }
   });
 
-  const getYear = (s) => parseInt((s.match(/\d{4}/) || ["0"])[0]);
-
-  return Object.entries(map)
-    .sort(([a], [b]) => {
-      if (a === "Unknown") return 1;
-      if (b === "Unknown") return -1;
-      return getYear(b) - getYear(a);
+  return Array.from(groups.entries())
+    .sort(([keyA, a], [keyB, b]) => {
+      if (keyA === "unknown") return 1;
+      if (keyB === "unknown") return -1;
+      return b.sortYear - a.sortYear;
     })
-    .map(([termPeriod, entries]) => ({ termPeriod, entries }));
+    .map(([key, { councilId, termPeriod, entries }]) => ({
+      key,
+      councilId,
+      termPeriod,
+      entries,
+    }));
 }
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
@@ -115,7 +137,10 @@ function MemberCard({
       </div>
 
       <div className={styles.memberName}>{member.full_name || "—"}</div>
-      <div className={styles.memberPos}>{member.position || "—"}</div>
+      {/* term?.position, not member.position — this card is showing the
+          member's seat *within this specific council*, which can differ
+          from whatever their current/other-term position is. */}
+      <div className={styles.memberPos}>{term?.position || member.position || "—"}</div>
 
       {term ? (
         <span
@@ -160,14 +185,25 @@ function MemberCard({
 function AddCouncilModal({ onClose, onConfirm }) {
   const [termPeriod, setTermPeriod] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const val = termPeriod.trim();
     if (!val) {
       setError("Please enter the term period.");
       return;
     }
-    onConfirm(val);
+    setSubmitting(true);
+    setError("");
+    // onConfirm actually creates the council server-side now (POST
+    // /api/councils) instead of just tracking a client-only placeholder —
+    // it resolves to { success, error? } so a duplicate-label conflict (or
+    // any other server error) surfaces here instead of silently vanishing.
+    const result = await onConfirm(val);
+    setSubmitting(false);
+    if (result && result.success === false) {
+      setError(result.error || "Failed to add council.");
+    }
   };
 
   return (
@@ -209,11 +245,11 @@ function AddCouncilModal({ onClose, onConfirm }) {
         </div>
 
         <div className={styles.modalActions}>
-          <button className={styles.cancelBtn} onClick={onClose}>
+          <button className={styles.cancelBtn} onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <button className={styles.primaryBtn} onClick={handleSubmit}>
-            <Plus size={14} /> Create Council
+          <button className={styles.primaryBtn} onClick={handleSubmit} disabled={submitting}>
+            <Plus size={14} /> {submitting ? "Creating..." : "Create Council"}
           </button>
         </div>
       </div>
@@ -346,6 +382,8 @@ function CouncilGroup({
 export default function OfficialsPage({
   officials = [],
   ordinances = [],
+  councils = [],
+  onAddCouncil,
   setDeleteTarget,
   onViewProfile,
   onEditMember,
@@ -355,28 +393,43 @@ export default function OfficialsPage({
   const [openGroups, setOpenGroups] = useState({});
   const [groupSearch, setGroupSearch] = useState({});
   const [showAddCouncil, setShowAddCouncil] = useState(false);
-  const [emptyCouncils, setEmptyCouncils] = useState([]); // manually-added empty ones
 
   const grouped = useMemo(() => buildCouncilGroups(officials), [officials]);
 
-  // Merge empty councils that don't exist yet in grouped data
+  // Councils with no current members don't show up in `grouped` at all
+  // (buildCouncilGroups only ever sees officials' terms) — merge in the
+  // rest of the real councils list so a freshly-created empty council is
+  // still visible, and persists across a refresh (it's a real row now, not
+  // client-only state).
   const allGroups = useMemo(() => {
-    const existing = new Set(grouped.map((g) => g.termPeriod));
+    const existingCouncilIds = new Set(
+      grouped.filter((g) => g.councilId != null).map((g) => g.councilId)
+    );
     const getYear = (s) => parseInt((s.match(/\d{4}/) || ["0"])[0]);
-    const extras = emptyCouncils
-      .filter((tp) => !existing.has(tp))
-      .map((tp) => ({ termPeriod: tp, entries: [] }))
+    const emptyOnes = councils
+      .filter((c) => !existingCouncilIds.has(c.id))
+      .map((c) => ({
+        key: `council-${c.id}`,
+        councilId: c.id,
+        termPeriod: c.term_label,
+        entries: [],
+      }))
       .sort((a, b) => getYear(b.termPeriod) - getYear(a.termPeriod));
-    return [...extras, ...grouped];
-  }, [grouped, emptyCouncils]);
+    return [...emptyOnes, ...grouped];
+  }, [grouped, councils]);
 
-  const toggleGroup = (tp) =>
-    setOpenGroups((prev) => ({ ...prev, [tp]: !prev[tp] }));
+  const toggleGroup = (key) =>
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  const handleAddCouncilConfirm = (tp) => {
-    setEmptyCouncils((prev) => (prev.includes(tp) ? prev : [tp, ...prev]));
-    setOpenGroups((prev) => ({ ...prev, [tp]: true }));
-    setShowAddCouncil(false);
+  const handleAddCouncilConfirm = async (tp) => {
+    if (!onAddCouncil) return { success: false, error: "Not available." };
+    const result = await onAddCouncil(tp);
+    if (result.success) {
+      const key = result.data?.id != null ? `council-${result.data.id}` : null;
+      if (key) setOpenGroups((prev) => ({ ...prev, [key]: true }));
+      setShowAddCouncil(false);
+    }
+    return result;
   };
 
   const handleDelete = (member) =>
@@ -451,16 +504,16 @@ export default function OfficialsPage({
         </div>
       ) : (
         <div className={styles.groupList}>
-          {allGroups.map(({ termPeriod, entries }) => (
+          {allGroups.map(({ key, termPeriod, entries }) => (
             <CouncilGroup
-              key={termPeriod}
+              key={key}
               termPeriod={termPeriod}
               entries={entries}
-              isOpen={!!openGroups[termPeriod]}
-              onToggle={() => toggleGroup(termPeriod)}
-              search={groupSearch[termPeriod] || ""}
+              isOpen={!!openGroups[key]}
+              onToggle={() => toggleGroup(key)}
+              search={groupSearch[key] || ""}
               onSearch={(val) =>
-                setGroupSearch((prev) => ({ ...prev, [termPeriod]: val }))
+                setGroupSearch((prev) => ({ ...prev, [key]: val }))
               }
               onAddMember={(tp) => onAddMember && onAddMember(tp)}
               onEdit={onEditMember}

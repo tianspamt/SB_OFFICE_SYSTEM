@@ -1,5 +1,5 @@
 import { AlertCircle, CalendarDays, Upload, CheckSquare } from "lucide-react";
-import { COLOR_SWATCHES } from "./AdminContext";
+import { COLOR_SWATCHES, OFFICIAL_POSITIONS } from "./AdminContext";
 
 // ─── User Avatar (photo if set, initials fallback) ───────────────────────────
 export const UserAvatar = ({
@@ -71,8 +71,19 @@ export const ModalAlert = ({ message, type }) => message ? (
 ) : null;
 
 // ─── Term Form Fields ─────────────────────────────────────────────────────────
+// Position lives here, not on the person — a councilor's seat can change
+// between terms (regular Councilor in one, elected Vice Mayor in the next),
+// so it's captured per-term alongside term_period/dates.
 export const TermFormFields = ({ form, setForm, styles }) => (
   <>
+    <label className={styles.fieldLabel}>Position <span style={{ color: "#e53e3e" }}>*</span></label>
+    <select className={styles.input} value={form.position || ""}
+      onChange={(e) => setForm({ ...form, position: e.target.value })}>
+      <option value="">Select position...</option>
+      {OFFICIAL_POSITIONS.map((p) => (
+        <option key={p} value={p}>{p}</option>
+      ))}
+    </select>
     <label className={styles.fieldLabel}>Term Period <span style={{ color: "#e53e3e" }}>*</span></label>
     <input className={styles.input} placeholder="e.g. 2022–2025" value={form.term_period}
       onChange={(e) => setForm({ ...form, term_period: e.target.value })} />
@@ -104,6 +115,10 @@ export const TermFormFields = ({ form, setForm, styles }) => (
 );
 
 // ─── Officials Check List ─────────────────────────────────────────────────────
+// o.position here is the member's *current* position — computed server-side
+// from their active (or most recent) term, not a static per-person field —
+// so a person who's held more than one seat over time shows whichever one
+// applies now, not a stale value.
 export const OfficialsCheckList = ({ officials, selected, onToggle, styles }) => (
   <div className={styles.officialsCheckList}>
     {officials.length === 0 && <p className={styles.fileHint}>No council members yet.</p>}
@@ -115,7 +130,7 @@ export const OfficialsCheckList = ({ officials, selected, onToggle, styles }) =>
           : <div className={styles.checkAvatar}>{o.full_name.charAt(0)}</div>}
         <div>
           <div style={{ fontWeight: "600", fontSize: "13px" }}>{o.full_name}</div>
-          <div style={{ fontSize: "11px", color: "#718096" }}>{o.position}</div>
+          <div style={{ fontSize: "11px", color: "#718096" }}>{o.position || "—"}</div>
         </div>
       </label>
     ))}

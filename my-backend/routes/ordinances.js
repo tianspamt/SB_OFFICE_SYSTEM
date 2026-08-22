@@ -12,6 +12,27 @@ const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { safeParseJSON } = require('../helpers/utils')
+const { resolveCurrentTermId } = require('../helpers/officials')
+
+// Historical-accuracy note: `term.position` is the specific membership
+// current when this official was linked (see resolveCurrentTermId and
+// migrations/004). It's null only for a row that predates term_id (the
+// person had zero terms at link time, so there was nothing to snapshot) —
+// sb_council_members.position was dropped (migrations/006), so there's no
+// further fallback for that edge case; it just shows no position.
+const mapOfficials = (ordinanceOfficials) =>
+  (ordinanceOfficials || [])
+    .map((oo) => {
+      const person = oo.sb_council_members
+      if (!person) return null
+      return {
+        id: person.id,
+        full_name: person.full_name,
+        photo: person.photo,
+        position: oo.term?.position || null,
+      }
+    })
+    .filter(Boolean)
 
 // ─── Helper: extract text based on file type ──────────────────────────────────
 // PDFs and Word files are stored only — no extraction at upload time.
@@ -46,7 +67,11 @@ router.get('/', async (req, res) => {
     const { year, search } = req.query
     let query = supabase
       .from('ordinances')
-      .select(`*, ordinance_officials ( sb_council_members ( id, full_name, position, photo ) )`)
+      .select(`*, ordinance_officials (
+        official_id, term_id,
+        sb_council_members ( id, full_name, photo ),
+        term:sb_council_member_terms ( id, position, term_period )
+      )`)
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
 if (search) query = query.ilike('title', `%${search}%`)
@@ -58,7 +83,7 @@ if (req.query.status) {
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(o => ({
       ...o,
-      officials: o.ordinance_officials?.map(oo => oo.sb_council_members).filter(Boolean) || [],
+      officials: mapOfficials(o.ordinance_officials),
       ordinance_officials: undefined
     }))
     res.json(parsed)
@@ -144,13 +169,17 @@ router.get('/:id', async (req, res) => {
   try {
     const { data: o, error } = await supabase
       .from('ordinances')
-      .select(`*, ordinance_officials ( sb_council_members ( id, full_name, position, photo ) )`)
+      .select(`*, ordinance_officials (
+        official_id, term_id,
+        sb_council_members ( id, full_name, photo ),
+        term:sb_council_member_terms ( id, position, term_period )
+      )`)
       .eq('id', req.params.id)
       .single()
     if (error || !o) return res.status(404).json({ error: 'Not found' })
     const parsed = {
       ...o,
-      officials: o.ordinance_officials?.map(oo => oo.sb_council_members).filter(Boolean) || [],
+      officials: mapOfficials(o.ordinance_officials),
       ordinance_officials: undefined
     }
     res.json(parsed)
@@ -192,9 +221,12 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
     }
 
     if (officialIds.length > 0) {
-      const { error: relErr } = await supabase.from('ordinance_officials').insert(
-        officialIds.map(oid => ({ ordinance_id: ordinance.id, official_id: oid }))
-      )
+      const rows = await Promise.all(officialIds.map(async (oid) => ({
+        ordinance_id: ordinance.id,
+        official_id: oid,
+        term_id: await resolveCurrentTermId(oid),
+      })))
+      const { error: relErr } = await supabase.from('ordinance_officials').insert(rows)
       if (relErr) console.error('ordinance_officials insert error:', relErr.message)
     }
 
@@ -240,11 +272,26 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
     if (error) return res.status(500).json({ error: error.message })
 
     const officialIds = safeParseJSON(officials, [])
+    // Preserve term_id for officials who remain selected — this route
+    // deletes and re-inserts all links on every edit (even ones that don't
+    // touch the officials list at all), so re-resolving term_id
+    // unconditionally would silently rewrite an already-linked official's
+    // historical snapshot just because someone fixed a typo in the title
+    // years later. Only a newly-added official gets a freshly resolved one.
+    const { data: existingLinks } = await supabase
+      .from('ordinance_officials').select('official_id, term_id').eq('ordinance_id', id)
+    const existingTermByOfficial = new Map((existingLinks || []).map(l => [l.official_id, l.term_id]))
+
     await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
     if (officialIds.length > 0) {
-      const { error: relErr } = await supabase.from('ordinance_officials').insert(
-        officialIds.map(oid => ({ ordinance_id: id, official_id: oid }))
-      )
+      const rows = await Promise.all(officialIds.map(async (oid) => ({
+        ordinance_id: id,
+        official_id: oid,
+        term_id: existingTermByOfficial.has(oid)
+          ? existingTermByOfficial.get(oid)
+          : await resolveCurrentTermId(oid),
+      })))
+      const { error: relErr } = await supabase.from('ordinance_officials').insert(rows)
       if (relErr) console.error('ordinance_officials insert error:', relErr.message)
     }
 
@@ -417,12 +464,14 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances')
-      .select(`*, ordinance_officials ( official_id )`)
+      .select(`*, ordinance_officials ( official_id, term_id )`)
       .eq('id', req.params.id)
       .single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
 
-    const official_ids = existing.ordinance_officials?.map(x => x.official_id) || []
+    // Snapshot term_id alongside official_id so restoring from Archives
+    // recreates the historically-accurate link, not a fresh live one.
+    const official_ids = existing.ordinance_officials?.map(x => ({ official_id: x.official_id, term_id: x.term_id })) || []
     const snapshot = { ...existing, ordinance_officials: undefined, official_ids }
 
     const { error: archiveErr } = await supabase.from('archives').insert({

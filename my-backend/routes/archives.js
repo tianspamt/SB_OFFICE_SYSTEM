@@ -60,20 +60,40 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
     }
 
     if (module === 'all' || module === 'official') {
+      // position comes from the member's terms now, not the (now-dropped)
+      // sb_council_members.position column — same active-term-or-most-recent
+      // logic as routes/councilMembers.js's own enrichment.
       const { data, error } = await supabase
-        .from('sb_council_members').select('id, full_name, position, photo, is_archived, archived_at, archived_by')
+        .from('sb_council_members')
+        .select(`
+          id, full_name, photo, is_archived, archived_at, archived_by,
+          sb_council_member_terms ( status, position, term_start )
+        `)
         .eq('is_archived', true)
       if (error) return res.status(500).json({ error: error.message })
-      data.forEach(o => rows.push({
-        id: o.id,
-        source: 'official',
-        entity_type: 'official',
-        original_id: o.id,
-        title: o.full_name,
-        archived_at: o.archived_at,
-        archived_by: o.archived_by,
-        data: o,
-      }))
+      data.forEach(o => {
+        const terms = o.sb_council_member_terms || []
+        const sorted = [...terms].sort((a, b) => new Date(b.term_start) - new Date(a.term_start))
+        const activeTerm = sorted.find(t => t.status === 'active') || sorted[0] || null
+        rows.push({
+          id: o.id,
+          source: 'official',
+          entity_type: 'official',
+          original_id: o.id,
+          title: o.full_name,
+          archived_at: o.archived_at,
+          archived_by: o.archived_by,
+          data: {
+            id: o.id,
+            full_name: o.full_name,
+            photo: o.photo,
+            is_archived: o.is_archived,
+            archived_at: o.archived_at,
+            archived_by: o.archived_by,
+            position: activeTerm?.position || null,
+          },
+        })
+      })
     }
 
     const archiverIds = [...new Set(rows.map(r => r.archived_by).filter(Boolean))]
@@ -106,14 +126,25 @@ router.put('/:id/restore', verifyToken, adminOnly, async (req, res) => {
     const { error: restoreErr } = await supabase.from(table).insert(record)
     if (restoreErr) return res.status(500).json({ error: restoreErr.message })
 
+    // official_ids used to be a flat array of person IDs; since
+    // migrations/004 it's an array of { official_id, term_id } so a
+    // restored record keeps its historically-accurate authorship snapshot
+    // instead of falling back to a fresh live link. Archives created before
+    // that change still have the old flat shape — restoring one of those
+    // just links term_id: null, same as before this feature existed.
+    const toLinkRows = (idOrEntity) =>
+      typeof idOrEntity === 'object' && idOrEntity !== null
+        ? { official_id: idOrEntity.official_id, term_id: idOrEntity.term_id ?? null }
+        : { official_id: idOrEntity, term_id: null }
+
     if (archived.entity_type === 'ordinance' && official_ids?.length > 0) {
       await supabase.from('ordinance_officials').insert(
-        official_ids.map(oid => ({ ordinance_id: archived.original_id, official_id: oid }))
+        official_ids.map(item => ({ ordinance_id: archived.original_id, ...toLinkRows(item) }))
       )
     }
     if (archived.entity_type === 'resolution' && official_ids?.length > 0) {
       await supabase.from('resolution_officials').insert(
-        official_ids.map(oid => ({ resolution_id: archived.original_id, official_id: oid }))
+        official_ids.map(item => ({ resolution_id: archived.original_id, ...toLinkRows(item) }))
       )
     }
 

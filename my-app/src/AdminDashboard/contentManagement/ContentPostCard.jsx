@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Pencil,
   Trash2,
@@ -21,6 +22,7 @@ const BADGE_STYLE = {
   announcement: { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" },
 };
 
+
 export function ContentPostCard({
   post,
   onEdit,
@@ -31,16 +33,65 @@ export function ContentPostCard({
   readOnly = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  // Dropdown opens downward by default; if the button is near the bottom of
+  // the viewport that pushes it past the fold and forces a scroll to see
+  // every item, so flip it to open upward instead once we know it doesn't fit.
+  const [dropUp, setDropUp] = useState(false);
+  // Coordinates for the portaled dropdown, in viewport (position:fixed)
+  // terms — computed from the button's own position, not the card's, since
+  // the dropdown no longer lives inside the card's DOM subtree.
+  const [menuCoords, setMenuCoords] = useState(null);
+  const btnRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     const handler = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target))
+      if (
+        btnRef.current && !btnRef.current.contains(e.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target)
+      ) {
         setMenuOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // A portaled, fixed-position menu doesn't move with the button if the page
+  // scrolls or resizes underneath it — rather than re-tracking on every
+  // scroll tick, just close it, same as clicking outside would.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menuOpen]);
+
+  const openMenu = () => {
+    const rect = btnRef.current.getBoundingClientRect();
+    setDropUp(false); // reset; layout effect below flips it if it doesn't fit
+    setMenuCoords({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setMenuOpen(true);
+  };
+
+  // Runs after the dropdown mounts (opening downward by default) but before
+  // the browser paints, so measuring/flipping here never shows a flicker.
+  useLayoutEffect(() => {
+    if (!menuOpen || !dropdownRef.current || !btnRef.current) return;
+    const dropRect = dropdownRef.current.getBoundingClientRect();
+    if (dropRect.bottom > window.innerHeight) {
+      const btnRect = btnRef.current.getBoundingClientRect();
+      setMenuCoords({
+        bottom: window.innerHeight - btnRect.top + 4,
+        right: window.innerWidth - btnRect.right,
+      });
+      setDropUp(true);
+    }
+  }, [menuOpen]);
 
   return (
     <div
@@ -93,16 +144,21 @@ export function ContentPostCard({
               )}
             </span>
             {!readOnly && (
-            <div className={styles.menuWrap} ref={menuRef}>
+            <div className={styles.menuWrap}>
               <button
+                ref={btnRef}
                 type="button"
                 className={styles.menuBtn}
-                onClick={() => setMenuOpen(!menuOpen)}
+                onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
               >
                 <MoreHorizontal size={16} />
               </button>
-              {menuOpen && (
-                <div className={styles.menuDropdown}>
+              {menuOpen && menuCoords && createPortal(
+                <div
+                  ref={dropdownRef}
+                  className={`${styles.menuDropdown} ${dropUp ? styles.menuDropdownUp : ""}`}
+                  style={{ position: "fixed", ...menuCoords }}
+                >
                   <button
                     type="button"
                     onClick={() => {
@@ -148,7 +204,8 @@ export function ContentPostCard({
                   >
                     <Trash2 size={13} /> Delete
                   </button>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
             )}

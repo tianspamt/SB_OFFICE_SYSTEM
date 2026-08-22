@@ -11,7 +11,14 @@ const uploadToStorage = async (file, folder) => {
   const fileName = `${folder}/${unique}${ext}`
   const { error: uploadError } = await supabase.storage
     .from('assets')
-    .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: false })
+    // Each upload gets a unique filename (see `unique` above) and is never
+    // overwritten, so a 1-year cache is risk-free — this URL will never
+    // point at different content later, unlike Supabase's 1h default.
+    .upload(fileName, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false,
+      cacheControl: '31536000',
+    })
   if (uploadError) throw new Error(uploadError.message)
   const { data: { publicUrl } } = supabase.storage.from('assets').getPublicUrl(fileName)
   return { fileName, publicUrl }

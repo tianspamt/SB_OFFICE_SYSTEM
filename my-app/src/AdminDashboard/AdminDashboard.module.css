@@ -4184,7 +4184,9 @@
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  overflow: hidden;
+  /* NOT overflow:hidden — the 3-dot menu's dropdown lives inside this card
+     and needs to spill past its edges. Corner-clipping for the image is
+     handled on .postImgWrap instead (see below). */
   display: flex;
   flex-direction: column;
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
@@ -4216,6 +4218,9 @@
   width: 180px;
   min-width: 180px;
   flex-shrink: 0;
+  /* List layout is a row — image sits on the left spanning full height,
+     so it's the left corners that need rounding here, not the top ones. */
+  border-radius: 14px 0 0 14px;
 }
 
 .postCardList .carousel {
@@ -4233,6 +4238,11 @@
   position: relative;
   background: #f8fafc;
   flex-shrink: 0;
+  /* Card itself no longer clips overflow (the 3-dot dropdown needs to
+     spill out), so the image's own corners are rounded here instead —
+     top corners only, since this sits at the top of the column layout. */
+  border-radius: 14px 14px 0 0;
+  overflow: hidden;
 }
 
 /* ── Carousel ── */
@@ -4433,6 +4443,19 @@
 
 @keyframes dropIn {
   from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Flipped when there isn't room to open downward without pushing the
+   dropdown past the viewport (see ContentPostCard's useLayoutEffect). */
+.menuDropdownUp {
+  top: auto;
+  bottom: calc(100% + 4px);
+  animation: dropInUp 0.15s ease-out;
+}
+
+@keyframes dropInUp {
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 

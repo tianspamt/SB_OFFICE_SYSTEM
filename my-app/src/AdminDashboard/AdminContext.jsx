@@ -27,6 +27,63 @@ export const authFetch = (url, options = {}) => {
   });
 };
 
+// ─── React Query: council members ──────────────────────────────────────────────
+// First module migrated off the hand-rolled fetch/useState/loading-flag pattern
+// used elsewhere in AdminDashboard. Query key + fetcher live here so any future
+// consumer (not just AdminDashboard) can share the same cache entry instead of
+// re-fetching independently.
+export const OFFICIALS_QUERY_KEY = ["officials"];
+
+export const fetchOfficialsList = async () => {
+  const d = await (await fetch(`${API}/api/sb-council-members`)).json();
+  return Array.isArray(d) ? d : [];
+};
+
+// ─── React Query: PH holidays ──────────────────────────────────────────────────
+// Same for every user and barely ever changes — routes/holidays.js caches the
+// upstream response for 24h and now sends a matching Cache-Control header, so
+// staleTime here just means React Query won't even re-issue the request
+// (let alone hit the network) until a day has passed.
+export const HOLIDAYS_STALE_TIME_MS = 24 * 60 * 60 * 1000;
+
+export const holidaysQueryKey = (year) => ["holidays", year];
+
+export const fetchHolidaysForYear = async (year) => {
+  const res = await authFetch(`${API}/api/holidays/${year}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load holidays."));
+  return data.map((h) => ({
+    date: h.date,
+    name: h.localName || h.name,
+    type: h.types?.includes("Public") ? "national" : "special",
+  }));
+};
+
+// ─── React Query: councils ──────────────────────────────────────────────────────
+// Councils are now a real entity (see migrations/001_create_councils_table.sql)
+// instead of an implicit grouping of term_period strings — this is the
+// canonical list, independent of which members happen to have terms in them.
+export const COUNCILS_QUERY_KEY = ["councils"];
+
+export const fetchCouncilsList = async () => {
+  const d = await (await fetch(`${API}/api/councils`)).json();
+  return Array.isArray(d) ? d : [];
+};
+
+// ─── Fixed set of valid Sangguniang Bayan council positions ────────────────────
+// Kept as a constant, not free text, since these map to the real, legally
+// fixed composition of a Sangguniang Bayan under RA 7160: one Vice Mayor
+// (presiding officer), regular Councilors, and two ex-officio members (the
+// Liga ng mga Barangay and SK Federation presidents). Lives on the *term*
+// (sb_council_member_terms.position), not the person — a councilor's seat
+// can change between terms.
+export const OFFICIAL_POSITIONS = [
+  "Vice Mayor",
+  "Councilor",
+  "Liga ng mga Barangay President",
+  "SK Federated President",
+];
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 export const toIsoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(

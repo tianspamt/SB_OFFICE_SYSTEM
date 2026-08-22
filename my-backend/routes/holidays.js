@@ -19,6 +19,10 @@ router.get('/:year', verifyToken, async (req, res) => {
 
   const cached = cache.get(year)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    // Same data for every user and barely ever changes — safe for the
+    // browser to skip re-requesting this for a full day. Only set on
+    // success paths; the 502 below must stay uncached.
+    res.set('Cache-Control', 'public, max-age=86400')
     return res.json(cached.data)
   }
 
@@ -27,11 +31,15 @@ router.get('/:year', verifyToken, async (req, res) => {
     if (!upstream.ok) throw new Error(`Upstream returned ${upstream.status}`)
     const data = await upstream.json()
     cache.set(year, { data, fetchedAt: Date.now() })
+    res.set('Cache-Control', 'public, max-age=86400')
     res.json(data)
   } catch (err) {
     // Upstream is slow/down — serve stale cache rather than fail outright;
     // holidays barely change, so day-old (or older) data is still correct.
-    if (cached) return res.json(cached.data)
+    if (cached) {
+      res.set('Cache-Control', 'public, max-age=86400')
+      return res.json(cached.data)
+    }
     console.error('PH holidays fetch error:', err.message)
     res.status(502).json({ error: 'Could not load holidays right now. Please try again later.' })
   }

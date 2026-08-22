@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import styles from "./AdminDashboard.module.css";
 import logo from "../assets/image/balilihan-logo-Large-1.png";
 import {
@@ -49,6 +50,13 @@ import {
   suggestResolutionNumber,
   suggestSessionNumber,
   isDuplicateRecordNumber,
+  OFFICIALS_QUERY_KEY,
+  fetchOfficialsList,
+  COUNCILS_QUERY_KEY,
+  fetchCouncilsList,
+  HOLIDAYS_STALE_TIME_MS,
+  holidaysQueryKey,
+  fetchHolidaysForYear,
 } from "./AdminContext";
 import {
   TermStatusBadge,
@@ -79,15 +87,6 @@ const ARCHIVABLE_TYPES = [
   "session",
 ];
 
-// Fixed set of valid Sangguniang Bayan council positions — kept as a
-// dropdown (instead of free text) to prevent inconsistent/inaccurate entries.
-const OFFICIAL_POSITIONS = [
-  "Vice Mayor",
-  "Councilor",
-  "Liga ng mga Barangay President",
-  "SK Federated President",
-];
-
 export default function AdminDashboard() {
   // ── core ──
   const [users, setUsers] = useState([]);
@@ -110,16 +109,34 @@ export default function AdminDashboard() {
   // directly on its Pending tab instead of the default Published tab.
   const [subTabRequest, setSubTabRequest] = useState(null);
 
-  // ── PH Holidays ──
-  const [phHolidays, setPhHolidays] = useState({});
-  const [fetchingHolidays, setFetchingHolidays] = useState(false);
+  // ── PH Holidays ── cached via React Query (staleTime: 24h, matching the
+  // backend's own cache + Cache-Control) instead of a plain fetch guarded by
+  // "already have this year" — only fetched once the Calendar tab is opened.
   const [showHolidays, setShowHolidays] = useState(true);
-  const [holidaysError, setHolidaysError] = useState("");
+  const currentYear = new Date().getFullYear();
+  const holidaysQueryThisYear = useQuery({
+    queryKey: holidaysQueryKey(currentYear),
+    queryFn: () => fetchHolidaysForYear(currentYear),
+    staleTime: HOLIDAYS_STALE_TIME_MS,
+    enabled: activeTab === "calendar",
+  });
+  const holidaysQueryNextYear = useQuery({
+    queryKey: holidaysQueryKey(currentYear + 1),
+    queryFn: () => fetchHolidaysForYear(currentYear + 1),
+    staleTime: HOLIDAYS_STALE_TIME_MS,
+    enabled: activeTab === "calendar",
+  });
+  const phHolidays = {
+    ...(holidaysQueryThisYear.data ? { [currentYear]: holidaysQueryThisYear.data } : {}),
+    ...(holidaysQueryNextYear.data ? { [currentYear + 1]: holidaysQueryNextYear.data } : {}),
+  };
+  const fetchingHolidays = holidaysQueryThisYear.isLoading || holidaysQueryNextYear.isLoading;
+  const holidaysError =
+    holidaysQueryThisYear.error?.message || holidaysQueryNextYear.error?.message || "";
 
   // ── loading flags ──
   const [fetchingUsers, setFetchingUsers] = useState(false);
   const [fetchingOrdinances, setFetchingOrdinances] = useState(false);
-  const [fetchingOfficials, setFetchingOfficials] = useState(false);
   const [fetchingMinutes, setFetchingMinutes] = useState(false);
   const [fetchingResolutions, setFetchingResolutions] = useState(false);
   const [fetchingAnnouncements, setFetchingAnnouncements] = useState(false);
@@ -221,8 +238,44 @@ export default function AdminDashboard() {
     useState([]);
   const [editResolutionFile, setEditResolutionFile] = useState(null);
 
-  // officials
-  const [officials, setOfficials] = useState([]);
+  // officials — cached via React Query instead of useState/fetchX so
+  // reopening the tab (or invalidating after a mutation) doesn't unmount
+  // OfficialsPage the way the old fetchingX-gated pattern did (see the
+  // announcements flicker fix for the same class of bug).
+  const queryClient = useQueryClient();
+  const { data: officials = [], isLoading: fetchingOfficials } = useQuery({
+    queryKey: OFFICIALS_QUERY_KEY,
+    queryFn: fetchOfficialsList,
+  });
+  // Old call sites just call fetchOfficials() to refresh after a mutation —
+  // keeping the name means none of them need to change.
+  const fetchOfficials = () =>
+    queryClient.invalidateQueries({ queryKey: OFFICIALS_QUERY_KEY });
+
+  // councils — the canonical list (see migrations/001), independent of
+  // which members currently have terms in one. Needed so "Add Council" can
+  // create a real, persisted row instead of a client-only placeholder that
+  // vanished on refresh.
+  const { data: councils = [] } = useQuery({
+    queryKey: COUNCILS_QUERY_KEY,
+    queryFn: fetchCouncilsList,
+  });
+  const handleAddCouncil = async (termLabel) => {
+    try {
+      const res = await authFetch(`${API}/api/councils`, {
+        method: "POST",
+        body: JSON.stringify({ term_label: termLabel }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        queryClient.invalidateQueries({ queryKey: COUNCILS_QUERY_KEY });
+        return { success: true, data: data.data };
+      }
+      return { success: false, error: data.error || "Failed to add council." };
+    } catch {
+      return { success: false, error: "Server error." };
+    }
+  };
   const [newOfficial, setNewOfficial] = useState({
     full_name: "",
     position: "",
@@ -238,10 +291,10 @@ export default function AdminDashboard() {
   // ── edit official states ──
   const [editingOfficial, setEditingOfficial] = useState(null);
   const [editOfficialName, setEditOfficialName] = useState("");
-  const [editOfficialPosition, setEditOfficialPosition] = useState("");
   const [editOfficialPhoto, setEditOfficialPhoto] = useState(null);
 
   const emptyTermForm = {
+    position: "",
     term_period: "",
     term_start: "",
     term_end: "",
@@ -338,7 +391,7 @@ export default function AdminDashboard() {
 
     if (u.role === "admin") fetchUsers();
     fetchOrdinances();
-    fetchOfficials();
+    // officials load via the useQuery above — no manual kickoff needed here
     fetchSessionMinutes();
     fetchResolutions();
     fetchAnnouncements();
@@ -349,9 +402,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === "calendar") {
       fetchLocalEvents();
-      const year = new Date().getFullYear();
-      fetchPHHolidays(year);
-      fetchPHHolidays(year + 1);
+      // PH holidays load via the useQuery pair above (enabled when this tab
+      // is active) — no manual kickoff needed here.
     }
     if (activeTab === "logs") {
       fetchLogs();
@@ -433,17 +485,6 @@ export default function AdminDashboard() {
       setResolutions([]);
     } finally {
       setFetchingResolutions(false);
-    }
-  };
-  const fetchOfficials = async () => {
-    setFetchingOfficials(true);
-    try {
-      const d = await (await fetch(`${API}/api/sb-council-members`)).json();
-      setOfficials(Array.isArray(d) ? d : []);
-    } catch {
-      setOfficials([]);
-    } finally {
-      setFetchingOfficials(false);
     }
   };
   const fetchSessionMinutes = async () => {
@@ -540,37 +581,6 @@ export default function AdminDashboard() {
       setLogStats(d);
     } catch {}
   };
-  const fetchPHHolidays = async (year) => {
-    if (phHolidays[year]) return;
-    setFetchingHolidays(true);
-    setHolidaysError("");
-    try {
-      // Routed through our own backend (routes/holidays.js), which caches
-      // the upstream response for 24h — the data is identical for every
-      // user and barely ever changes, so there's no reason for each
-      // browser to hit the third-party API independently every session.
-      const res = await authFetch(`${API}/api/holidays/${year}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load holidays."));
-      setPhHolidays((prev) => ({
-        ...prev,
-        [year]: data.map((h) => ({
-          date: h.date,
-          name: h.localName || h.name,
-          type: h.types?.includes("Public") ? "national" : "special",
-        })),
-      }));
-    } catch (err) {
-      // Deliberately NOT caching an empty result here — phHolidays[year]
-      // stays unset, so the guard above lets a later retry (revisiting the
-      // tab) try again instead of permanently remembering "no holidays"
-      // for a year that just had a transient failure.
-      setHolidaysError(err.message || "Failed to load holidays.");
-    } finally {
-      setFetchingHolidays(false);
-    }
-  };
-
   // ─── Users / Admins ───────────────────────────────────────────────────────────
   const handleAddAdmin = async () => {
     if (
@@ -973,18 +983,33 @@ export default function AdminDashboard() {
 
   // ─── Officials ────────────────────────────────────────────────────────────────
   const handleAddOfficial = async () => {
-    if (!newOfficial.full_name || !newOfficial.position) {
-      showModalMsg("Full name and position are required!", "error");
+    if (!newOfficial.full_name) {
+      showModalMsg("Full name is required!", "error");
+      return;
+    }
+    // Position is now per-term (see 002_add_council_id_and_position_to_terms
+    // migration) — it only means anything alongside a term, so require all
+    // three together, or none (member added with no term yet; position
+    // gets added later via "+ Add Term" from their profile).
+    const hasTermInfo = newOfficial.term_period || newOfficial.term_start;
+    if (
+      hasTermInfo &&
+      (!newOfficial.term_period || !newOfficial.term_start || !newOfficial.position)
+    ) {
+      showModalMsg(
+        "Term period, start date, and position are required together.",
+        "error"
+      );
       return;
     }
     setSubmitting(true);
     const fd = new FormData();
     fd.append("full_name", newOfficial.full_name);
-    fd.append("position", newOfficial.position);
     if (newOfficial.term_period)
       fd.append("term_period", newOfficial.term_period);
     if (newOfficial.term_start) fd.append("term_start", newOfficial.term_start);
     if (newOfficial.term_end) fd.append("term_end", newOfficial.term_end);
+    if (newOfficial.position) fd.append("position", newOfficial.position);
     fd.append("is_reelected", newOfficial.is_reelected);
     if (newOfficial.notes) fd.append("notes", newOfficial.notes);
     if (officialPhoto) fd.append("photo", officialPhoto);
@@ -1020,21 +1045,19 @@ export default function AdminDashboard() {
   const handleOpenEditOfficial = (o) => {
     setEditingOfficial(o);
     setEditOfficialName(o.full_name || "");
-    setEditOfficialPosition(o.position || "");
     setEditOfficialPhoto(null);
     setModalMessage("");
     setShowEditOfficialModal(true);
   };
 
   const handleUpdateOfficial = async () => {
-    if (!editOfficialName || !editOfficialPosition) {
-      showModalMsg("Full name and position are required!", "error");
+    if (!editOfficialName) {
+      showModalMsg("Full name is required!", "error");
       return;
     }
     setSubmitting(true);
     const fd = new FormData();
     fd.append("full_name", editOfficialName);
-    fd.append("position", editOfficialPosition);
     if (editOfficialPhoto) fd.append("photo", editOfficialPhoto);
     try {
       const res = await authFetch(
@@ -1113,6 +1136,7 @@ export default function AdminDashboard() {
   const handleOpenEditTerm = (memberId, term) => {
     setTermTarget({ memberId, term });
     setTermForm({
+      position: term.position || "",
       term_period: term.term_period || "",
       term_start: term.term_start ? term.term_start.split("T")[0] : "",
       term_end: term.term_end ? term.term_end.split("T")[0] : "",
@@ -2004,6 +2028,8 @@ export default function AdminDashboard() {
           <OfficialsPage
             officials={officials}
             ordinances={ordinances}
+            councils={councils}
+            onAddCouncil={handleAddCouncil}
             setDeleteTarget={setDeleteTarget}
             onViewProfile={(o) => {
               setSelectedOfficialProfile(o);
@@ -2745,24 +2771,6 @@ export default function AdminDashboard() {
                 }
               />
 
-              <label className={styles.fieldLabel}>
-                Position <span style={{ color: "#e53e3e" }}>*</span>
-              </label>
-              <select
-                className={styles.input}
-                value={newOfficial.position}
-                onChange={(e) =>
-                  setNewOfficial({ ...newOfficial, position: e.target.value })
-                }
-              >
-                <option value="">Select position...</option>
-                {OFFICIAL_POSITIONS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
@@ -2808,7 +2816,7 @@ export default function AdminDashboard() {
                     letterSpacing: "0.4px",
                   }}
                 >
-                  <History size={13} /> Term Details{" "}
+                  <History size={13} /> Term &amp; Position{" "}
                   <span
                     style={{
                       fontWeight: 500,
@@ -2817,7 +2825,8 @@ export default function AdminDashboard() {
                       letterSpacing: 0,
                     }}
                   >
-                    (optional)
+                    (optional — fill in once they have a seat; leave blank to
+                    add later)
                   </span>
                 </div>
                 <TermFormFields
@@ -2945,21 +2954,11 @@ export default function AdminDashboard() {
                 value={editOfficialName}
                 onChange={(e) => setEditOfficialName(e.target.value)}
               />
-              <label className={styles.fieldLabel}>
-                Position <span style={{ color: "#e53e3e" }}>*</span>
-              </label>
-              <select
-                className={styles.input}
-                value={editOfficialPosition}
-                onChange={(e) => setEditOfficialPosition(e.target.value)}
-              >
-                <option value="">Select position...</option>
-                {OFFICIAL_POSITIONS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
+              <p className={styles.fieldHint} style={{ marginTop: 4 }}>
+                Position is set per term now — edit it from this member's
+                Term History instead (open their profile, then Edit on the
+                relevant term).
+              </p>
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
