@@ -13,10 +13,16 @@ const verifyToken = async (req, res, next) => {
       audience: 'sb-client'
     })
     const { data: user } = await supabase
-      .from('users').select('is_archived').eq('id', decoded.id).single()
-    if (user?.is_archived)
+      .from('users').select('is_archived, role, position').eq('id', decoded.id).single()
+    if (!user)
+      return res.status(401).json({ error: 'Account not found.' })
+    if (user.is_archived)
       return res.status(401).json({ error: 'This account has been archived.' })
-    req.user = decoded
+    // role/position are re-read live rather than trusted from the JWT
+    // payload, so a permission change (de-admin'ing someone, reassigning
+    // their position) takes effect on their very next request instead of
+    // waiting out the token's up-to-8h lifetime.
+    req.user = { ...decoded, role: user.role, position: user.position }
     next()
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token.' })

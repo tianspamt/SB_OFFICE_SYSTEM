@@ -153,6 +153,7 @@ export const ACTION_COLORS = {
   DELETE: { bg: "#fee2e2", color: "#991b1b" },
   ARCHIVE: { bg: "#fef3c7", color: "#92400e" },
   RESTORE: { bg: "#e0f2fe", color: "#075985" },
+  RESET_PASSWORD: { bg: "#fce7f3", color: "#9d174d" },
   ACCEPT: { bg: "#d1fae5", color: "#065f46" },
   REQUEST_CHANGES: { bg: "#fee2e2", color: "#991b1b" },
   VM_APPROVE: { bg: "#dbeafe", color: "#1e40af" },

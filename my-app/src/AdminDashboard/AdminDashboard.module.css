@@ -1816,6 +1816,54 @@
   .statCard   { padding: 14px; }
 }
 
+/* ── Solid-color stat cards (Users/Admins pages) ──────────────────────────
+   Renamed copies of the block above, not reuses of it — .statCard/.statLabel
+   get redefined further down this file (white-card/icon style, used by
+   LogsPage/DashboardPage-style layouts), and since CSS Modules don't scope
+   class names per-rule, the later definition's background/color wins for
+   every consumer of the shared name. That silently left these gradient
+   cards with the later definition's white background but this block's
+   white text — invisible numbers. Giving this variant its own name sidesteps
+   the collision instead of relying on which rule happens to load last. */
+.statCardSolid {
+  flex: 1;
+  min-width: 120px;
+  background: linear-gradient(135deg, #009439, #009439);
+  border-radius: 12px;
+  padding: 18px;
+  color: #fff;
+}
+
+.statCardSolidGreen  { background: linear-gradient(135deg, #009439, #005822); }
+.statCardSolidOrange { background: linear-gradient(135deg, #005822, #005822); }
+
+.statNumberSolid {
+  font-size: 32px;
+  font-weight: bold;
+}
+
+.statLabelSolid {
+  font-size: 14px;
+  color: rgba(255,255,255,0.75);
+  margin-top: 4px;
+}
+
+/* Shimmer meant to sit on the dark gradient backgrounds above — the plain
+   .skeleton block elsewhere in this file is a light-gray-on-white shimmer
+   built for white table/card backgrounds and is barely visible here. */
+.skeletonSolid {
+  display: inline-block;
+  background: linear-gradient(90deg, rgba(255,255,255,0.2) 25%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+
+@media (max-width: 480px) {
+  .statNumberSolid { font-size: 26px; }
+  .statCardSolid   { padding: 14px; }
+}
+
 /* ============================================================
    MESSAGE BANNER
    ============================================================ */

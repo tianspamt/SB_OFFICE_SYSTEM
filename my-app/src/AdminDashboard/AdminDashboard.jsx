@@ -68,6 +68,7 @@ import {
 } from "./AdminComponents";
 import UsersPage from "./UsersPage";
 import AdminsPage from "./AdminsPage";
+import UserFormModal from "./UserFormModal";
 import OrdinancesPage from "./OrdinancesPage";
 import ResolutionsPage from "./ResolutionsPage";
 import OfficialsPage from "./OfficialsPage";
@@ -152,6 +153,7 @@ export default function AdminDashboard() {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
   const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [resetPasswordTarget, setResetPasswordTarget] = useState(null); // { id, name, email }
   const [showOrdinanceModal, setShowOrdinanceModal] = useState(false);
   const [showEditOrdinanceModal, setShowEditOrdinanceModal] = useState(false);
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -638,7 +640,11 @@ export default function AdminDashboard() {
     fd.append("position", newUser.position || "councilor");
     if (newUserPhoto) fd.append("photo", newUserPhoto);
     try {
-      const res = await fetch(`${API}/api/register`, {
+      // Admin-gated creation goes through POST /api/users (verifyToken +
+      // adminOnly) now, not the public self-registration endpoint
+      // (/api/register) — that endpoint has no auth at all, so this button
+      // used to have no real server-side protection beyond the UI hiding it.
+      const res = await authFetch(`${API}/api/users`, {
         method: "POST",
         body: fd,
       });
@@ -711,6 +717,23 @@ export default function AdminDashboard() {
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
+    }
+  };
+
+  const handleResetPassword = async (user) => {
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`${API}/api/users/${user.id}/reset-password`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) showMsg(`Temporary password sent to ${user.email}.`);
+      else showMsg(data.error || "Failed to reset password.", "error");
+    } catch {
+      showMsg("Server error.", "error");
+    } finally {
+      setSubmitting(false);
+      setResetPasswordTarget(null);
     }
   };
 
@@ -1536,6 +1559,10 @@ export default function AdminDashboard() {
     }
   };
   const isAdmin = admin?.role === "admin";
+  // Computed once here instead of UsersPage/AdminsPage each independently
+  // re-deriving it from the same `users` array.
+  const totalUsersCount = users.filter((u) => u.role === "user").length;
+  const totalAdminsCount = users.filter((u) => u.role === "admin").length;
   const PIN_LIMIT = 3;
   const pinnedCount = announcements.filter((a) => a.pinned).length;
   // Editing an already-pinned post shouldn't count against its own slot.
@@ -1990,11 +2017,26 @@ export default function AdminDashboard() {
             isClerk={isClerk}
           />
         )}
-        {activeTab === "users" && !fetchingUsers && (
-          <UsersPage users={users} setDeleteTarget={setDeleteTarget} onEdit={handleOpenEditUser} />
+        {activeTab === "users" && (
+          <UsersPage
+            users={users}
+            totalUsers={totalUsersCount}
+            totalAdmins={totalAdminsCount}
+            loading={fetchingUsers}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditUser}
+            onResetPassword={setResetPasswordTarget}
+          />
         )}
-        {activeTab === "admins" && !fetchingUsers && (
-          <AdminsPage users={users} setDeleteTarget={setDeleteTarget} onEdit={handleOpenEditUser} />
+        {activeTab === "admins" && (
+          <AdminsPage
+            users={users}
+            totalAdmins={totalAdminsCount}
+            loading={fetchingUsers}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditUser}
+            onResetPassword={setResetPasswordTarget}
+          />
         )}
         {activeTab === "ordinances" && !fetchingOrdinances && (
           <OrdinancesPage
@@ -2134,526 +2176,76 @@ export default function AdminDashboard() {
 
       {/* ══════════════════ MODALS ══════════════════ */}
 
-      {/* Add Admin */}
+      {/* Add Admin / Add User / Edit User+Admin — one shared parameterized
+          modal (UserFormModal.jsx) instead of three near-duplicate ~170-line
+          JSX blocks. */}
       {showAddAdminModal && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => {
+        <UserFormModal
+          mode="add"
+          roleGroup="admin"
+          title="Add New Admin"
+          form={newAdmin}
+          onFieldChange={(field, value) => setNewAdmin({ ...newAdmin, [field]: value })}
+          photo={newAdminPhoto}
+          onPhotoChange={setNewAdminPhoto}
+          modalMessage={modalMessage}
+          modalMessageType={modalMessageType}
+          submitting={submitting}
+          submitLabel="Add Admin"
+          submittingLabel="Adding..."
+          onSubmit={handleAddAdmin}
+          onClose={() => {
             setShowAddAdminModal(false);
             setModalMessage("");
           }}
-        >
-          <div
-            className={styles.modal}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              maxHeight: "90vh",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "20px 24px 16px",
-                borderBottom: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <h2
-                className={styles.modalTitle}
-                style={{ margin: 0, fontSize: 18 }}
-              >
-                Add New Admin
-              </h2>
-              <button
-                onClick={() => {
-                  setShowAddAdminModal(false);
-                  setModalMessage("");
-                }}
-                aria-label="Close modal"
-                style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#64748b",
-                  width: 32,
-                  height: 32,
-                  minWidth: 32,
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: "20px 24px",
-                overscrollBehavior: "contain",
-              }}
-            >
-              <input
-                className={styles.input}
-                placeholder="Full Name"
-                value={newAdmin.name}
-                onChange={(e) =>
-                  setNewAdmin({ ...newAdmin, name: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                placeholder="Username"
-                value={newAdmin.username}
-                onChange={(e) =>
-                  setNewAdmin({ ...newAdmin, username: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                type="email"
-                placeholder="Email Address"
-                value={newAdmin.email}
-                onChange={(e) =>
-                  setNewAdmin({ ...newAdmin, email: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                type="password"
-                placeholder="Password"
-                value={newAdmin.password}
-                onChange={(e) =>
-                  setNewAdmin({ ...newAdmin, password: e.target.value })
-                }
-              />
-              <label className={styles.fieldLabel}>Position</label>
-              <select
-                className={styles.input}
-                value={newAdmin.position}
-                onChange={(e) =>
-                  setNewAdmin({ ...newAdmin, position: e.target.value })
-                }
-              >
-                <option value="secretary">Secretary</option>
-                <option value="clerk">Clerk</option>
-              </select>
-              <div className={styles.fileUploadBox}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  id="newAdminPhotoInput"
-                  style={{ display: "none" }}
-                  onChange={(e) => setNewAdminPhoto(e.target.files[0])}
-                />
-                <label htmlFor="newAdminPhotoInput" className={styles.fileLabel}>
-                  {newAdminPhoto ? (
-                    <>
-                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                      {newAdminPhoto.name}
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} strokeWidth={1.5} /> Click to upload
-                      profile photo (optional)
-                    </>
-                  )}
-                </label>
-              </div>
-              <MAlert />
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                justifyContent: "flex-end",
-                padding: "16px 24px 20px",
-                borderTop: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAddAdminModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleAddAdmin}
-                disabled={submitting}
-              >
-                {submitting ? "Adding..." : "Add Admin"}
-              </button>
-            </div>
-          </div>
-        </div>
+        />
       )}
 
-      {/* Add User */}
       {showAddUserModal && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => {
+        <UserFormModal
+          mode="add"
+          roleGroup="user"
+          title="Add New User"
+          form={newUser}
+          onFieldChange={(field, value) => setNewUser({ ...newUser, [field]: value })}
+          photo={newUserPhoto}
+          onPhotoChange={setNewUserPhoto}
+          modalMessage={modalMessage}
+          modalMessageType={modalMessageType}
+          submitting={submitting}
+          submitLabel="Add User"
+          submittingLabel="Adding..."
+          onSubmit={handleAddUser}
+          onClose={() => {
             setShowAddUserModal(false);
             setModalMessage("");
           }}
-        >
-          <div
-            className={styles.modal}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              maxHeight: "90vh",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "20px 24px 16px",
-                borderBottom: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <h2
-                className={styles.modalTitle}
-                style={{ margin: 0, fontSize: 18 }}
-              >
-                Add New User
-              </h2>
-              <button
-                onClick={() => {
-                  setShowAddUserModal(false);
-                  setModalMessage("");
-                }}
-                aria-label="Close modal"
-                style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#64748b",
-                  width: 32,
-                  height: 32,
-                  minWidth: 32,
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: "20px 24px",
-                overscrollBehavior: "contain",
-              }}
-            >
-              <input
-                className={styles.input}
-                placeholder="Full Name"
-                value={newUser.name}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, name: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                placeholder="Username"
-                value={newUser.username}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, username: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                type="email"
-                placeholder="Email Address"
-                value={newUser.email}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, email: e.target.value })
-                }
-              />
-              <input
-                className={styles.input}
-                type="password"
-                placeholder="Password"
-                value={newUser.password}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, password: e.target.value })
-                }
-              />
-              <label className={styles.fieldLabel}>Position</label>
-              <select
-                className={styles.input}
-                value={newUser.position}
-                onChange={(e) =>
-                  setNewUser({ ...newUser, position: e.target.value })
-                }
-              >
-                <option value="councilor">Councilor</option>
-                <option value="vice_mayor">Vice Mayor</option>
-              </select>
-              <div className={styles.fileUploadBox}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  id="newUserPhotoInput"
-                  style={{ display: "none" }}
-                  onChange={(e) => setNewUserPhoto(e.target.files[0])}
-                />
-                <label htmlFor="newUserPhotoInput" className={styles.fileLabel}>
-                  {newUserPhoto ? (
-                    <>
-                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                      {newUserPhoto.name}
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} strokeWidth={1.5} /> Click to upload
-                      profile photo (optional)
-                    </>
-                  )}
-                </label>
-              </div>
-              <MAlert />
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                justifyContent: "flex-end",
-                padding: "16px 24px 20px",
-                borderTop: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAddUserModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleAddUser}
-                disabled={submitting}
-              >
-                {submitting ? "Adding..." : "Add User"}
-              </button>
-            </div>
-          </div>
-        </div>
+        />
       )}
 
-      {/* ── Edit User / Edit Admin modal (shared) ── */}
       {showEditUserModal && editingUser && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => {
+        <UserFormModal
+          mode="edit"
+          roleGroup={editingUser.role === "admin" ? "admin" : "user"}
+          title={`Edit ${editingUser.role === "admin" ? "Admin" : "User"}`}
+          form={editUserForm}
+          onFieldChange={(field, value) => setEditUserForm({ ...editUserForm, [field]: value })}
+          photo={editUserPhoto}
+          onPhotoChange={setEditUserPhoto}
+          currentPhotoUrl={editingUser.photo}
+          excludeUserId={editingUser.id}
+          modalMessage={modalMessage}
+          modalMessageType={modalMessageType}
+          submitting={submitting}
+          submitLabel="Save Changes"
+          submittingLabel="Saving..."
+          onSubmit={handleUpdateUser}
+          onClose={() => {
             setShowEditUserModal(false);
             setEditingUser(null);
             setModalMessage("");
           }}
-        >
-          <div
-            className={styles.modal}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              maxHeight: "90vh",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "20px 24px 16px",
-                borderBottom: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <h2
-                className={styles.modalTitle}
-                style={{ margin: 0, fontSize: 18 }}
-              >
-                Edit {editingUser.role === "admin" ? "Admin" : "User"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowEditUserModal(false);
-                  setEditingUser(null);
-                  setModalMessage("");
-                }}
-                aria-label="Close modal"
-                style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "#64748b",
-                  width: 32,
-                  height: 32,
-                  minWidth: 32,
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: "20px 24px",
-                overscrollBehavior: "contain",
-              }}
-            >
-              <label className={styles.fieldLabel}>
-                Full Name <span style={{ color: "#e53e3e" }}>*</span>
-              </label>
-              <input
-                className={styles.input}
-                placeholder="Full Name"
-                value={editUserForm.name}
-                onChange={(e) =>
-                  setEditUserForm({ ...editUserForm, name: e.target.value })
-                }
-              />
-              <label className={styles.fieldLabel}>
-                Username <span style={{ color: "#e53e3e" }}>*</span>
-              </label>
-              <input
-                className={styles.input}
-                placeholder="Username"
-                value={editUserForm.username}
-                onChange={(e) =>
-                  setEditUserForm({ ...editUserForm, username: e.target.value })
-                }
-              />
-              <label className={styles.fieldLabel}>
-                Email Address <span style={{ color: "#e53e3e" }}>*</span>
-              </label>
-              <input
-                className={styles.input}
-                type="email"
-                placeholder="Email Address"
-                value={editUserForm.email}
-                onChange={(e) =>
-                  setEditUserForm({ ...editUserForm, email: e.target.value })
-                }
-              />
-              <label className={styles.fieldLabel}>Position</label>
-              <select
-                className={styles.input}
-                value={editUserForm.position}
-                onChange={(e) =>
-                  setEditUserForm({ ...editUserForm, position: e.target.value })
-                }
-              >
-                {editingUser.role === "admin" ? (
-                  <>
-                    <option value="secretary">Secretary</option>
-                    <option value="clerk">Clerk</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="councilor">Councilor</option>
-                    <option value="vice_mayor">Vice Mayor</option>
-                  </>
-                )}
-              </select>
-              <div className={styles.fileUploadBox}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  id="editUserPhotoInput"
-                  style={{ display: "none" }}
-                  onChange={(e) => setEditUserPhoto(e.target.files[0])}
-                />
-                <label htmlFor="editUserPhotoInput" className={styles.fileLabel}>
-                  {editUserPhoto ? (
-                    <>
-                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
-                      {editUserPhoto.name}
-                    </>
-                  ) : (
-                    <>
-                      <Upload size={14} strokeWidth={1.5} /> Click to replace
-                      photo (optional)
-                    </>
-                  )}
-                </label>
-                {editingUser.photo && !editUserPhoto && (
-                  <p className={styles.fileHint}>Current photo on file</p>
-                )}
-              </div>
-              <MAlert />
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                justifyContent: "flex-end",
-                padding: "16px 24px 20px",
-                borderTop: "1px solid #f1f5f9",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditUserModal(false);
-                  setEditingUser(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={handleUpdateUser}
-                disabled={submitting}
-              >
-                {submitting ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
-          </div>
-        </div>
+        />
       )}
 
       {/* ── Add Council Member modal ── */}
@@ -5526,6 +5118,18 @@ export default function AdminDashboard() {
             setDeleteTarget(null);
           }}
           onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {resetPasswordTarget && (
+        <ConfirmModal
+          type="warning"
+          title="Reset this account's password?"
+          message={`A new temporary password will be emailed to "${resetPasswordTarget.email}". They'll be required to set a new password the next time they log in.`}
+          confirmLabel="Send Reset"
+          loading={submitting}
+          onConfirm={() => handleResetPassword(resetPasswordTarget)}
+          onCancel={() => setResetPasswordTarget(null)}
         />
       )}
     </div>

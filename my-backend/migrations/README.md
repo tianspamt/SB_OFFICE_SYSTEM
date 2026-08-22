@@ -41,6 +41,8 @@ with real data in it.
 | 008 | `008_archives_pagination_search_rpc.sql` | Adds `get_archives()`, a Postgres function that unions/filters/paginates the three archive sources (content snapshots, archived users, archived officials) in one query, so `GET /api/archives` can support search + LIMIT/OFFSET without loading the whole archive set into memory. |
 | 009 | `009_archives_sort_direction.sql` | Adds a `p_sort` ('asc'/'desc') parameter to `get_archives()` so the Archives page's "Archived" column header can toggle sort order server-side (sorting only the current page client-side would be misleading under pagination). **Left a stale overload behind — see 010.** |
 | 010 | `010_fix_get_archives_overload.sql` | Fixes 009: `CREATE OR REPLACE FUNCTION` can't change a function's argument count, so 009 created a second overloaded `get_archives` instead of replacing the first, and PostgREST couldn't disambiguate calls (breaking the endpoint entirely, not just sorting). Drops the stale 4-parameter overload. |
+| 011 | `011_case_insensitive_username_email_uniqueness.sql` | Adds case-insensitive unique indexes on `users.username`/`users.email` (on top of the existing case-sensitive constraint) so e.g. "JDoe" and "jdoe" can't both exist. Verified no case-variant duplicates existed before writing this. |
+| 012 | `012_add_must_change_password.sql` | Adds `users.must_change_password` (default false), backing the admin-initiated "reset this user's password" flow — set true when an admin forces a temp password, cleared automatically on the user's next successful password change. |
 
 Also required once, outside the numbered files (a raw `CREATE TABLE` in the
 SQL Editor doesn't inherit the grants Supabase's Table Editor UI applies

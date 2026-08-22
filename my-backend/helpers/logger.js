@@ -1,11 +1,15 @@
 const supabase = require('../config/supabase')
 
-const logActivity = async (req, action, module, description, status = 'success') => {
+// `overrides` lets a caller supply the acting identity directly — needed by
+// unauthenticated routes like POST /register, where there's no req.user
+// (the person registering isn't a logged-in caller, they're the new account
+// itself) but the log entry should still say who it's about, not "Unknown".
+const logActivity = async (req, action, module, description, status = 'success', overrides = {}) => {
   try {
     await supabase.from('activity_logs').insert({
-      user_id:    req.user?.id || null,
-      user_name:  req.user?.name || 'Unknown',
-      user_role:  req.user?.role || 'unknown',
+      user_id:    overrides.userId ?? req.user?.id ?? null,
+      user_name:  overrides.userName ?? req.user?.name ?? 'Unknown',
+      user_role:  overrides.userRole ?? req.user?.role ?? 'unknown',
       action,
       module,
       description,

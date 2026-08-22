@@ -8,11 +8,12 @@ const SibApiV3Sdk = require('sib-api-v3-sdk')
 
 const supabase = require('../config/supabase')
 const { verifyToken, adminOnly, validate } = require('../middleware/auth')
-const { loginLimiter, otpLimiter } = require('../middleware/rateLimiter')
+const { loginLimiter, otpLimiter, accountCreationLimiter } = require('../middleware/rateLimiter')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { isValidEmail, getIP } = require('../helpers/utils')
+const { ROLE_POSITIONS } = require('../helpers/roles')
 
 const JWT_SECRET = process.env.JWT_SECRET
 const SALT_ROUNDS = 10
@@ -80,14 +81,16 @@ router.post('/verify-otp', async (req, res) => {
 })
 
 // POST /api/register
-router.post('/register', upload.single('photo'), handleMulterError, [
-  body('name').trim().escape().notEmpty().withMessage('Full name is required.'),
+router.post('/register', accountCreationLimiter, upload.single('photo'), handleMulterError, [
+  body('name').trim().notEmpty().withMessage('Full name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
   body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
   body('password')
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
     .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
     .matches(/\d/).withMessage('Password must contain at least 1 number.'),
+  body('position').optional({ checkFalsy: true }).isIn(ROLE_POSITIONS.user)
+    .withMessage(`Position must be one of: ${ROLE_POSITIONS.user.join(', ')}.`),
 ], validate, async (req, res) => {
   const { name, username, email, password, position } = req.body
   try {
@@ -108,11 +111,15 @@ router.post('/register', upload.single('photo'), handleMulterError, [
         return res.status(400).json({ error: 'Username or email already exists.' })
       return res.status(500).json({ error: error.message })
     }
-    await supabase.from('activity_logs').insert({
-      user_id: data.id, user_name: name, user_role: 'user',
-      action: 'REGISTER', module: 'Auth',
-      description: `New user registered: ${username}`,
-      ip_address: getIP(req), status: 'success'
+    // Routed through the shared logActivity() helper (like /admin/add)
+    // instead of a raw insert, with the new account's identity passed as an
+    // override since there's no req.user here — the caller isn't logged in,
+    // they ARE the new account. This also means a logging hiccup no longer
+    // throws into the outer catch and reports a false 500 for a
+    // registration that actually already succeeded (logActivity swallows
+    // its own errors instead of propagating them).
+    await logActivity(req, 'REGISTER', 'Auth', `New user registered: ${username}`, 'success', {
+      userId: data.id, userName: name, userRole: 'user',
     })
     res.json({ success: true, userId: data.id })
   } catch (err) {
@@ -165,7 +172,7 @@ router.post('/login', loginLimiter, [
     })
     res.json({
   success: true, token,
-  user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, position: user.position, photo: user.photo }
+  user: { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, position: user.position, photo: user.photo, mustChangePassword: user.must_change_password }
 })
   } catch (err) {
     console.error('LOGIN ERROR:', err)
@@ -180,14 +187,16 @@ router.post('/logout', verifyToken, async (req, res) => {
 })
 
 // POST /api/admin/add
-router.post('/admin/add', verifyToken, adminOnly, upload.single('photo'), handleMulterError, [
-  body('name').trim().escape().notEmpty().withMessage('Name is required.'),
+router.post('/admin/add', accountCreationLimiter, verifyToken, adminOnly, upload.single('photo'), handleMulterError, [
+  body('name').trim().notEmpty().withMessage('Name is required.'),
   body('username').trim().escape().notEmpty().isAlphanumeric().withMessage('Username must be alphanumeric.'),
   body('email').trim().normalizeEmail().isEmail().withMessage('Invalid email format.'),
   body('password')
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
     .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
     .matches(/\d/).withMessage('Password must contain at least 1 number.'),
+  body('position').optional({ checkFalsy: true }).isIn(ROLE_POSITIONS.admin)
+    .withMessage(`Position must be one of: ${ROLE_POSITIONS.admin.join(', ')}.`),
 ], validate, async (req, res) => {
   const { name, username, email, password, position } = req.body
 try {
