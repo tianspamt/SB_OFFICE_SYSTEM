@@ -6,6 +6,8 @@ const { verifyToken, adminOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
+const { notify, notificationEmailHtml } = require('../helpers/notify')
+const { escapeHtml } = require('../helpers/utils')
 
 const AUTHOR_SELECT = '*, author:users!author_id(name, photo)'
 
@@ -164,7 +166,7 @@ router.patch('/:id', verifyToken, adminOnly, async (req, res) => {
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
     const { data: existing, error: fetchErr } = await supabase
-      .from('content_posts').select('title, images').eq('id', req.params.id).single()
+      .from('content_posts').select('title, images, author_id').eq('id', req.params.id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Post not found.' })
 
     for (const img of existing.images || []) await deleteFromStorage(img.path)
@@ -172,6 +174,21 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
     const { error } = await supabase.from('content_posts').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'DELETE', 'Content Management', `Deleted content: ${existing.title}`)
+    // Moderation delete — someone other than the post's own author removed
+    // it. A self-delete (the author cleaning up their own post) is not a
+    // moderation action and shouldn't notify anyone.
+    if (existing.author_id && existing.author_id !== req.user.id) {
+      notify({
+        recipientId: existing.author_id,
+        message: `Your content post was removed by ${req.user.name}: ${existing.title}`,
+        entityType: 'content_post', entityId: req.params.id,
+        emailSubject: `Content Post Removed: ${existing.title}`,
+        emailHtml: notificationEmailHtml(
+          'Content Post Removed',
+          `Your post <strong>${escapeHtml(existing.title)}</strong> was removed by ${escapeHtml(req.user.name)}.`
+        ),
+      })
+    }
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

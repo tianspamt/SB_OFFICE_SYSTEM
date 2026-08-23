@@ -13,6 +13,7 @@ const { logActivity } = require('../helpers/logger')
 const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -181,7 +182,8 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         filetype: req.file.mimetype,
         filepath: fileName,
         extracted_text,
-        status: 'pending'
+        status: 'pending',
+        created_by: req.user.id,
       })
       .select().single()
 
@@ -201,6 +203,15 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     }
 
     await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution: ${title}`)
+    notifyByPosition('secretary', {
+      message: `New resolution draft submitted: ${title}`,
+      entityType: 'resolution', entityId: resolution.id,
+      emailSubject: `New Resolution Draft: ${title}`,
+      emailHtml: notificationEmailHtml(
+        'New Resolution Draft Submitted',
+        `A new resolution draft, <strong>${escapeHtml(title)}</strong>, was submitted and is waiting on your review.`
+      ),
+    })
     res.json({ success: true, id: resolution.id, data: resolution })
   } catch (err) {
     console.error('Resolution upload error:', err)

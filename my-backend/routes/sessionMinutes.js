@@ -11,6 +11,7 @@ const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
 const { escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile } = require('../helpers/utils')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
 
 // GET /api/session-minutes
@@ -87,11 +88,21 @@ router.post('/', verifyToken, canCreateDraft, async (req, res) => {
         venue: venue || null,
         agenda: agenda || null,
         minutes_text: minutes_text || null,
-        status: 'pending'
+        status: 'pending',
+        created_by: req.user.id,
       })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'CREATE', 'Sessions', `Added session: ${session_number || session_date}`)
+    notifyByPosition('secretary', {
+      message: `New session minutes draft submitted: ${session_number || session_date}`,
+      entityType: 'session_minutes', entityId: data.id,
+      emailSubject: `New Session Minutes Draft: ${session_number || session_date}`,
+      emailHtml: notificationEmailHtml(
+        'New Session Minutes Draft Submitted',
+        `A new session minutes draft, <strong>${escapeHtml(session_number || session_date)}</strong>, was submitted and is waiting on your review.`
+      ),
+    })
     res.json({ success: true, id: data.id, data })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -155,12 +166,22 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         minutes_text: extractedText || minutes_text || null,
         filename: req.file.originalname,
         filetype: mime,
-        status: 'pending'
+        status: 'pending',
+        created_by: req.user.id,
       })
       .select().single()
 
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session: ${session_number || session_date}`)
+    notifyByPosition('secretary', {
+      message: `New session minutes draft submitted: ${session_number || session_date}`,
+      entityType: 'session_minutes', entityId: data.id,
+      emailSubject: `New Session Minutes Draft: ${session_number || session_date}`,
+      emailHtml: notificationEmailHtml(
+        'New Session Minutes Draft Submitted',
+        `A new session minutes draft, <strong>${escapeHtml(session_number || session_date)}</strong>, was submitted and is waiting on your review.`
+      ),
+    })
     res.json({ success: true, id: data.id, data })
   } catch (err) {
     if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)

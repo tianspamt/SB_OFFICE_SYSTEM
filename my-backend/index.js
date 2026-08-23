@@ -6,6 +6,7 @@ const bodyParser = require('body-parser')
 const helmet = require('helmet')
 
 const { globalLimiter } = require('./middleware/rateLimiter')
+require('./helpers/reminderJob') // starts the daily 8am calendar-reminder cron schedule
 
 // ---- ROUTES ----
 const authRoutes          = require('./routes/auth')

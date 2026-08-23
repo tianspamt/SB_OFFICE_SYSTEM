@@ -14,6 +14,7 @@ const { uploadToStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { isValidEmail, getIP } = require('../helpers/utils')
 const { ROLE_POSITIONS } = require('../helpers/roles')
+const { emailShell, BRAND_GREEN } = require('../helpers/notify')
 
 const JWT_SECRET = process.env.JWT_SECRET
 const SALT_ROUNDS = 10
@@ -40,21 +41,18 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
     sendSmtpEmail.sender = { name: 'Sangguniang Bayan Balilihan', email: process.env.BREVO_SENDER_EMAIL }
     sendSmtpEmail.to = [{ email: email.trim() }]
     sendSmtpEmail.subject = 'Your Registration Verification Code'
-    sendSmtpEmail.htmlContent = `
-      <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:12px;">
-        <div style="text-align:center;margin-bottom:24px;">
-          <h2 style="color:#2e7d32;margin:0 0 4px;">Office of Sangguniang Bayan</h2>
-          <p style="color:#888;font-size:13px;margin:0;">Municipality of Balilihan, Bohol</p>
+    sendSmtpEmail.htmlContent = emailShell({
+      icon: '🔐',
+      heading: 'Your Verification Code',
+      bodyHtml: `
+        <div style="text-align:center;">
+          <p style="color:#555;font-size:14px;margin:0 0 8px;">Enter this code to continue:</p>
+          <div style="font-size:38px;font-weight:800;letter-spacing:12px;color:${BRAND_GREEN};text-align:center;margin:16px 0;padding:16px;background:#eafaf1;border-radius:10px;">${otp}</div>
+          <p style="color:#888;font-size:13px;margin-top:16px;">This code expires in <strong>10 minutes</strong>.<br/>Do not share this code with anyone.</p>
         </div>
-        <p style="color:#555;text-align:center;font-size:15px;margin-bottom:8px;">Your verification code is:</p>
-        <div style="font-size:42px;font-weight:bold;letter-spacing:14px;color:#2e7d32;text-align:center;margin:16px 0;padding:16px;background:#f0faf0;border-radius:8px;">${otp}</div>
-        <p style="color:#888;font-size:13px;text-align:center;margin-top:16px;">
-          This code expires in <strong>10 minutes</strong>.<br/>Do not share this code with anyone.
-        </p>
-        <hr style="border:none;border-top:1px solid #eee;margin:24px 0;"/>
-        <p style="color:#aaa;font-size:11px;text-align:center;">If you did not request this, please ignore this email.</p>
-      </div>
-    `
+      `,
+      footerNote: 'If you did not request this, please ignore this email.',
+    })
     await emailApi.sendTransacEmail(sendSmtpEmail)
     res.json({ success: true, message: 'OTP sent successfully.' })
   } catch (err) {

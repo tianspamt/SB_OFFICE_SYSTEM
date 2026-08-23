@@ -4,12 +4,50 @@ const router = express.Router()
 const supabase = require('../config/supabase')
 const { verifyToken } = require('../middleware/auth')
 const { logActivity } = require('../helpers/logger')
+const { notify, notificationEmailHtml } = require('../helpers/notify')
+const { escapeHtml } = require('../helpers/utils')
 
 const MODULE_LABELS = {
   ordinance: 'Ordinances',
   resolution: 'Resolutions',
   session_minutes: 'Sessions',
   announcement: 'Announcements',
+}
+
+// entity_type -> the table + how to derive its display label, for the two
+// legislative types that have a real drafter/reviewer conversation to
+// resolve "the other party" from.
+const LEGISLATIVE_TABLES = {
+  ordinance: { table: 'ordinances', labelOf: (r) => r.title },
+  resolution: { table: 'resolutions', labelOf: (r) => r.title },
+  session_minutes: { table: 'session_minutes', labelOf: (r) => r.session_number || r.session_date },
+}
+
+// Notifies "the other party" in a legislative record's comment thread: the
+// record's drafter (created_by) and its last reviewer (reviewed_by) are the
+// two people actually having the conversation — whichever of them didn't
+// just post this comment gets notified. Announcements are deliberately
+// excluded: their comment threads are public/social (see AnnouncementsPage),
+// not a two-party review conversation, so there's no single "other party"
+// to resolve there.
+async function notifyOtherParty(req, entityType, entityId, commentText) {
+  const cfg = LEGISLATIVE_TABLES[entityType]
+  if (!cfg) return
+  const { data: record } = await supabase.from(cfg.table).select('*').eq('id', entityId).single()
+  if (!record) return
+  const otherPartyId = req.user.id === record.created_by ? record.reviewed_by : record.created_by
+  if (!otherPartyId || otherPartyId === req.user.id) return
+  const label = cfg.labelOf(record)
+  notify({
+    recipientId: otherPartyId,
+    message: `New comment on ${label}: "${commentText}"`,
+    entityType, entityId,
+    emailSubject: `New Comment: ${label}`,
+    emailHtml: notificationEmailHtml(
+      'New Comment',
+      `${escapeHtml(req.user.name)} commented on <strong>${escapeHtml(label)}</strong>:<br/><em>"${escapeHtml(commentText)}"</em>`
+    ),
+  })
 }
 
 // ─── GET /api/comments?entity_type=ordinance&entity_id=123 ────────────────────
@@ -50,6 +88,7 @@ router.post('/', verifyToken, async (req, res) => {
       .single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'COMMENT', MODULE_LABELS[entity_type] || 'Comments', `Commented on ${entity_type} #${entity_id}`)
+    notifyOtherParty(req, entity_type, entity_id, text.trim())
     res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })

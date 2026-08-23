@@ -5,6 +5,7 @@ const supabase = require('../config/supabase')
 const { verifyToken, adminOnly } = require('../middleware/auth')
 const { logActivity } = require('../helpers/logger')
 const { sendEmail } = require('../helpers/email')
+const { emailShell, BRAND_GREEN_DARK } = require('../helpers/notify')
 const { escapeHtml } = require('../helpers/utils')
 
 const AUTHOR_SELECT = '*, author:users!created_by(name, photo, position, role), announcement_reactions(emoji, user_id), announcement_reads(user_id, reader:users!user_id(name))'
@@ -28,38 +29,49 @@ const assertPinAllowed = async () => {
     throw new Error(`Only ${PIN_LIMIT} announcements can be pinned at once. Unpin one first.`)
 }
 
-// Urgent is the one priority tier that actually does something: it emails
-// every other active user. Fire-and-forget from the route handlers below —
-// a slow/failed email should never block or fail the announcement itself.
-const notifyUrgent = async (announcement) => {
+// Emails every other active user about a new announcement — urgent or not,
+// unlike the old urgent-only version. Respects each recipient's
+// email_notifications opt-out, same as every other trigger in the app (the
+// old version BCC'd every active user regardless, which was an inconsistency
+// rather than a deliberate "urgent bypasses opt-out" design). Urgent posts
+// get a bold dark-green "URGENT" pill above the title instead of the old red
+// badge — kept off red so it stays on-brand with the rest of the system's
+// green, but still visually distinct from a normal announcement. Fire-and-
+// forget from the route handlers below — a slow/failed email should never
+// block or fail the announcement itself.
+const notifyAnnouncement = async (announcement) => {
   try {
     const { data: recipients, error } = await supabase
       .from('users')
       .select('email')
       .eq('is_archived', false)
+      .eq('email_notifications', true)
       .neq('id', announcement.created_by ?? -1)
     if (error) throw new Error(error.message)
     const emails = (recipients || []).map((r) => r.email).filter(Boolean)
     if (!emails.length) return
 
+    const isUrgent = announcement.priority === 'urgent'
+    const bodyHtml = `
+      ${isUrgent ? `
+        <div style="text-align:center;margin-bottom:16px;">
+          <span style="display:inline-block;background:${BRAND_GREEN_DARK};color:#fff;font-weight:bold;font-size:11px;letter-spacing:1px;padding:5px 14px;border-radius:20px;">URGENT ANNOUNCEMENT</span>
+        </div>
+      ` : ''}
+      <span style="white-space:pre-wrap;">${escapeHtml(announcement.body)}</span>
+    `
     await sendEmail({
       to: [{ email: process.env.BREVO_SENDER_EMAIL, name: 'Sangguniang Bayan Balilihan' }],
       bcc: emails.map((email) => ({ email })),
-      subject: `URGENT: ${announcement.title}`,
-      htmlContent: `
-        <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #feb2b2;border-radius:12px;">
-          <div style="text-align:center;margin-bottom:20px;">
-            <span style="display:inline-block;background:#fff5f5;color:#c53030;font-weight:bold;font-size:12px;letter-spacing:1px;padding:4px 12px;border-radius:20px;border:1px solid #feb2b2;">URGENT ANNOUNCEMENT</span>
-          </div>
-          <h2 style="color:#1a365d;margin:0 0 12px;">${escapeHtml(announcement.title)}</h2>
-          <p style="color:#4a5568;font-size:14px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(announcement.body)}</p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;"/>
-          <p style="color:#aaa;font-size:11px;text-align:center;">Sangguniang Bayan Office System — Municipality of Balilihan, Bohol</p>
-        </div>
-      `,
+      subject: isUrgent ? `URGENT: ${announcement.title}` : `New Announcement: ${announcement.title}`,
+      htmlContent: emailShell({
+        icon: isUrgent ? '⚠️' : '📰',
+        heading: announcement.title,
+        bodyHtml,
+      }),
     })
   } catch (err) {
-    console.error('Urgent announcement email error:', err.message)
+    console.error('Announcement email error:', err.message)
   }
 }
 
@@ -150,7 +162,7 @@ router.post('/', verifyToken, adminOnly, async (req, res) => {
       .select(AUTHOR_SELECT).single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'CREATE', 'Announcements', `Posted announcement: ${title}`)
-    if (safePriority === 'urgent') notifyUrgent(data)
+    notifyAnnouncement(data)
     res.json({ success: true, id: data.id, data })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -202,8 +214,10 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPDATE', 'Announcements', `Updated announcement: ${title}`)
     // Only notify on the transition into urgent — re-saving an already-urgent
-    // post (e.g. fixing a typo) shouldn't re-email the whole office.
-    if (safePriority === 'urgent' && existing.priority !== 'urgent') notifyUrgent(data)
+    // post (e.g. fixing a typo) shouldn't re-email the whole office. Edits
+    // that stay/become normal priority never re-notify either — the email
+    // already went out once, at creation.
+    if (safePriority === 'urgent' && existing.priority !== 'urgent') notifyAnnouncement(data)
     res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })

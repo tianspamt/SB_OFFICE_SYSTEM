@@ -14,6 +14,7 @@ const { logActivity } = require('../helpers/logger')
 const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -256,7 +257,8 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         filetype: req.file.mimetype,
         filepath: fileName,
         extracted_text,
-        status: 'pending'
+        status: 'pending',
+        created_by: req.user.id,
       })
       .select().single()
 
@@ -276,6 +278,15 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     }
 
     await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance: ${title}`)
+    notifyByPosition('secretary', {
+      message: `New ordinance draft submitted: ${title}`,
+      entityType: 'ordinance', entityId: ordinance.id,
+      emailSubject: `New Ordinance Draft: ${title}`,
+      emailHtml: notificationEmailHtml(
+        'New Ordinance Draft Submitted',
+        `A new ordinance draft, <strong>${escapeHtml(title)}</strong>, was submitted and is waiting on your review.`
+      ),
+    })
     res.json({ success: true, id: ordinance.id, data: ordinance })
   } catch (err) {
     console.error('Ordinance upload error:', err)

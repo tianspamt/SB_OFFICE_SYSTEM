@@ -1,8 +1,9 @@
 const express = require('express')
 const supabase = require('../config/supabase')
 const { verifyToken, secretaryOnly, viceMayorOnly } = require('../middleware/auth')
-const { canManageLegislativeRecord } = require('./utils')
+const { canManageLegislativeRecord, escapeHtml } = require('./utils')
 const { logActivity } = require('./logger')
+const { notify, notifyByPosition, notificationEmailHtml } = require('./notify')
 
 // Builds the shared review-workflow routes — accept / request-changes /
 // vm-approve / publish / archive — for one legislative record type
@@ -77,6 +78,15 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'ACCEPT', activityModule, `Accepted draft: ${labelOf(existing)}`)
+      notifyByPosition('vice_mayor', {
+        message: `${singularLabel} ready for your approval: ${labelOf(existing)}`,
+        entityType, entityId: id,
+        emailSubject: `${singularLabel} Ready for Your Approval`,
+        emailHtml: notificationEmailHtml(
+          `${singularLabel} Ready for Your Approval`,
+          `<strong>${escapeHtml(labelOf(existing))}</strong> was accepted by the Secretary and is now waiting on your Vice-Mayor approval.`
+        ),
+      })
       res.json({ success: true, data })
     } catch (err) {
       res.status(500).json({ error: err.message })
@@ -107,6 +117,16 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'REQUEST_CHANGES', activityModule, `Requested changes on draft: ${labelOf(existing)}`)
+      notify({
+        recipientId: existing.created_by,
+        message: `Changes requested on your ${lower}: ${labelOf(existing)}`,
+        entityType, entityId: id,
+        emailSubject: `Changes Requested: ${labelOf(existing)}`,
+        emailHtml: notificationEmailHtml(
+          'Changes Requested',
+          `The Secretary requested changes on <strong>${escapeHtml(labelOf(existing))}</strong>:<br/><em>"${escapeHtml(comment.trim())}"</em>`
+        ),
+      })
       res.json({ success: true, data })
     } catch (err) {
       res.status(500).json({ error: err.message })
@@ -126,6 +146,15 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'VM_APPROVE', activityModule, `Vice-Mayor approved: ${labelOf(existing)}`)
+      notifyByPosition('secretary', {
+        message: `Vice-Mayor approved, ready to publish: ${labelOf(existing)}`,
+        entityType, entityId: id,
+        emailSubject: `Approved — Ready to Publish: ${labelOf(existing)}`,
+        emailHtml: notificationEmailHtml(
+          'Ready to Publish',
+          `<strong>${escapeHtml(labelOf(existing))}</strong> was approved by the Vice-Mayor and is ready for you to publish.`
+        ),
+      })
       res.json({ success: true, data })
     } catch (err) {
       res.status(500).json({ error: err.message })
@@ -143,6 +172,16 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'PUBLISH', activityModule, `Published: ${labelOf(existing)}`)
+      notify({
+        recipientId: existing.created_by,
+        message: `Your ${lower} was published: ${labelOf(existing)}`,
+        entityType, entityId: id,
+        emailSubject: `Published: ${labelOf(existing)}`,
+        emailHtml: notificationEmailHtml(
+          'Published',
+          `<strong>${escapeHtml(labelOf(existing))}</strong> has been officially published.`
+        ),
+      })
       res.json({ success: true, data })
     } catch (err) {
       res.status(500).json({ error: err.message })

@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase'); // adjust if filename differs
 const { verifyToken } = require('../middleware/auth');
+const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify');
+const { escapeHtml } = require('../helpers/utils');
+
+// Who can create/edit/delete an office-wide event, beyond the admin role
+// itself. Secretary and Clerk are the two positions that staff the calendar
+// day-to-day and may post office-wide events; Vice-Mayor/Councilor events
+// stay personal-only, by design.
+const canManageOfficialEvents = (user) =>
+  user.role === 'admin' || ['secretary', 'clerk'].includes(user.position);
 
 // start_date/end_date are ISO "YYYY-MM-DD" strings, so plain string
 // comparison already sorts chronologically — no need to parse into Date
@@ -39,7 +48,6 @@ query = query.or(`is_admin_event.eq.true,created_by.eq.${userId}`);
 router.post('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
     const { title, description, location, start_date, start_time, end_date, end_time, all_day, color } = req.body;
 
     if (!title || !start_date) {
@@ -60,13 +68,27 @@ router.post('/', verifyToken, async (req, res) => {
         end_time: all_day ? null : (end_time || null),
         all_day: !!all_day,
         color: color || '#009439',
-        is_admin_event: userRole === 'admin',
+        is_admin_event: canManageOfficialEvents(req.user),
         created_by: userId,
       }])
       .select()
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    // Only official/admin events are office-wide — a personal event
+    // (is_admin_event: false) is private to its creator (see GET's read
+    // scope above), so broadcasting it to every staff member would leak it.
+    if (data.is_admin_event) {
+      notifyAllStaff({
+        message: `New schedule: ${title} on ${start_date}`,
+        entityType: 'calendar_event', entityId: data.id,
+        emailSubject: `New Schedule: ${title}`,
+        emailHtml: notificationEmailHtml(
+          'New Schedule Added',
+          `A new event was added to the calendar: <strong>${escapeHtml(title)}</strong> on ${escapeHtml(start_date)}.`
+        ),
+      });
+    }
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -77,7 +99,6 @@ router.post('/', verifyToken, async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
     const eventId = req.params.id;
 
     const { data: existing, error: fetchError } = await supabase
@@ -89,12 +110,12 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (fetchError || !existing) return res.status(404).json({ error: 'Event not found' });
 
     // Write scope matches read scope exactly: an official event can only be
-    // touched by an admin; a personal event can only be touched by the
-    // person who created it — no admin override on someone else's personal
-    // reminder, since admins can't even see other people's personal events
-    // through GET in the first place.
+    // touched by whoever can also create one; a personal event can only be
+    // touched by the person who created it — no override on someone else's
+    // personal reminder, since even admins can't see other people's personal
+    // events through GET in the first place.
     if (existing.is_admin_event) {
-      if (userRole !== 'admin') return res.status(403).json({ error: 'You cannot edit this event' });
+      if (!canManageOfficialEvents(req.user)) return res.status(403).json({ error: 'You cannot edit this event' });
     } else if (existing.created_by !== userId) {
       return res.status(403).json({ error: 'You cannot edit this event' });
     }
@@ -131,7 +152,6 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
     const eventId = req.params.id;
 
     const { data: existing, error: fetchError } = await supabase
@@ -144,7 +164,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // Same write-matches-read scoping as PUT above.
     if (existing.is_admin_event) {
-      if (userRole !== 'admin') return res.status(403).json({ error: 'You cannot delete this event' });
+      if (!canManageOfficialEvents(req.user)) return res.status(403).json({ error: 'You cannot delete this event' });
     } else if (existing.created_by !== userId) {
       return res.status(403).json({ error: 'You cannot delete this event' });
     }
