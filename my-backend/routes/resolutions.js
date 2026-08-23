@@ -6,12 +6,13 @@ const os = require('os')
 const Tesseract = require('tesseract.js')
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly } = require('../middleware/auth')
+const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause } = require('../helpers/utils')
 const { resolveCurrentTermId } = require('../helpers/officials')
+const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -59,34 +60,19 @@ async function extractText(file) {
   return null
 }
 
-// ─── Helper: extract text based on file type ──────────────────────────────────
-// PDFs and Word files are stored only — no extraction at upload time.
-// Only images run through OCR here.
-async function extractText(file) {
-  const mime = file.mimetype
-  const isImage = mime.startsWith('image/')
-
-  if (isImage) {
-    let tempPath = null
-    try {
-      tempPath = path.join(os.tmpdir(), `${Date.now()}-${file.originalname}`)
-      fs.writeFileSync(tempPath, file.buffer)
-      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
-      fs.unlinkSync(tempPath)
-      return text.trim() || null
-    } catch (err) {
-      console.error('OCR extract error:', err.message)
-      if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
-      return null
-    }
-  }
-
-  // PDF and Word files — no extraction, just store
-  return null
-}
-
 // GET /api/resolutions
-router.get('/', async (req, res) => {
+// Auth-gated — drafts/pending review copies live here alongside published
+// ones. A caller that doesn't ask for a specific status gets published-only
+// (matching content_posts' public-safe default); the review queues (see
+// ResolutionsPage.jsx) pass an explicit status list to see drafts, and the
+// admin dashboard's own counts/recent-activity view passes status=all to see
+// every status without the caller having to enumerate them.
+//
+// Pagination is opt-in: pass both page and limit to get back
+// { data, total, page, limit, totalPages } instead of a bare array. Existing
+// callers that don't paginate (the pending queues, the dashboard's full-list
+// fetch, PendingRecordsWidget) are unaffected.
+router.get('/', verifyToken, async (req, res) => {
   try {
     const { year, search } = req.query
     let query = supabase
@@ -95,21 +81,27 @@ router.get('/', async (req, res) => {
         official_id, term_id,
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
-      )`)
+      )`, { count: 'exact' })
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
-    if (search) query = query.ilike('title', `%${search}%`)
-    if (req.query.status) {
-      const statuses = req.query.status.split(',')
+    if (search) query = query.or(`${orIlikeClause('title', search)},${orIlikeClause('resolution_number', search)}`)
+    if (req.query.status !== 'all') {
+      const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
     }
-    const { data, error } = await query
+    const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
+    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
+    if (page && limit) query = query.range((page - 1) * limit, page * limit - 1)
+    const { data, error, count } = await query
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(r => ({
       ...r,
       officials: mapOfficials(r.resolution_officials),
       resolution_officials: undefined
     }))
+    if (page && limit) {
+      return res.json({ data: parsed, total: count ?? parsed.length, page, limit, totalPages: Math.max(Math.ceil((count ?? parsed.length) / limit), 1) })
+    }
     res.json(parsed)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -117,7 +109,7 @@ router.get('/', async (req, res) => {
 })
 
 // GET /api/resolutions/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', verifyToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('resolutions')
@@ -141,8 +133,10 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/resolutions/upload
-// POST /api/resolutions/upload
-router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+// Any of the four legislative positions can originate a draft — Secretary
+// and Vice-Mayor sometimes draft directly rather than only reviewing/
+// approving what Clerk/Councilor submit.
+router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { resolution_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
@@ -193,7 +187,10 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
 })
 
 // PUT /api/resolutions/:id
-router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+// Who may edit depends on which bucket the record is currently in — see
+// canManageLegislativeRecord: Secretary/Clerk own it once published,
+// Clerk/Councilor own everything before that.
+router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { resolution_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
@@ -201,7 +198,13 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
     const { data: existing, error: fetchErr } = await supabase
       .from('resolutions').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Resolution not found.' })
+    if (!canManageLegislativeRecord(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to edit this resolution.' })
     const updateData = { resolution_number: resolution_number || null, title, year: year ? parseInt(year) : null }
+    // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
+    // it goes straight back into the Secretary's queue instead of requiring
+    // a separate "resubmit" click.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
     if (req.file) {
       if (existing.filepath) await deleteFromStorage(existing.filepath)
       const { fileName } = await uploadToStorage(req.file, 'resolutions')
@@ -213,21 +216,25 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
       .from('resolutions').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
     const officialIds = safeParseJSON(officials, [])
-    // Preserve term_id for officials who remain selected — see the same
-    // comment in ordinances.js's PUT /:id for why (this route re-links on
-    // every edit regardless of whether the officials list even changed).
+    // Diff against the existing links instead of blanket delete+reinsert on
+    // every edit — see the same comment in ordinances.js's PUT /:id. An
+    // official who stays selected keeps their row (and its historical
+    // term_id snapshot) untouched; only actual removals/additions hit the DB.
     const { data: existingLinks } = await supabase
       .from('resolution_officials').select('official_id, term_id').eq('resolution_id', id)
-    const existingTermByOfficial = new Map((existingLinks || []).map(l => [l.official_id, l.term_id]))
+    const existingIds = new Set((existingLinks || []).map(l => l.official_id))
+    const newIds = new Set(officialIds)
+    const toRemove = [...existingIds].filter(oid => !newIds.has(oid))
+    const toAdd = [...newIds].filter(oid => !existingIds.has(oid))
 
-    await supabase.from('resolution_officials').delete().eq('resolution_id', id)
-    if (officialIds.length > 0) {
-      const rows = await Promise.all(officialIds.map(async (oid) => ({
+    if (toRemove.length > 0) {
+      await supabase.from('resolution_officials').delete().eq('resolution_id', id).in('official_id', toRemove)
+    }
+    if (toAdd.length > 0) {
+      const rows = await Promise.all(toAdd.map(async (oid) => ({
         resolution_id: id,
         official_id: oid,
-        term_id: existingTermByOfficial.has(oid)
-          ? existingTermByOfficial.get(oid)
-          : await resolveCurrentTermId(oid),
+        term_id: await resolveCurrentTermId(oid),
       })))
       await supabase.from('resolution_officials').insert(rows)
     }
@@ -238,34 +245,13 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
   }
 })
 
-// DELETE /api/resolutions/:id
-// Archives the resolution instead of a hard delete via archive_resolution()
-// (see ordinances.js and migrations/007 for the same transactional pattern).
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
-  try {
-    const { data: snapshot, error } = await supabase.rpc('archive_resolution', {
-      p_id: req.params.id,
-      p_archived_by: req.user.id,
-    })
-    if (error) {
-      if (error.code === 'P0002') return res.status(404).json({ error: 'Resolution not found.' })
-      return res.status(500).json({ error: error.message })
-    }
-
-    await logActivity(req, 'ARCHIVE', 'Resolutions', `Archived resolution: ${snapshot.title}`)
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
 // GET /api/resolutions/:id/print
-router.get('/:id/print', async (req, res) => {
+router.get('/:id/print', verifyToken, async (req, res) => {
   try {
     const { data: r, error } = await supabase
       .from('resolutions').select('*').eq('id', req.params.id).single()
     if (error || !r) return res.status(404).send('Not found')
-    res.send(`<!DOCTYPE html><html><head><title>${r.resolution_number || r.title}</title>
+    res.send(`<!DOCTYPE html><html><head><title>${escapeHtml(r.resolution_number || r.title)}</title>
       <style>
         * { box-sizing:border-box; margin:0; padding:0; }
         body { font-family:'Times New Roman',serif; max-width:850px; margin:0 auto; padding:48px 60px; color:#111; }
@@ -295,14 +281,14 @@ router.get('/:id/print', async (req, res) => {
         </div>
       </div>
       <div class="doc-title">
-        ${r.resolution_number ? `<h2>${r.resolution_number}</h2>` : ''}
-        <h1>${r.title}</h1>
+        ${r.resolution_number ? `<h2>${escapeHtml(r.resolution_number)}</h2>` : ''}
+        <h1>${escapeHtml(r.title)}</h1>
       </div>
       <div class="meta">
-        ${r.year ? `Year: ${r.year} &nbsp;|&nbsp;` : ''}
+        ${r.year ? `Year: ${escapeHtml(r.year)} &nbsp;|&nbsp;` : ''}
         Date: ${new Date(r.uploaded_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}
       </div>
-      <div class="content">${r.extracted_text || 'No extracted text available for this resolution.'}</div>
+      <div class="content">${escapeHtml(r.extracted_text) || 'No extracted text available for this resolution.'}</div>
       <div class="footer">Sangguniang Bayan of Balilihan, Bohol &nbsp;•&nbsp; Official Public Record</div>
     </body></html>`)
   } catch (err) {
@@ -310,36 +296,38 @@ router.get('/:id/print', async (req, res) => {
   }
 })
 
-// ─── Review workflow: pending → needs_revision → pending → ready_to_publish → approved → published
-async function loadResolutionInStatus(id, expectedStatus) {
-  const { data, error } = await supabase.from('resolutions').select('*').eq('id', id).single()
-  if (error || !data) return { notFound: true }
-  if (data.status !== expectedStatus) return { wrongStatus: true, data }
-  return { data }
-}
-
 // ─── PUT /api/resolutions/:id/replace-file ────────────────────────────────────
-// Secretary or Clerk — overwrites the stored file, bumps revision_count.
-router.put('/:id/replace-file', verifyToken, secretaryOrClerk, upload.single('file'), handleMulterError, async (req, res) => {
+// Clerk/Councilor are the primary drafters; Secretary keeps this as a
+// fallback alongside their approve/reject authority rather than having to
+// reject a draft just to fix something themselves. Overwrites the stored
+// file and bumps revision_count.
+router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('resolutions').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Resolution not found.' })
+    if (!canReplaceLegislativeFile(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to replace this file.' })
 
     const extracted_text = await extractText(req.file)
     const { fileName } = await uploadToStorage(req.file, 'resolutions')
 
+    const updateData = {
+      filename: req.file.originalname,
+      filetype: req.file.mimetype,
+      filepath: fileName,
+      extracted_text,
+      revision_count: (existing.revision_count || 0) + 1,
+    }
+    // Replacing the file on a rejected draft doubles as the resubmit — see
+    // the same note on PUT /:id above.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
+
     const { data, error } = await supabase
       .from('resolutions')
-      .update({
-        filename: req.file.originalname,
-        filetype: req.file.mimetype,
-        filepath: fileName,
-        extracted_text,
-        revision_count: (existing.revision_count || 0) + 1,
-      })
+      .update(updateData)
       .eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
 
@@ -352,115 +340,16 @@ router.put('/:id/replace-file', verifyToken, secretaryOrClerk, upload.single('fi
   }
 })
 
-// ─── PUT /api/resolutions/:id/accept ──────────────────────────────────────────
-// Secretary — pending → ready_to_publish
-router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadResolutionInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Resolution not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Resolution is not pending review.' })
-  try {
-    const { data, error } = await supabase
-      .from('resolutions')
-      .update({ status: 'ready_to_publish', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'ACCEPT', 'Resolutions', `Accepted draft: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/resolutions/:id/request-changes ────────────────────────────────
-// Secretary — pending → needs_revision, requires an accompanying comment
-router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { comment } = req.body
-  if (!comment?.trim()) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
-  const { notFound, wrongStatus, data: existing } = await loadResolutionInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Resolution not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Resolution is not pending review.' })
-  try {
-    const { error: commentErr } = await supabase.from('comments').insert({
-      entity_type: 'resolution',
-      entity_id: id,
-      author_id: req.user.id,
-      author_role: req.user.position || req.user.role,
-      text: comment.trim(),
-    })
-    if (commentErr) return res.status(500).json({ error: commentErr.message })
-
-    const { data, error } = await supabase
-      .from('resolutions')
-      .update({ status: 'needs_revision', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'REQUEST_CHANGES', 'Resolutions', `Requested changes on draft: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/resolutions/:id/vm-approve ─────────────────────────────────────
-// Vice-Mayor — ready_to_publish → approved
-router.put('/:id/vm-approve', verifyToken, viceMayorOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadResolutionInStatus(id, 'ready_to_publish')
-  if (notFound) return res.status(404).json({ error: 'Resolution not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Resolution is not ready for Vice-Mayor approval.' })
-  try {
-    const { data, error } = await supabase
-      .from('resolutions')
-      .update({ status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'VM_APPROVE', 'Resolutions', `Vice-Mayor approved: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/resolutions/:id/publish ────────────────────────────────────────
-// Secretary — approved → published
-router.put('/:id/publish', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadResolutionInStatus(id, 'approved')
-  if (notFound) return res.status(404).json({ error: 'Resolution not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Resolution is not approved for publishing.' })
-  try {
-    const { data, error } = await supabase
-      .from('resolutions')
-      .update({ status: 'published' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'PUBLISH', 'Resolutions', `Published: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/resolutions/:id/resubmit ───────────────────────────────────────
-// Clerk — needs_revision → pending
-router.put('/:id/resubmit', verifyToken, clerkOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadResolutionInStatus(id, 'needs_revision')
-  if (notFound) return res.status(404).json({ error: 'Resolution not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Resolution is not awaiting revision.' })
-  try {
-    const { data, error } = await supabase
-      .from('resolutions')
-      .update({ status: 'pending' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'RESUBMIT', 'Resolutions', `Resubmitted draft after revision: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
+// ─── Review workflow + archive: accept/request-changes/vm-approve/publish/
+// DELETE — shared across ordinances/resolutions/session_minutes, see
+// helpers/legislativeReviewRoutes.js.
+router.use('/', createLegislativeReviewRoutes({
+  table: 'resolutions',
+  entityType: 'resolution',
+  activityModule: 'Resolutions',
+  singularLabel: 'Resolution',
+  archiveRpc: 'archive_resolution',
+  labelOf: (r) => r.title,
+}))
 
 module.exports = router

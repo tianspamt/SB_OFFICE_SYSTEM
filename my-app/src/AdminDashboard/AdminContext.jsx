@@ -70,6 +70,42 @@ export const fetchCouncilsList = async () => {
   return Array.isArray(d) ? d : [];
 };
 
+// ─── React Query: pending legislative records ───────────────────────────────────
+// Shared cache key for the role-scoped pending queue on ordinances/resolutions/
+// session-minutes. Both the Dashboard's "Needs your review" widget and each
+// module's own Pending tab ask for the exact same slice (see
+// pendingStatusesForRole in useLegislativeReview.js) — keying on it means they
+// share one cache entry instead of independently re-fetching, and a single
+// invalidateQueries call after an accept/reject/publish action refreshes both
+// places at once.
+export const pendingQueryKey = (route, statusQ) => ["pending", route, statusQ];
+
+export const fetchPendingList = async (route, statusQ) => {
+  const res = await authFetch(`${API}/api/${route}?status=${statusQ}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+};
+
+// ─── React Query: published legislative records ─────────────────────────────────
+// Server-paginated, so the key includes page/search/year(/type) — each
+// page+filter combo caches independently, meaning flipping back to a page
+// you've already seen (or a filter you've already used) serves from cache
+// instead of re-hitting the server. `params` should only contain the keys
+// that are actually set (mirrors the old URLSearchParams construction) so
+// e.g. clearing a filter produces a genuinely different, correctly-cached key.
+export const publishedQueryKey = (route, params) => ["published", route, params];
+
+export const fetchPublishedList = async (route, params) => {
+  const qs = new URLSearchParams({ status: "published", ...params });
+  const res = await authFetch(`${API}/api/${route}?${qs.toString()}`);
+  const body = await res.json();
+  return {
+    data: Array.isArray(body?.data) ? body.data : [],
+    total: body?.total || 0,
+    totalPages: body?.totalPages || 1,
+  };
+};
+
 // ─── Fixed set of valid Sangguniang Bayan council positions ────────────────────
 // Kept as a constant, not free text, since these map to the real, legally
 // fixed composition of a Sangguniang Bayan under RA 7160: one Vice Mayor

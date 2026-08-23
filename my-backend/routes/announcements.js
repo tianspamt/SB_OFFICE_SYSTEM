@@ -5,6 +5,7 @@ const supabase = require('../config/supabase')
 const { verifyToken, adminOnly } = require('../middleware/auth')
 const { logActivity } = require('../helpers/logger')
 const { sendEmail } = require('../helpers/email')
+const { escapeHtml } = require('../helpers/utils')
 
 const AUTHOR_SELECT = '*, author:users!created_by(name, photo, position, role), announcement_reactions(emoji, user_id), announcement_reads(user_id, reader:users!user_id(name))'
 
@@ -50,8 +51,8 @@ const notifyUrgent = async (announcement) => {
           <div style="text-align:center;margin-bottom:20px;">
             <span style="display:inline-block;background:#fff5f5;color:#c53030;font-weight:bold;font-size:12px;letter-spacing:1px;padding:4px 12px;border-radius:20px;border:1px solid #feb2b2;">URGENT ANNOUNCEMENT</span>
           </div>
-          <h2 style="color:#1a365d;margin:0 0 12px;">${announcement.title}</h2>
-          <p style="color:#4a5568;font-size:14px;line-height:1.6;white-space:pre-wrap;">${announcement.body}</p>
+          <h2 style="color:#1a365d;margin:0 0 12px;">${escapeHtml(announcement.title)}</h2>
+          <p style="color:#4a5568;font-size:14px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(announcement.body)}</p>
           <hr style="border:none;border-top:1px solid #eee;margin:24px 0;"/>
           <p style="color:#aaa;font-size:11px;text-align:center;">Sangguniang Bayan Office System — Municipality of Balilihan, Bohol</p>
         </div>

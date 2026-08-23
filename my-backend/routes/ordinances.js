@@ -7,12 +7,13 @@ const Tesseract = require('tesseract.js')
 const PDFParser = require('pdf2json')
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly } = require('../middleware/auth')
+const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause } = require('../helpers/utils')
 const { resolveCurrentTermId } = require('../helpers/officials')
+const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -62,7 +63,19 @@ async function extractText(file) {
 }
 
 // ─── GET /api/ordinances ──────────────────────────────────────────────────────
-router.get('/', async (req, res) => {
+// Auth-gated — drafts/pending review copies live here alongside published
+// ones. A caller that doesn't ask for a specific status gets published-only
+// (matching content_posts' public-safe default); the review queues (see
+// OrdinancesPage.jsx) pass an explicit status list to see drafts, and the
+// admin dashboard's own counts/recent-activity view passes status=all to see
+// every status without the caller having to enumerate them.
+//
+// Pagination is opt-in: pass both page and limit to get back
+// { data, total, page, limit, totalPages } instead of a bare array. Existing
+// callers that don't paginate (the pending queues, the dashboard's full-list
+// fetch, PendingRecordsWidget) are unaffected — this only changes behavior
+// for a caller that explicitly asks for a page.
+router.get('/', verifyToken, async (req, res) => {
   try {
     const { year, search } = req.query
     let query = supabase
@@ -71,21 +84,27 @@ router.get('/', async (req, res) => {
         official_id, term_id,
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
-      )`)
+      )`, { count: 'exact' })
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
-if (search) query = query.ilike('title', `%${search}%`)
-if (req.query.status) {
-  const statuses = req.query.status.split(',')
-  query = query.in('status', statuses)
-}
-    const { data, error } = await query
+    if (search) query = query.or(`${orIlikeClause('title', search)},${orIlikeClause('ordinance_number', search)}`)
+    if (req.query.status !== 'all') {
+      const statuses = req.query.status ? req.query.status.split(',') : ['published']
+      query = query.in('status', statuses)
+    }
+    const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
+    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
+    if (page && limit) query = query.range((page - 1) * limit, page * limit - 1)
+    const { data, error, count } = await query
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(o => ({
       ...o,
       officials: mapOfficials(o.ordinance_officials),
       ordinance_officials: undefined
     }))
+    if (page && limit) {
+      return res.json({ data: parsed, total: count ?? parsed.length, page, limit, totalPages: Math.max(Math.ceil((count ?? parsed.length) / limit), 1) })
+    }
     res.json(parsed)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -93,7 +112,7 @@ if (req.query.status) {
 })
 
 // ─── GET /api/ordinances/:id/print ───────────────────────────────────────────
-router.get('/:id/print', async (req, res) => {
+router.get('/:id/print', verifyToken, async (req, res) => {
   try {
     const { data: o, error } = await supabase
       .from('ordinances').select('*').eq('id', req.params.id).single()
@@ -138,7 +157,7 @@ router.get('/:id/print', async (req, res) => {
     const fileUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/assets/${o.filepath}`
 
     res.send(`<!DOCTYPE html><html><head>
-      <title>${o.ordinance_number || o.title}</title>
+      <title>${escapeHtml(o.ordinance_number || o.title)}</title>
       <style>
         body { font-family:'Times New Roman',serif; max-width:800px; margin:40px auto; padding:40px; color:#000; }
         h2 { text-align:center; font-size:15px; color:#555; margin-bottom:4px; }
@@ -151,12 +170,12 @@ router.get('/:id/print', async (req, res) => {
       </style>
       </head><body>
       <button class="print-btn" onclick="window.print()">🖨 Print</button>
-      ${o.ordinance_number ? `<h2>${o.ordinance_number}</h2>` : ''}
-      <h1>${o.title}</h1>
-      <div class="meta">${o.year ? `Year: ${o.year} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+      ${o.ordinance_number ? `<h2>${escapeHtml(o.ordinance_number)}</h2>` : ''}
+      <h1>${escapeHtml(o.title)}</h1>
+      <div class="meta">${o.year ? `Year: ${escapeHtml(o.year)} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
       ${isWord
-        ? `<div style="text-align:center"><p>This ordinance is stored as a Word document.</p><a href="${fileUrl}" class="download-btn" download>⬇ Download Word File</a></div>`
-        : `<div class="content">${extractedText || 'No extracted text available.'}</div>`
+        ? `<div style="text-align:center"><p>This ordinance is stored as a Word document.</p><a href="${encodeURI(fileUrl)}" class="download-btn" download>⬇ Download Word File</a></div>`
+        : `<div class="content">${escapeHtml(extractedText) || 'No extracted text available.'}</div>`
       }
       </body></html>`)
   } catch (err) {
@@ -165,7 +184,7 @@ router.get('/:id/print', async (req, res) => {
 })
 
 // ─── GET /api/ordinances/:id ──────────────────────────────────────────────────
-router.get('/:id', async (req, res) => {
+router.get('/:id', verifyToken, async (req, res) => {
   try {
     const { data: o, error } = await supabase
       .from('ordinances')
@@ -189,7 +208,10 @@ router.get('/:id', async (req, res) => {
 })
 
 // ─── POST /api/ordinances/upload ─────────────────────────────────────────────
-router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+// Any of the four legislative positions can originate a draft — Secretary
+// and Vice-Mayor sometimes draft directly rather than only reviewing/
+// approving what Clerk/Councilor submit.
+router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
@@ -240,7 +262,12 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
 })
 
 // ─── PUT /api/ordinances/:id ──────────────────────────────────────────────────
-router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+// Who may edit depends on which bucket the record is currently in — see
+// canManageLegislativeRecord: Secretary/Clerk own it once published,
+// Clerk/Councilor own everything before that. Checked against the record's
+// live status below rather than as route middleware, since the answer
+// depends on data this handler has to fetch anyway.
+router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { ordinance_number, title, year, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
@@ -249,12 +276,18 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
+    if (!canManageLegislativeRecord(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to edit this ordinance.' })
 
     const updateData = {
       ordinance_number: ordinance_number || null,
       title,
       year: year ? parseInt(year) : null
     }
+    // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
+    // it goes straight back into the Secretary's queue instead of requiring
+    // a separate "resubmit" click.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
 
     if (req.file) {
       const { fileName } = await uploadToStorage(req.file, 'ordinances')
@@ -272,24 +305,26 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
     if (error) return res.status(500).json({ error: error.message })
 
     const officialIds = safeParseJSON(officials, [])
-    // Preserve term_id for officials who remain selected — this route
-    // deletes and re-inserts all links on every edit (even ones that don't
-    // touch the officials list at all), so re-resolving term_id
-    // unconditionally would silently rewrite an already-linked official's
-    // historical snapshot just because someone fixed a typo in the title
-    // years later. Only a newly-added official gets a freshly resolved one.
+    // Diff against the existing links instead of blanket delete+reinsert on
+    // every edit — an official who stays selected keeps their row (and its
+    // historical term_id snapshot) completely untouched; only officials
+    // actually removed get deleted and only ones actually added get a
+    // freshly resolved term_id.
     const { data: existingLinks } = await supabase
       .from('ordinance_officials').select('official_id, term_id').eq('ordinance_id', id)
-    const existingTermByOfficial = new Map((existingLinks || []).map(l => [l.official_id, l.term_id]))
+    const existingIds = new Set((existingLinks || []).map(l => l.official_id))
+    const newIds = new Set(officialIds)
+    const toRemove = [...existingIds].filter(oid => !newIds.has(oid))
+    const toAdd = [...newIds].filter(oid => !existingIds.has(oid))
 
-    await supabase.from('ordinance_officials').delete().eq('ordinance_id', id)
-    if (officialIds.length > 0) {
-      const rows = await Promise.all(officialIds.map(async (oid) => ({
+    if (toRemove.length > 0) {
+      await supabase.from('ordinance_officials').delete().eq('ordinance_id', id).in('official_id', toRemove)
+    }
+    if (toAdd.length > 0) {
+      const rows = await Promise.all(toAdd.map(async (oid) => ({
         ordinance_id: id,
         official_id: oid,
-        term_id: existingTermByOfficial.has(oid)
-          ? existingTermByOfficial.get(oid)
-          : await resolveCurrentTermId(oid),
+        term_id: await resolveCurrentTermId(oid),
       })))
       const { error: relErr } = await supabase.from('ordinance_officials').insert(rows)
       if (relErr) console.error('ordinance_officials insert error:', relErr.message)
@@ -302,37 +337,38 @@ router.put('/:id', verifyToken, adminOnly, upload.single('file'), handleMulterEr
     res.status(500).json({ error: err.message })
   }
 })
-// ─── Review workflow: pending → needs_revision → pending → ready_to_publish → approved → published
-// Helper: load an ordinance and confirm it's currently in the expected status.
-async function loadOrdinanceInStatus(id, expectedStatus) {
-  const { data, error } = await supabase.from('ordinances').select('*').eq('id', id).single()
-  if (error || !data) return { notFound: true }
-  if (data.status !== expectedStatus) return { wrongStatus: true, data }
-  return { data }
-}
-
 // ─── PUT /api/ordinances/:id/replace-file ─────────────────────────────────────
-// Secretary or Clerk — overwrites the stored file, bumps revision_count.
-router.put('/:id/replace-file', verifyToken, secretaryOrClerk, upload.single('file'), handleMulterError, async (req, res) => {
+// Clerk/Councilor are the primary drafters; Secretary keeps this as a
+// fallback alongside their approve/reject authority rather than having to
+// reject a draft just to fix something themselves. Overwrites the stored
+// file and bumps revision_count.
+router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
+    if (!canReplaceLegislativeFile(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to replace this file.' })
 
     const extracted_text = await extractText(req.file)
     const { fileName } = await uploadToStorage(req.file, 'ordinances')
 
+    const updateData = {
+      filename: req.file.originalname,
+      filetype: req.file.mimetype,
+      filepath: fileName,
+      extracted_text,
+      revision_count: (existing.revision_count || 0) + 1,
+    }
+    // Replacing the file on a rejected draft doubles as the resubmit — see
+    // the same note on PUT /:id above.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
+
     const { data, error } = await supabase
       .from('ordinances')
-      .update({
-        filename: req.file.originalname,
-        filetype: req.file.mimetype,
-        filepath: fileName,
-        extracted_text,
-        revision_count: (existing.revision_count || 0) + 1,
-      })
+      .update(updateData)
       .eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
 
@@ -345,141 +381,16 @@ router.put('/:id/replace-file', verifyToken, secretaryOrClerk, upload.single('fi
   }
 })
 
-// ─── PUT /api/ordinances/:id/accept ───────────────────────────────────────────
-// Secretary — pending → ready_to_publish
-router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadOrdinanceInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Ordinance not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Ordinance is not pending review.' })
-  try {
-    const { data, error } = await supabase
-      .from('ordinances')
-      .update({ status: 'ready_to_publish', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'ACCEPT', 'Ordinances', `Accepted draft: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/ordinances/:id/request-changes ─────────────────────────────────
-// Secretary — pending → needs_revision, requires an accompanying comment
-router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { comment } = req.body
-  if (!comment?.trim()) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
-  const { notFound, wrongStatus, data: existing } = await loadOrdinanceInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Ordinance not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Ordinance is not pending review.' })
-  try {
-    const { error: commentErr } = await supabase.from('comments').insert({
-      entity_type: 'ordinance',
-      entity_id: id,
-      author_id: req.user.id,
-      author_role: req.user.position || req.user.role,
-      text: comment.trim(),
-    })
-    if (commentErr) return res.status(500).json({ error: commentErr.message })
-
-    const { data, error } = await supabase
-      .from('ordinances')
-      .update({ status: 'needs_revision', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'REQUEST_CHANGES', 'Ordinances', `Requested changes on draft: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/ordinances/:id/vm-approve ──────────────────────────────────────
-// Vice-Mayor — ready_to_publish → approved
-router.put('/:id/vm-approve', verifyToken, viceMayorOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadOrdinanceInStatus(id, 'ready_to_publish')
-  if (notFound) return res.status(404).json({ error: 'Ordinance not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Ordinance is not ready for Vice-Mayor approval.' })
-  try {
-    const { data, error } = await supabase
-      .from('ordinances')
-      .update({ status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'VM_APPROVE', 'Ordinances', `Vice-Mayor approved: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/ordinances/:id/publish ─────────────────────────────────────────
-// Secretary — approved → published
-router.put('/:id/publish', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadOrdinanceInStatus(id, 'approved')
-  if (notFound) return res.status(404).json({ error: 'Ordinance not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Ordinance is not approved for publishing.' })
-  try {
-    const { data, error } = await supabase
-      .from('ordinances')
-      .update({ status: 'published' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'PUBLISH', 'Ordinances', `Published: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/ordinances/:id/resubmit ────────────────────────────────────────
-// Clerk — needs_revision → pending
-router.put('/:id/resubmit', verifyToken, clerkOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadOrdinanceInStatus(id, 'needs_revision')
-  if (notFound) return res.status(404).json({ error: 'Ordinance not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Ordinance is not awaiting revision.' })
-  try {
-    const { data, error } = await supabase
-      .from('ordinances')
-      .update({ status: 'pending' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'RESUBMIT', 'Ordinances', `Resubmitted draft after revision: ${existing.title}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── DELETE /api/ordinances/:id ───────────────────────────────────────────────
-// Archives the ordinance instead of a hard delete: archive_ordinance() (see
-// migrations/007) snapshots the row + its council-member links into
-// `archives` and removes them from the live tables as one Postgres
-// transaction, so a failure partway through can't leave the ordinance
-// deleted-but-unsnapshotted or stripped of its officials without being
-// deleted. The stored file is left in place until a permanent delete from
-// the Archives page.
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
-  try {
-    const { data: snapshot, error } = await supabase.rpc('archive_ordinance', {
-      p_id: req.params.id,
-      p_archived_by: req.user.id,
-    })
-    if (error) {
-      if (error.code === 'P0002') return res.status(404).json({ error: 'Ordinance not found.' })
-      return res.status(500).json({ error: error.message })
-    }
-
-    await logActivity(req, 'ARCHIVE', 'Ordinances', `Archived ordinance: ${snapshot.title}`)
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
+// ─── Review workflow + archive: accept/request-changes/vm-approve/publish/
+// DELETE — shared across ordinances/resolutions/session_minutes, see
+// helpers/legislativeReviewRoutes.js.
+router.use('/', createLegislativeReviewRoutes({
+  table: 'ordinances',
+  entityType: 'ordinance',
+  activityModule: 'Ordinances',
+  singularLabel: 'Ordinance',
+  archiveRpc: 'archive_ordinance',
+  labelOf: (r) => r.title,
+}))
 
 module.exports = router

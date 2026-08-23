@@ -6,7 +6,8 @@
 // module (Ordinances / Resolutions / Sessions), landing directly on that
 // module's Pending tab.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ScrollText,
@@ -20,8 +21,9 @@ import {
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
-import { API, authFetch } from "./AdminContext";
+import { API, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
 import { StatusBadge } from "./LegislativeComponents";
+import { pendingStatusesForRole, useCommentThread } from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
 // Keeps this widget generic across the three legislative record types
@@ -91,75 +93,61 @@ export default function PendingRecordsWidget({
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
+  isCouncilor = false,
   onNavigate,
   showMsg,
   style,
 }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [reviewTarget, setReviewTarget] = useState(null);
+  const queryClient = useQueryClient();
+  const statusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
 
-  // ── Role-aware status scope — mirrors the queue logic already used on
-  // the Ordinances / Resolutions / Sessions pages, so this widget only ever
-  // surfaces what the viewer is actually responsible for acting on.
-  const pendingStatusesForRole = () => {
-    if (isSecretary) return "pending,approved";
-    if (isViceMayor) return "ready_to_publish";
-    if (isClerk) return "needs_revision";
-    return "pending,needs_revision,ready_to_publish,approved";
-  };
+  // Same query key + fetcher as each module's own Pending tab
+  // (OrdinancesPage/ResolutionsPage/SessionsPage) — sharing the cache entry
+  // is what stops this widget and that tab from independently re-fetching
+  // the identical list when both get visited in the same session.
+  const ordinancesQuery = useQuery({
+    queryKey: pendingQueryKey("ordinances", statusQ),
+    queryFn: () => fetchPendingList("ordinances", statusQ),
+    staleTime: 15000,
+  });
+  const resolutionsQuery = useQuery({
+    queryKey: pendingQueryKey("resolutions", statusQ),
+    queryFn: () => fetchPendingList("resolutions", statusQ),
+    staleTime: 15000,
+  });
+  const sessionsQuery = useQuery({
+    queryKey: pendingQueryKey("session-minutes", statusQ),
+    queryFn: () => fetchPendingList("session-minutes", statusQ),
+    staleTime: 15000,
+  });
+  const loading =
+    ordinancesQuery.isLoading || resolutionsQuery.isLoading || sessionsQuery.isLoading;
 
   // Title reflects what this specific role is being asked to do, not just
   // a generic "pending" label — a Secretary is reviewing new drafts, a Vice
-  // Mayor is approving finished ones, a Clerk is fixing flagged ones.
+  // Mayor is approving finished ones, a Clerk/Councilor is drafting/fixing.
   const widgetTitle = () => {
     if (isSecretary) return "Pending your review";
     if (isViceMayor) return "Awaiting your approval";
-    if (isClerk) return "Needs revision";
+    if (isClerk || isCouncilor) return "Drafts in progress";
     return "Needs your review";
   };
 
-  const fetchAllPending = async () => {
-    setLoading(true);
-    const statusQ = pendingStatusesForRole();
-    const safeFetch = async (route) => {
-      try {
-        const res = await fetch(`${API}/api/${route}?status=${statusQ}`);
-        const data = await res.json();
-        return Array.isArray(data) ? data : [];
-      } catch {
-        return [];
-      }
-    };
-    try {
-      const [ordinances, resolutions, sessions] = await Promise.all([
-        safeFetch("ordinances"),
-        safeFetch("resolutions"),
-        safeFetch("session-minutes"),
-      ]);
-      const tag = (list, type) =>
-        list.map((item) => ({ ...item, record_type: type }));
-      const merged = [
-        ...tag(ordinances, "ordinance"),
-        ...tag(resolutions, "resolution"),
-        ...tag(sessions, "session_minutes"),
-      ];
-      // Oldest-waiting first — the items that have been sitting longest are
-      // the ones most likely to stall the workflow, so they surface first
-      // rather than being buried under newer submissions.
-      merged.sort(
-        (a, b) => new Date(getItemDate(a)) - new Date(getItemDate(b))
-      );
-      setItems(merged);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAllPending();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isViceMayor, isSecretary, isClerk]);
+  // Oldest-waiting first — the items that have been sitting longest are the
+  // ones most likely to stall the workflow, so they surface first rather
+  // than being buried under newer submissions.
+  const items = useMemo(() => {
+    const tag = (list, type) =>
+      (list || []).map((item) => ({ ...item, record_type: type }));
+    const merged = [
+      ...tag(ordinancesQuery.data, "ordinance"),
+      ...tag(resolutionsQuery.data, "resolution"),
+      ...tag(sessionsQuery.data, "session_minutes"),
+    ];
+    merged.sort((a, b) => new Date(getItemDate(a)) - new Date(getItemDate(b)));
+    return merged;
+  }, [ordinancesQuery.data, resolutionsQuery.data, sessionsQuery.data]);
 
   const visibleItems = items.slice(0, MAX_ITEMS_SHOWN);
 
@@ -183,7 +171,24 @@ export default function PendingRecordsWidget({
         </div>
 
         {loading ? (
-          <p className={styles.dashWidgetEmpty}>Loading pending records...</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                style={{ border: "1px solid #f1f5f9", borderRadius: 10, padding: 10 }}
+              >
+                <div className={styles.skeleton} style={{ height: 16, width: 90, borderRadius: 10, marginBottom: 8 }} />
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <div className={styles.skeleton} style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div className={styles.skeleton} style={{ height: 12.5, width: "75%", borderRadius: 4, marginBottom: 6 }} />
+                    <div className={styles.skeleton} style={{ height: 11, width: "50%", borderRadius: 4 }} />
+                  </div>
+                </div>
+                <div className={styles.skeleton} style={{ height: 26, width: "100%", borderRadius: 8, marginTop: 8 }} />
+              </div>
+            ))}
+          </div>
         ) : visibleItems.length === 0 ? (
           <p className={styles.dashWidgetEmpty}>
             Nothing waiting on you right now.
@@ -289,11 +294,13 @@ export default function PendingRecordsWidget({
           isViceMayor={isViceMayor}
           isSecretary={isSecretary}
           isClerk={isClerk}
+          isCouncilor={isCouncilor}
           showMsg={showMsg}
           onClose={() => setReviewTarget(null)}
           onActionComplete={() => {
+            const cfg = TYPE_CONFIG[reviewTarget.record_type];
             setReviewTarget(null);
-            fetchAllPending();
+            queryClient.invalidateQueries({ queryKey: pendingQueryKey(cfg.route, statusQ) });
           }}
           onOpenFullRecord={() => {
             const cfg = TYPE_CONFIG[reviewTarget.record_type];
@@ -316,35 +323,21 @@ function ReviewModal({
   isViceMayor,
   isSecretary,
   isClerk,
+  isCouncilor,
   showMsg,
   onClose,
   onActionComplete,
   onOpenFullRecord,
 }) {
   const cfg = TYPE_CONFIG[item.record_type];
-  const [comments, setComments] = useState([]);
-  const [loadingComments, setLoadingComments] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [resubmitFile, setResubmitFile] = useState(null);
+  const [replacementFile, setReplacementFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const { comments, loadingComments, commentSubmitting, fetchComments, sendComment } = useCommentThread();
 
   useEffect(() => {
-    const fetchComments = async () => {
-      setLoadingComments(true);
-      try {
-        const res = await authFetch(
-          `${API}/api/comments?entity_type=${cfg.entityType}&entity_id=${item.id}`
-        );
-        const data = await res.json();
-        setComments(Array.isArray(data) ? data : []);
-      } catch {
-        setComments([]);
-      } finally {
-        setLoadingComments(false);
-      }
-    };
-    fetchComments();
+    fetchComments(cfg.entityType, item.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
@@ -370,27 +363,9 @@ function ReviewModal({
   };
 
   const handleSendComment = async () => {
-    if (!commentText.trim()) return;
-    setSubmitting(true);
-    try {
-      const res = await authFetch(`${API}/api/comments`, {
-        method: "POST",
-        body: JSON.stringify({
-          entity_type: cfg.entityType,
-          entity_id: item.id,
-          text: commentText.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setComments((prev) => [...prev, data]);
-        setCommentText("");
-      } else setError(data.error || "Couldn't post comment.");
-    } catch {
-      setError("Server error.");
-    } finally {
-      setSubmitting(false);
-    }
+    const result = await sendComment(cfg.entityType, item.id, commentText);
+    if (result.ok) setCommentText("");
+    else if (result.error) setError(result.error);
   };
 
   const handleAccept = () =>
@@ -426,34 +401,22 @@ function ReviewModal({
       `${cfg.label} published!`
     );
 
-  const handleResubmit = async () => {
-    if (!resubmitFile) {
-      setError("Choose a replacement file before resubmitting.");
+  // Replacing the file is the whole action now — the backend auto-flips a
+  // needs_revision record back to pending as part of the same request, so
+  // there's no separate "resubmit" call to chain afterward.
+  const handleReplaceFile = () => {
+    if (!replacementFile) {
+      setError("Choose a replacement file first.");
       return;
     }
     const fd = new FormData();
-    fd.append("file", resubmitFile);
-    if (item.record_type === "session_minutes") {
-      await runAction(
-        `/api/${cfg.route}/${item.id}/revise`,
-        { method: "PUT", body: fd },
-        `${cfg.label} resubmitted!`
-      );
-      return;
-    }
-    const replaced = await runAction(
-      `/api/${cfg.route}/${item.id}/replace-file`,
-      {
-        method: "PUT",
-        body: fd,
-      }
-    );
-    if (replaced)
-      runAction(
-        `/api/${cfg.route}/${item.id}/resubmit`,
-        { method: "PUT" },
-        `${cfg.label} resubmitted!`
-      );
+    fd.append("file", replacementFile);
+    const action = item.record_type === "session_minutes" ? "revise" : "replace-file";
+    const successMsg =
+      item.status === "needs_revision"
+        ? `${cfg.label} resubmitted!`
+        : `${cfg.label} file updated!`;
+    runAction(`/api/${cfg.route}/${item.id}/${action}`, { method: "PUT", body: fd }, successMsg);
   };
 
   return (
@@ -524,7 +487,7 @@ function ReviewModal({
 
           <div className={lStyles.viewModalDivider} />
 
-          {isClerk && item.status === "needs_revision" && (
+          {(isSecretary || isClerk || isCouncilor) && (
             <div style={{ marginBottom: 16 }}>
               <div
                 className={lStyles.viewModalCouncilTitle}
@@ -535,21 +498,21 @@ function ReviewModal({
               <div
                 className={lStyles.uploadZone}
                 onClick={() =>
-                  document.getElementById("widgetResubmitFile")?.click()
+                  document.getElementById("widgetReplacementFile")?.click()
                 }
               >
                 <div className={lStyles.uploadIcon}>📎</div>
                 <div className={lStyles.uploadText}>
-                  {resubmitFile
-                    ? resubmitFile.name
+                  {replacementFile
+                    ? replacementFile.name
                     : "Click to choose a replacement file"}
                 </div>
                 <input
-                  id="widgetResubmitFile"
+                  id="widgetReplacementFile"
                   type="file"
                   accept=".pdf,.doc,.docx,image/*"
                   style={{ display: "none" }}
-                  onChange={(e) => setResubmitFile(e.target.files?.[0] || null)}
+                  onChange={(e) => setReplacementFile(e.target.files?.[0] || null)}
                 />
               </div>
             </div>
@@ -601,7 +564,7 @@ function ReviewModal({
             )}
           </div>
 
-          {(isSecretary || isClerk) && (
+          {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
             <div className={lStyles.commentInputRow}>
               <textarea
                 className={lStyles.commentInput}
@@ -612,7 +575,7 @@ function ReviewModal({
               />
               <button
                 className={`${lStyles.btn} ${lStyles.btnSm}`}
-                disabled={submitting || !commentText.trim()}
+                disabled={commentSubmitting || !commentText.trim()}
                 onClick={handleSendComment}
               >
                 <Send size={13} />
@@ -654,13 +617,14 @@ function ReviewModal({
               </div>
             )}
 
-            {isClerk && item.status === "needs_revision" && (
+            {(isSecretary || isClerk || isCouncilor) && (
               <button
                 className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                disabled={submitting}
-                onClick={handleResubmit}
+                disabled={submitting || !replacementFile}
+                onClick={handleReplaceFile}
               >
-                <Upload size={13} /> Replace File &amp; Resubmit
+                <Upload size={13} />{" "}
+                {item.status === "needs_revision" ? "Replace File & Resubmit" : "Replace File"}
               </button>
             )}
 

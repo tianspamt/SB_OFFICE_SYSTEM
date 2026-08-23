@@ -59,6 +59,28 @@ const viceMayorOnly = (req, res, next) => {
   next()
 }
 
+// Legislative-records RBAC: who may create a brand-new draft. All four
+// positions can originate one — Clerk/Councilor are the primary drafters,
+// but Secretary and Vice-Mayor both sometimes draft the ordinance/
+// resolution/session minutes directly rather than only reviewing/approving
+// what someone else submitted.
+const canCreateDraft = (req, res, next) => {
+  if (!['secretary', 'clerk', 'councilor', 'vice_mayor'].includes(req.user?.position))
+    return res.status(403).json({ error: 'Secretary, Clerk, Councilor, or Vice-Mayor only.' })
+  next()
+}
+
+// Legislative-records RBAC: who may replace/revise a not-yet-published
+// record's file. Clerk and Councilor are the primary drafters; Secretary
+// also fixes records directly often enough that they're included rather
+// than treated as a review-only fallback. Vice-Mayor is not — their role
+// stays limited to approving, not editing draft content.
+const pendingEditors = (req, res, next) => {
+  if (!['secretary', 'clerk', 'councilor'].includes(req.user?.position))
+    return res.status(403).json({ error: 'Secretary, Clerk, or Councilor only.' })
+  next()
+}
+
 const validate = (req, res, next) => {
   const errors = validationResult(req)
   if (!errors.isEmpty())
@@ -66,4 +88,7 @@ const validate = (req, res, next) => {
   next()
 }
 
-module.exports = { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly, validate }
+module.exports = {
+  verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly,
+  canCreateDraft, pendingEditors, validate,
+}

@@ -6,37 +6,59 @@ const os = require('os')
 const Tesseract = require('tesseract.js')
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk, clerkOnly, viceMayorOnly } = require('../middleware/auth')
+const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
+const { escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile } = require('../helpers/utils')
+const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 
 
 // GET /api/session-minutes
-router.get('/', async (req, res) => {
+// Auth-gated — drafts/pending review copies live here alongside published
+// ones. A caller that doesn't ask for a specific status gets published-only
+// (matching content_posts' public-safe default); the review queues (see
+// SessionsPage.jsx) pass an explicit status list to see drafts, and the
+// admin dashboard's own counts/recent-activity view passes status=all to see
+// every status without the caller having to enumerate them.
+//
+// year/search are real SQL filters (not a post-fetch JS filter, which
+// can't be combined correctly with pagination — a JS .filter() after
+// .range() would silently drop matches that happened to land on a
+// different page). Pagination itself is opt-in: pass both page and limit
+// to get back { data, total, page, limit, totalPages } instead of a bare
+// array; existing callers that don't paginate are unaffected.
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const { month, year, type } = req.query
+    const { year, search, type } = req.query
     let query = supabase
       .from('session_minutes')
-      .select('id, session_number, session_date, session_type, venue, agenda, minutes_text, filename, filetype, created_at, status, revision_count, reviewed_by, reviewed_at')
+      .select('id, session_number, session_date, session_type, venue, agenda, minutes_text, filename, filetype, created_at, status, revision_count, reviewed_by, reviewed_at', { count: 'exact' })
       .order('session_date', { ascending: false })
     if (type && type !== 'all') query = query.eq('session_type', type)
-    if (req.query.status) {
-      const statuses = req.query.status.split(',')
+    if (year && /^\d{4}$/.test(year)) {
+      query = query.gte('session_date', `${year}-01-01`).lt('session_date', `${Number(year) + 1}-01-01`)
+    }
+    if (search) query = query.ilike('session_number', `%${search}%`)
+    if (req.query.status !== 'all') {
+      const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
     }
-    const { data, error } = await query
+    const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
+    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
+    if (page && limit) query = query.range((page - 1) * limit, page * limit - 1)
+    const { data, error, count } = await query
     if (error) return res.status(500).json({ error: error.message })
-    let results = data
-    if (month) results = results.filter(r => new Date(r.session_date).getMonth() + 1 === parseInt(month))
-    if (year)  results = results.filter(r => new Date(r.session_date).getFullYear() === parseInt(year))
-    res.json(results)
+    if (page && limit) {
+      return res.json({ data, total: count ?? data.length, page, limit, totalPages: Math.max(Math.ceil((count ?? data.length) / limit), 1) })
+    }
+    res.json(data)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
 // GET /api/session-minutes/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', verifyToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('session_minutes').select('*').eq('id', req.params.id).single()
@@ -49,7 +71,10 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/session-minutes
-router.post('/', verifyToken, adminOnly, async (req, res) => {
+// Any of the four legislative positions can originate a draft — Secretary
+// and Vice-Mayor sometimes draft directly rather than only reviewing/
+// approving what Clerk/Councilor submit.
+router.post('/', verifyToken, canCreateDraft, async (req, res) => {
   try {
     const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
     if (!session_date) return res.status(400).json({ error: 'Session date is required.' })
@@ -75,7 +100,8 @@ router.post('/', verifyToken, adminOnly, async (req, res) => {
 
 
 // POST /api/session-minutes/upload — auto-detects file type
-router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMulterError, async (req, res) => {
+// See POST / above.
+router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' })
   const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
   if (!session_date) return res.status(400).json({ error: 'Session date is required.' })
@@ -143,24 +169,34 @@ router.post('/upload', verifyToken, adminOnly, upload.single('file'), handleMult
 })
 
 // PUT /api/session-minutes/:id
-router.put('/:id', verifyToken, adminOnly, async (req, res) => {
+// Who may edit depends on which bucket the record is currently in — see
+// canManageLegislativeRecord: Secretary/Clerk own it once published,
+// Clerk/Councilor own everything before that.
+router.put('/:id', verifyToken, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing } = await supabase
-      .from('session_minutes').select('id').eq('id', id).single()
+      .from('session_minutes').select('id, status').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'Session minutes not found.' })
+    if (!canManageLegislativeRecord(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to edit this session record.' })
     const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
     if (!session_date) return res.status(400).json({ error: 'Session date is required.' })
+    const updateData = {
+      session_number: session_number || null,
+      session_date,
+      session_type: session_type || 'regular',
+      venue: venue || null,
+      agenda: agenda || null,
+      minutes_text: minutes_text || null
+    }
+    // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
+    // it goes straight back into the Secretary's queue instead of requiring
+    // a separate "resubmit" click.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
     const { data, error } = await supabase
       .from('session_minutes')
-      .update({
-        session_number: session_number || null,
-        session_date,
-        session_type: session_type || 'regular',
-        venue: venue || null,
-        agenda: agenda || null,
-        minutes_text: minutes_text || null
-      })
+      .update(updateData)
       .eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPDATE', 'Sessions', `Updated session ID: ${id}`)
@@ -170,30 +206,8 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
   }
 })
 
-// DELETE /api/session-minutes/:id
-// Archives the session minutes instead of a hard delete via
-// archive_session_minutes() (see ordinances.js and migrations/007 for the
-// same transactional pattern).
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
-  try {
-    const { data: snapshot, error } = await supabase.rpc('archive_session_minutes', {
-      p_id: req.params.id,
-      p_archived_by: req.user.id,
-    })
-    if (error) {
-      if (error.code === 'P0002') return res.status(404).json({ error: 'Session minutes not found.' })
-      return res.status(500).json({ error: error.message })
-    }
-
-    await logActivity(req, 'ARCHIVE', 'Sessions', `Archived session: ${snapshot.session_number || req.params.id}`)
-    res.json({ success: true })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
 // GET /api/session-minutes/:id/print
-router.get('/:id/print', async (req, res) => {
+router.get('/:id/print', verifyToken, async (req, res) => {
   try {
     const { data: s, error } = await supabase
       .from('session_minutes').select('*').eq('id', req.params.id).single()
@@ -201,7 +215,7 @@ router.get('/:id/print', async (req, res) => {
     const agendaItems = s.agenda ? s.agenda.split('\n').filter(Boolean) : []
     res.send(`<!DOCTYPE html><html lang="en"><head>
       <meta charset="UTF-8"/>
-      <title>Session Minutes — ${s.session_number || new Date(s.session_date).toLocaleDateString('en-PH')}</title>
+      <title>Session Minutes — ${escapeHtml(s.session_number || new Date(s.session_date).toLocaleDateString('en-PH'))}</title>
       <style>
         * { box-sizing:border-box; margin:0; padding:0; }
         body { font-family:Arial,sans-serif; text-align:justify; max-width:850px; margin:0 auto; padding:40px 60px 60px; color:#111; }
@@ -244,7 +258,7 @@ router.get('/:id/print', async (req, res) => {
       <div class="letterhead-rule"></div>
       <div class="doc-title-block">
         <div class="doc-label">Session Minutes &amp; Agenda</div>
-        ${s.session_number ? `<div class="session-num">${s.session_number}</div>` : ''}
+        ${s.session_number ? `<div class="session-num">${escapeHtml(s.session_number)}</div>` : ''}
         <span class="type-badge ${s.session_type === 'special' ? 'type-special' : 'type-regular'}">
           ${s.session_type === 'special' ? 'Special Session' : 'Regular Session'}
         </span>
@@ -252,19 +266,19 @@ router.get('/:id/print', async (req, res) => {
       <div class="meta-grid">
         <div class="label">Date of Session:</div>
         <div class="value">${new Date(s.session_date).toLocaleDateString('en-PH', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}</div>
-        ${s.venue ? `<div class="label">Venue:</div><div class="value">${s.venue}</div>` : ''}
+        ${s.venue ? `<div class="label">Venue:</div><div class="value">${escapeHtml(s.venue)}</div>` : ''}
         <div class="label">Date Recorded:</div>
         <div class="value">${new Date(s.created_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}</div>
       </div>
       <div class="section">
         <div class="section-title">Agenda</div>
         <ol class="agenda-list">
-          ${agendaItems.length ? agendaItems.map(a => `<li>${a.trim()}</li>`).join('') : '<li><em>No agenda items listed.</em></li>'}
+          ${agendaItems.length ? agendaItems.map(a => `<li>${escapeHtml(a.trim())}</li>`).join('') : '<li><em>No agenda items listed.</em></li>'}
         </ol>
       </div>
       <div class="section">
         <div class="section-title">Minutes of the Session</div>
-        <div class="minutes-body">${s.minutes_text || '<em>No minutes content available.</em>'}</div>
+        <div class="minutes-body">${escapeHtml(s.minutes_text) || '<em>No minutes content available.</em>'}</div>
       </div>
       <div class="footer">Sangguniang Bayan of Balilihan &nbsp;•&nbsp; Province of Bohol &nbsp;•&nbsp; Official Public Record</div>
     </body></html>`)
@@ -273,23 +287,20 @@ router.get('/:id/print', async (req, res) => {
   }
 })
 
-// ─── Review workflow: pending → needs_revision → pending → ready_to_publish → approved → published
-async function loadSessionInStatus(id, expectedStatus) {
-  const { data, error } = await supabase.from('session_minutes').select('*').eq('id', id).single()
-  if (error || !data) return { notFound: true }
-  if (data.status !== expectedStatus) return { wrongStatus: true, data }
-  return { data }
-}
-
 // ─── PUT /api/session-minutes/:id/revise ──────────────────────────────────────
-// Secretary or Clerk — corrects the draft (either a replacement file, re-run
-// through OCR/PDF extraction, or a direct edit of the text fields), bumps revision_count.
-router.put('/:id/revise', verifyToken, secretaryOrClerk, upload.single('file'), handleMulterError, async (req, res) => {
+// Clerk/Councilor are the primary drafters; Secretary keeps this as a
+// fallback alongside their approve/reject authority rather than having to
+// reject a draft just to fix something themselves. Corrects the draft
+// (either a replacement file, re-run through OCR/PDF extraction, or a
+// direct edit of the text fields), bumps revision_count.
+router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('session_minutes').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Session minutes not found.' })
+    if (!canReplaceLegislativeFile(req.user.position, existing.status))
+      return res.status(403).json({ error: 'You are not allowed to revise this session record.' })
 
     const updateData = { revision_count: (existing.revision_count || 0) + 1 }
 
@@ -330,6 +341,10 @@ router.put('/:id/revise', verifyToken, secretaryOrClerk, upload.single('file'), 
       if (agenda !== undefined) updateData.agenda = agenda || null
       if (minutes_text !== undefined) updateData.minutes_text = minutes_text || null
     }
+    // A Clerk/Councilor revision on a rejected draft doubles as the
+    // resubmit — it goes straight back into the Secretary's queue instead
+    // of requiring a separate "resubmit" click.
+    if (existing.status === 'needs_revision') updateData.status = 'pending'
 
     const { data, error } = await supabase
       .from('session_minutes').update(updateData).eq('id', id).select().single()
@@ -342,115 +357,16 @@ router.put('/:id/revise', verifyToken, secretaryOrClerk, upload.single('file'), 
   }
 })
 
-// ─── PUT /api/session-minutes/:id/accept ──────────────────────────────────────
-// Secretary — pending → ready_to_publish
-router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not pending review.' })
-  try {
-    const { data, error } = await supabase
-      .from('session_minutes')
-      .update({ status: 'ready_to_publish', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'ACCEPT', 'Sessions', `Accepted draft session: ${existing.session_number || id}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/session-minutes/:id/request-changes ─────────────────────────────
-// Secretary — pending → needs_revision, requires an accompanying comment
-router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { comment } = req.body
-  if (!comment?.trim()) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
-  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'pending')
-  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not pending review.' })
-  try {
-    const { error: commentErr } = await supabase.from('comments').insert({
-      entity_type: 'session_minutes',
-      entity_id: id,
-      author_id: req.user.id,
-      author_role: req.user.position || req.user.role,
-      text: comment.trim(),
-    })
-    if (commentErr) return res.status(500).json({ error: commentErr.message })
-
-    const { data, error } = await supabase
-      .from('session_minutes')
-      .update({ status: 'needs_revision', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'REQUEST_CHANGES', 'Sessions', `Requested changes on draft session: ${existing.session_number || id}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/session-minutes/:id/vm-approve ──────────────────────────────────
-// Vice-Mayor — ready_to_publish → approved
-router.put('/:id/vm-approve', verifyToken, viceMayorOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'ready_to_publish')
-  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not ready for Vice-Mayor approval.' })
-  try {
-    const { data, error } = await supabase
-      .from('session_minutes')
-      .update({ status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString() })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'VM_APPROVE', 'Sessions', `Vice-Mayor approved: ${existing.session_number || id}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/session-minutes/:id/publish ─────────────────────────────────────
-// Secretary — approved → published
-router.put('/:id/publish', verifyToken, secretaryOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'approved')
-  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not approved for publishing.' })
-  try {
-    const { data, error } = await supabase
-      .from('session_minutes')
-      .update({ status: 'published' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'PUBLISH', 'Sessions', `Published: ${existing.session_number || id}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// ─── PUT /api/session-minutes/:id/resubmit ────────────────────────────────────
-// Clerk — needs_revision → pending
-router.put('/:id/resubmit', verifyToken, clerkOnly, async (req, res) => {
-  const { id } = req.params
-  const { notFound, wrongStatus, data: existing } = await loadSessionInStatus(id, 'needs_revision')
-  if (notFound) return res.status(404).json({ error: 'Session minutes not found.' })
-  if (wrongStatus) return res.status(400).json({ error: 'Session minutes is not awaiting revision.' })
-  try {
-    const { data, error } = await supabase
-      .from('session_minutes')
-      .update({ status: 'pending' })
-      .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
-    await logActivity(req, 'RESUBMIT', 'Sessions', `Resubmitted draft after revision: ${existing.session_number || id}`)
-    res.json({ success: true, data })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
+// ─── Review workflow + archive: accept/request-changes/vm-approve/publish/
+// DELETE — shared across ordinances/resolutions/session_minutes, see
+// helpers/legislativeReviewRoutes.js.
+router.use('/', createLegislativeReviewRoutes({
+  table: 'session_minutes',
+  entityType: 'session_minutes',
+  activityModule: 'Sessions',
+  singularLabel: 'Session minutes',
+  archiveRpc: 'archive_session_minutes',
+  labelOf: (r) => r.session_number || r.id,
+}))
 
 module.exports = router

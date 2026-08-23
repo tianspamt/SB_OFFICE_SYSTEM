@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
   X,
@@ -20,19 +21,28 @@ import {
   Upload,
   Send,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
-import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
-import { API, authFetch } from "./AdminContext";
+import { pendingQueryKey, fetchPendingList } from "./AdminContext";
+import {
+  pendingStatusesForRole,
+  useReviewWorkflow,
+  useCommentThread,
+  useLegislativePublished,
+  useResetOnChange,
+  useDeepLinkedTab,
+} from "./useLegislativeReview";
 
 import {
   TabNavigation,
   SearchBar,
   FilterPanel,
-  UploadModal,
   EmptyState,
   StatsRow,
   StatusBadge,
+  RecordListSkeleton,
 } from "./LegislativeComponents";
 
 // ─── DUMMY DATA ───────────────────────────────────────────────────────────────
@@ -49,79 +59,111 @@ const CATEGORIES = [
   "Infrastructure",
 ];
 
+// Published records are paginated server-side (see GET /api/ordinances'
+// opt-in page/limit) instead of fetching every ordinance ever created —
+// this stays independent of the `ordinances` prop, which the dashboard
+// still fetches in full for the Officials cross-reference and its own stats.
+const PAGE_SIZE = 20;
+
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function OrdinancesPage({
   ordinances,
+  loading = false,
   setDeleteTarget,
   onEdit,
   readOnly = false,
   canPublish = false,
+  canManagePending = false,
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
+  isCouncilor = false,
   onRefresh,
   initialSubTab = null,
 }) {
-  const [activeTab, setActiveTab] = useState("published");
-
   // Lets the dashboard's "Needs your review" widget deep-link straight into
   // the Pending tab instead of landing on the default Published tab.
-  useEffect(() => {
-    if (initialSubTab) setActiveTab(initialSubTab);
-  }, [initialSubTab]);
+  const [activeTab, setActiveTab] = useDeepLinkedTab("published", initialSubTab);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pendingOrdinances, setPendingOrdinances] = useState([]);
-  const [fetchingPending, setFetchingPending] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [viewTarget, setViewTarget] = useState(null);
   const [pdfError, setPdfError] = useState(false);
+  const queryClient = useQueryClient();
+  const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const { data: pendingOrdinances = [], isLoading: fetchingPending } = useQuery({
+    queryKey: pendingQueryKey("ordinances", pendingStatusQ),
+    queryFn: () => fetchPendingList("ordinances", pendingStatusQ),
+    enabled: activeTab === "pending" && canPublish,
+    staleTime: 15000,
+  });
+
+  // ── Published tab: server-paginated ─────────────────────────────────────────
+  const [publishedPage, setPublishedPage] = useState(1);
+  // Debounced so typing doesn't fire a request per keystroke — the search
+  // box itself stays instant (it also drives the Pending tab's client-side
+  // filter below, which doesn't need debouncing since it's not a network call).
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+  // A filter change invalidates whatever page you were on.
+  useResetOnChange([debouncedSearch, yearFilter], setPublishedPage, 1);
+
+  // Only the keys that are actually set — mirrors the old URLSearchParams
+  // construction, and keeps the cache key stable so e.g. clearing the year
+  // filter is a genuinely different (and independently cached) key rather
+  // than one with a stray `year: undefined`.
+  const publishedParams = {
+    page: String(publishedPage),
+    limit: String(PAGE_SIZE),
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...(yearFilter !== "all" ? { year: yearFilter } : {}),
+  };
+  const {
+    publishedList,
+    publishedTotal,
+    publishedTotalPages,
+    fetchingPublished,
+    refreshPublished: fetchPublishedOrdinances,
+  } = useLegislativePublished("ordinances", publishedParams, ordinances);
 
   // ── Review workflow (comment thread + actions inside the View Draft modal) ──
-  const [reviewComments, setReviewComments] = useState([]);
-  const [loadingComments, setLoadingComments] = useState(false);
+  // reviewCommentText/reviewFile stay local — they're page-specific glue
+  // (one textarea doubles as both the comment box and the reject-reason
+  // input; the file picker feeds handleReplaceFile below).
   const [reviewCommentText, setReviewCommentText] = useState("");
   const [reviewFile, setReviewFile] = useState(null);
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewError, setReviewError] = useState("");
+  const {
+    viewTarget, setViewTarget,
+    submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
+    runAction: runReviewAction,
+  } = useReviewWorkflow({ onRefresh: () => refreshAll() });
+  const {
+    comments: reviewComments, loadingComments, commentSubmitting,
+    fetchComments: fetchCommentsForId, sendComment,
+  } = useCommentThread();
+  const fetchComments = (id) => fetchCommentsForId("ordinance", id);
 
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const getFileUrl = (filepath) =>
     `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
 
-  // ── Split ordinances by actual status from the backend ─────────────────────
-  const publishedOrdinances = ordinances.filter(
-    (o) => o.status === "published"
-  );
-
-  // ── Derive available years from published ordinances ───────────────────────
+  // ── Derive available years from the full ordinances list (the dashboard
+  // already fetches this in full for its own stats/Officials cross-
+  // reference, so reusing it here is free — the Published tab's own list
+  // below is the one that's actually paginated).
   const availableYears = [
     ...new Set(
-      publishedOrdinances.map((o) => o.year?.toString()).filter(Boolean)
+      ordinances
+        .filter((o) => o.status === "published")
+        .map((o) => o.year?.toString())
+        .filter(Boolean)
     ),
   ].sort((a, b) => b - a);
-
-  // ── Filter helpers ──────────────────────────────────────────────────────────
-
-  const filterPublished = (list) =>
-    list.filter((o) => {
-      const s =
-        !search ||
-        (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-        (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase());
-      const c =
-        catFilter === "All" ||
-        (o.category || "").toLowerCase() === catFilter.toLowerCase();
-      const a =
-        !authorFilter ||
-        (o.author || "").toLowerCase().includes(authorFilter.toLowerCase());
-      const y = yearFilter === "all" || o.year?.toString() === yearFilter;
-      return s && c && a && y;
-    });
 
   const filterPending = (list) =>
     list.filter((o) => {
@@ -146,55 +188,15 @@ export default function OrdinancesPage({
     setAuthorFilter("");
     setYearFilter("all");
   };
-  //
-  useEffect(() => {
-    if (activeTab === "pending" && canPublish) {
-      fetchPendingOrdinances();
-    }
-  }, [activeTab]);
-
-  // Role-aware pending queue: each position only reviews the status it owns.
-  const pendingStatusesForRole = () => {
-    if (isSecretary) return "pending,approved";
-    if (isViceMayor) return "ready_to_publish";
-    if (isClerk) return "needs_revision";
-    return "pending,needs_revision,ready_to_publish,approved";
-  };
-
-  const fetchPendingOrdinances = async () => {
-    setFetchingPending(true);
-    try {
-      const res = await fetch(
-        `${API}/api/ordinances?status=${pendingStatusesForRole()}`
-      );
-      const data = await res.json();
-      setPendingOrdinances(Array.isArray(data) ? data : []);
-    } catch {
-      setPendingOrdinances([]);
-    } finally {
-      setFetchingPending(false);
-    }
-  };
+  // Old call sites just call fetchPendingOrdinances() to refresh — keeping
+  // the name means refreshAll() below doesn't need to change.
+  const fetchPendingOrdinances = () =>
+    queryClient.invalidateQueries({ queryKey: pendingQueryKey("ordinances", pendingStatusQ) });
 
   const refreshAll = () => {
     fetchPendingOrdinances();
+    fetchPublishedOrdinances();
     onRefresh?.();
-  };
-
-  // ── Comment thread (inside the View Draft modal) ────────────────────────────
-  const fetchComments = async (ordinanceId) => {
-    setLoadingComments(true);
-    try {
-      const res = await authFetch(
-        `${API}/api/comments?entity_type=ordinance&entity_id=${ordinanceId}`
-      );
-      const data = await res.json();
-      setReviewComments(Array.isArray(data) ? data : []);
-    } catch {
-      setReviewComments([]);
-    } finally {
-      setLoadingComments(false);
-    }
   };
 
   const handleOpenView = (item) => {
@@ -207,51 +209,10 @@ export default function OrdinancesPage({
   };
 
   const handleSendComment = async () => {
-    if (!reviewCommentText.trim() || !viewTarget) return;
-    setReviewSubmitting(true);
-    try {
-      const res = await authFetch(`${API}/api/comments`, {
-        method: "POST",
-        body: JSON.stringify({
-          entity_type: "ordinance",
-          entity_id: viewTarget.id,
-          text: reviewCommentText.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setReviewCommentText("");
-        fetchComments(viewTarget.id);
-      } else setReviewError(data.error || "Failed to add comment.");
-    } catch {
-      setReviewError("Server error.");
-    } finally {
-      setReviewSubmitting(false);
-    }
-  };
-
-  // ── Review workflow actions ──────────────────────────────────────────────────
-  const runReviewAction = async (url, options, successUpdate) => {
-    setReviewSubmitting(true);
-    setReviewError("");
-    try {
-      const res = await authFetch(`${API}${url}`, options);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setViewTarget((prev) =>
-          prev ? { ...prev, ...successUpdate(data.data) } : prev
-        );
-        refreshAll();
-        return true;
-      }
-      setReviewError(data.error || "Action failed.");
-      return false;
-    } catch {
-      setReviewError("Server error.");
-      return false;
-    } finally {
-      setReviewSubmitting(false);
-    }
+    if (!viewTarget) return;
+    const result = await sendComment("ordinance", viewTarget.id, reviewCommentText);
+    if (result.ok) setReviewCommentText("");
+    else if (result.error) setReviewError(result.error);
   };
 
   const handleAccept = (id) =>
@@ -308,18 +269,6 @@ export default function OrdinancesPage({
     return ok;
   };
 
-  const handleResubmit = async (id) => {
-    if (reviewFile) {
-      const replaced = await handleReplaceFile(id);
-      if (!replaced) return;
-    }
-    runReviewAction(
-      `/api/ordinances/${id}/resubmit`,
-      { method: "PUT" },
-      (d) => ({ status: d.status })
-    );
-  };
-
   // ── Pending count for badge ─────────────────────────────────────────────────
 
   const pendingFiltered = pendingOrdinances.filter((o) => {
@@ -330,13 +279,13 @@ export default function OrdinancesPage({
     );
   });
   const pendingCount = pendingOrdinances.length;
-  const publishedFiltered = filterPublished(publishedOrdinances);
 
   return (
     <>
       <StatsRow
+        loading={loading || (fetchingPublished && publishedTotal === 0)}
         stats={[
-          { value: publishedOrdinances.length, label: "Total Published" },
+          { value: publishedTotal, label: "Total Published" },
           {
             value: pendingCount,
             label: "Pending Review",
@@ -388,21 +337,24 @@ export default function OrdinancesPage({
       {activeTab === "published" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {publishedFiltered.length} of {publishedOrdinances.length}{" "}
-            ordinances
+            Showing {publishedList.length === 0 ? 0 : (publishedPage - 1) * PAGE_SIZE + 1}
+            {publishedList.length > 0 ? `-${(publishedPage - 1) * PAGE_SIZE + publishedList.length}` : ""} of {publishedTotal} ordinances
           </div>
+          {loading || fetchingPublished ? (
+            <RecordListSkeleton count={4} />
+          ) : (
           <div className={lStyles.recordList}>
-            {publishedFiltered.length === 0 ? (
+            {publishedList.length === 0 ? (
               <EmptyState
                 title="No published ordinances yet"
                 text={
-                  search || catFilter !== "All"
+                  search || yearFilter !== "all"
                     ? "No records match your filters."
                     : "Approved drafts will appear here after final signed upload."
                 }
               />
             ) : (
-              publishedFiltered.map((o) => (
+              publishedList.map((o) => (
                 <div key={o.id} className={lStyles.recordCard}>
                   <div
                     className={lStyles.recordIcon}
@@ -479,6 +431,28 @@ export default function OrdinancesPage({
               ))
             )}
           </div>
+          )}
+          {!fetchingPublished && publishedTotalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage <= 1}
+                onClick={() => setPublishedPage((p) => Math.max(p - 1, 1))}
+              >
+                <ChevronLeft size={13} /> Prev
+              </button>
+              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                Page {publishedPage} of {publishedTotalPages}
+              </span>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage >= publishedTotalPages}
+                onClick={() => setPublishedPage((p) => Math.min(p + 1, publishedTotalPages))}
+              >
+                Next <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -488,6 +462,9 @@ export default function OrdinancesPage({
           <div className={lStyles.resultCount}>
             Showing {pendingFiltered.length} drafts
           </div>
+          {fetchingPending ? (
+            <RecordListSkeleton count={3} />
+          ) : (
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -530,35 +507,27 @@ export default function OrdinancesPage({
                     >
                       <Eye size={13} /> View Draft
                     </button>
+                    {canManagePending && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: item.id,
+                            type: "ordinance",
+                            name: item.title,
+                          })
+                        }
+                      >
+                        <Archive size={13} /> Archive
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
             )}
           </div>
+          )}
         </>
-      )}
-
-      {/* ── UPLOAD MODAL ─────────────────────────────────────────────────────── */}
-      {showUploadModal && (
-        <UploadModal
-          title="Add Final Ordinance"
-          codePrefix="ORD"
-          categories={[
-            "Tax",
-            "Education",
-            "Agriculture",
-            "Environment",
-            "Public Works",
-            "Health",
-            "Infrastructure",
-          ]}
-          onClose={() => setShowUploadModal(false)}
-          onSubmit={(formData) => {
-            // TODO: connect to backend
-            console.log("Publish ordinance:", formData);
-            setShowUploadModal(false);
-          }}
-        />
       )}
 
       {/* ── VIEW ORDINANCE MODAL ─────────────────────────────────────────────── */}
@@ -670,14 +639,6 @@ export default function OrdinancesPage({
               <div className={lStyles.viewModalDivider} />
 
               {/* ── File actions ── */}
-              {console.log(
-                "SUPABASE_URL:",
-                SUPABASE_URL,
-                "filepath:",
-                viewTarget.filepath,
-                "full URL:",
-                getFileUrl(viewTarget.filepath)
-              )}
               {viewTarget.filetype === "application/pdf" && (
                 <div className={lStyles.viewModalFileActions}>
                   <a
@@ -800,8 +761,8 @@ export default function OrdinancesPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {/* Replace file — Secretary or Clerk, while the draft is still under review */}
-                  {(isSecretary || isClerk) && (
+                  {/* Replace file — Clerk/Councilor draft, Secretary keeps this as a fallback */}
+                  {(isSecretary || isClerk || isCouncilor) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -831,14 +792,17 @@ export default function OrdinancesPage({
                           }
                         />
                       </div>
-                      {reviewFile && viewTarget.status !== "needs_revision" && (
+                      {reviewFile && (
                         <button
                           className={`${lStyles.btn} ${lStyles.btnSm}`}
                           style={{ marginTop: 8 }}
                           disabled={reviewSubmitting}
                           onClick={() => handleReplaceFile(viewTarget.id)}
                         >
-                          <Upload size={13} /> Upload Replacement
+                          <Upload size={13} />{" "}
+                          {viewTarget.status === "needs_revision"
+                            ? "Replace File & Resubmit"
+                            : "Upload Replacement"}
                         </button>
                       )}
                     </div>
@@ -891,7 +855,7 @@ export default function OrdinancesPage({
                     )}
                   </div>
 
-                  {(isSecretary || isClerk) && (
+                  {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -902,7 +866,7 @@ export default function OrdinancesPage({
                       />
                       <button
                         className={`${lStyles.btn} ${lStyles.btnSm}`}
-                        disabled={reviewSubmitting || !reviewCommentText.trim()}
+                        disabled={commentSubmitting || !reviewCommentText.trim()}
                         onClick={handleSendComment}
                       >
                         <Send size={13} />
@@ -947,16 +911,6 @@ export default function OrdinancesPage({
                           <Check size={16} /> Accept
                         </button>
                       </div>
-                    )}
-
-                    {isClerk && viewTarget.status === "needs_revision" && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleResubmit(viewTarget.id)}
-                      >
-                        <Upload size={13} /> Replace File &amp; Resubmit
-                      </button>
                     )}
 
                     {isViceMayor &&

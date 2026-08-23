@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   X,
   Eye,
@@ -15,18 +16,28 @@ import {
   Download,
   Upload,
   Send,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { API, authFetch } from "./AdminContext";
+import { pendingQueryKey, fetchPendingList } from "./AdminContext";
+import {
+  pendingStatusesForRole,
+  useReviewWorkflow,
+  useCommentThread,
+  useLegislativePublished,
+  useResetOnChange,
+  useDeepLinkedTab,
+} from "./useLegislativeReview";
 
 import {
   TabNavigation,
   SearchBar,
   FilterPanel,
-  UploadModal,
   EmptyState,
   StatsRow,
   StatusBadge,
+  RecordListSkeleton,
 } from "./LegislativeComponents";
 
 const CATEGORIES = [
@@ -40,78 +51,101 @@ const CATEGORIES = [
   "Agriculture",
 ];
 
+// Published records are paginated server-side (see GET /api/resolutions'
+// opt-in page/limit) instead of fetching every resolution ever created —
+// this stays independent of the `resolutions` prop, which the dashboard
+// still fetches in full for its own stats.
+const PAGE_SIZE = 20;
+
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 
 export default function ResolutionsPage({
   resolutions,
+  loading = false,
   setDeleteTarget,
   onEdit,
   readOnly = false,
   canPublish = false,
+  canManagePending = false,
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
+  isCouncilor = false,
   onRefresh,
   initialSubTab = null,
 }) {
-  const [activeTab, setActiveTab] = useState("published");
-
   // Lets the dashboard's "Needs your review" widget deep-link straight into
   // the Pending tab instead of landing on the default Published tab.
-  useEffect(() => {
-    if (initialSubTab) setActiveTab(initialSubTab);
-  }, [initialSubTab]);
+  const [activeTab, setActiveTab] = useDeepLinkedTab("published", initialSubTab);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pendingResolutions, setPendingResolutions] = useState([]);
-  const [fetchingPending, setFetchingPending] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [viewTarget, setViewTarget] = useState(null);
+  const queryClient = useQueryClient();
+  const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const { data: pendingResolutions = [], isLoading: fetchingPending } = useQuery({
+    queryKey: pendingQueryKey("resolutions", pendingStatusQ),
+    queryFn: () => fetchPendingList("resolutions", pendingStatusQ),
+    enabled: activeTab === "pending" && canPublish,
+    staleTime: 15000,
+  });
+
+  // ── Published tab: server-paginated ─────────────────────────────────────────
+  const [publishedPage, setPublishedPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useResetOnChange([debouncedSearch, yearFilter], setPublishedPage, 1);
+
+  const publishedParams = {
+    page: String(publishedPage),
+    limit: String(PAGE_SIZE),
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...(yearFilter !== "all" ? { year: yearFilter } : {}),
+  };
+  const {
+    publishedList,
+    publishedTotal,
+    publishedTotalPages,
+    fetchingPublished,
+    refreshPublished: fetchPublishedResolutions,
+  } = useLegislativePublished("resolutions", publishedParams, resolutions);
 
   // ── Review workflow (comment thread + actions inside the View Draft modal) ──
-  const [reviewComments, setReviewComments] = useState([]);
-  const [loadingComments, setLoadingComments] = useState(false);
+  // reviewCommentText/reviewFile stay local — they're page-specific glue
+  // (one textarea doubles as both the comment box and the reject-reason
+  // input; the file picker feeds handleReplaceFile below).
   const [reviewCommentText, setReviewCommentText] = useState("");
   const [reviewFile, setReviewFile] = useState(null);
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewError, setReviewError] = useState("");
+  const {
+    viewTarget, setViewTarget,
+    submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
+    runAction: runReviewAction,
+  } = useReviewWorkflow({ onRefresh: () => refreshAll() });
+  const {
+    comments: reviewComments, loadingComments, commentSubmitting,
+    fetchComments: fetchCommentsForId, sendComment,
+  } = useCommentThread();
+  const fetchComments = (id) => fetchCommentsForId("resolution", id);
 
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const getFileUrl = (filepath) =>
     `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
 
-  // ── Split resolutions by actual status from the backend ─────────────────────
-  const publishedResolutions = resolutions.filter(
-    (r) => r.status === "published"
-  );
-
-  // ── Derive available years from published resolutions ──────────────────────
+  // ── Derive available years from the full resolutions list (the dashboard
+  // already fetches this in full for its own stats, so reusing it here is
+  // free — the Published tab's own list below is the one that's paginated).
   const availableYears = [
     ...new Set(
-      publishedResolutions.map((r) => r.year?.toString()).filter(Boolean)
+      resolutions
+        .filter((r) => r.status === "published")
+        .map((r) => r.year?.toString())
+        .filter(Boolean)
     ),
   ].sort((a, b) => b - a);
-
-  const filterPublished = (list) =>
-    list.filter((r) => {
-      const s =
-        !search ||
-        (r.title || "").toLowerCase().includes(search.toLowerCase()) ||
-        (r.resolution_number || "")
-          .toLowerCase()
-          .includes(search.toLowerCase());
-      const c =
-        catFilter === "All" ||
-        (r.category || "").toLowerCase() === catFilter.toLowerCase();
-      const a =
-        !authorFilter ||
-        (r.author || "").toLowerCase().includes(authorFilter.toLowerCase());
-      const y = yearFilter === "all" || r.year?.toString() === yearFilter;
-      return s && c && a && y;
-    });
 
   const resetFilters = () => {
     setSearch("");
@@ -121,54 +155,15 @@ export default function ResolutionsPage({
     setYearFilter("all");
   };
 
-  useEffect(() => {
-    if (activeTab === "pending" && canPublish) {
-      fetchPendingResolutions();
-    }
-  }, [activeTab]);
-
-  // Role-aware pending queue: each position only reviews the status it owns.
-  const pendingStatusesForRole = () => {
-    if (isSecretary) return "pending,approved";
-    if (isViceMayor) return "ready_to_publish";
-    if (isClerk) return "needs_revision";
-    return "pending,needs_revision,ready_to_publish,approved";
-  };
-
-  const fetchPendingResolutions = async () => {
-    setFetchingPending(true);
-    try {
-      const res = await fetch(
-        `${API}/api/resolutions?status=${pendingStatusesForRole()}`
-      );
-      const data = await res.json();
-      setPendingResolutions(Array.isArray(data) ? data : []);
-    } catch {
-      setPendingResolutions([]);
-    } finally {
-      setFetchingPending(false);
-    }
-  };
+  // Old call sites just call fetchPendingResolutions() to refresh — keeping
+  // the name means refreshAll() below doesn't need to change.
+  const fetchPendingResolutions = () =>
+    queryClient.invalidateQueries({ queryKey: pendingQueryKey("resolutions", pendingStatusQ) });
 
   const refreshAll = () => {
     fetchPendingResolutions();
+    fetchPublishedResolutions();
     onRefresh?.();
-  };
-
-  // ── Comment thread (inside the View Draft modal) ────────────────────────────
-  const fetchComments = async (resolutionId) => {
-    setLoadingComments(true);
-    try {
-      const res = await authFetch(
-        `${API}/api/comments?entity_type=resolution&entity_id=${resolutionId}`
-      );
-      const data = await res.json();
-      setReviewComments(Array.isArray(data) ? data : []);
-    } catch {
-      setReviewComments([]);
-    } finally {
-      setLoadingComments(false);
-    }
   };
 
   const handleOpenView = (item) => {
@@ -180,51 +175,10 @@ export default function ResolutionsPage({
   };
 
   const handleSendComment = async () => {
-    if (!reviewCommentText.trim() || !viewTarget) return;
-    setReviewSubmitting(true);
-    try {
-      const res = await authFetch(`${API}/api/comments`, {
-        method: "POST",
-        body: JSON.stringify({
-          entity_type: "resolution",
-          entity_id: viewTarget.id,
-          text: reviewCommentText.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setReviewCommentText("");
-        fetchComments(viewTarget.id);
-      } else setReviewError(data.error || "Failed to add comment.");
-    } catch {
-      setReviewError("Server error.");
-    } finally {
-      setReviewSubmitting(false);
-    }
-  };
-
-  // ── Review workflow actions ──────────────────────────────────────────────────
-  const runReviewAction = async (url, options, successUpdate) => {
-    setReviewSubmitting(true);
-    setReviewError("");
-    try {
-      const res = await authFetch(`${API}${url}`, options);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setViewTarget((prev) =>
-          prev ? { ...prev, ...successUpdate(data.data) } : prev
-        );
-        refreshAll();
-        return true;
-      }
-      setReviewError(data.error || "Action failed.");
-      return false;
-    } catch {
-      setReviewError("Server error.");
-      return false;
-    } finally {
-      setReviewSubmitting(false);
-    }
+    if (!viewTarget) return;
+    const result = await sendComment("resolution", viewTarget.id, reviewCommentText);
+    if (result.ok) setReviewCommentText("");
+    else if (result.error) setReviewError(result.error);
   };
 
   const handleAccept = (id) =>
@@ -283,18 +237,6 @@ export default function ResolutionsPage({
     return ok;
   };
 
-  const handleResubmit = async (id) => {
-    if (reviewFile) {
-      const replaced = await handleReplaceFile(id);
-      if (!replaced) return;
-    }
-    runReviewAction(
-      `/api/resolutions/${id}/resubmit`,
-      { method: "PUT" },
-      (d) => ({ status: d.status })
-    );
-  };
-
   const pendingFiltered = pendingResolutions.filter((r) => {
     return (
       !search ||
@@ -303,14 +245,14 @@ export default function ResolutionsPage({
     );
   });
   const pendingCount = pendingResolutions.length;
-  const publishedFiltered = filterPublished(publishedResolutions);
 
   return (
     <>
       {/* STATS */}
       <StatsRow
+        loading={loading || (fetchingPublished && publishedTotal === 0)}
         stats={[
-          { value: publishedResolutions.length, label: "Total Published" },
+          { value: publishedTotal, label: "Total Published" },
           {
             value: pendingCount,
             label: "Pending Review",
@@ -362,21 +304,24 @@ export default function ResolutionsPage({
       {activeTab === "published" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {publishedFiltered.length} of {publishedResolutions.length}{" "}
-            resolutions
+            Showing {publishedList.length === 0 ? 0 : (publishedPage - 1) * PAGE_SIZE + 1}
+            {publishedList.length > 0 ? `-${(publishedPage - 1) * PAGE_SIZE + publishedList.length}` : ""} of {publishedTotal} resolutions
           </div>
+          {loading || fetchingPublished ? (
+            <RecordListSkeleton count={4} />
+          ) : (
           <div className={lStyles.recordList}>
-            {publishedFiltered.length === 0 ? (
+            {publishedList.length === 0 ? (
               <EmptyState
                 title="No published resolutions yet"
                 text={
-                  search || catFilter !== "All"
+                  search || yearFilter !== "all"
                     ? "No records match your filters."
                     : "Approved drafts will appear here after final signed upload."
                 }
               />
             ) : (
-              publishedFiltered.map((r) => (
+              publishedList.map((r) => (
                 <div key={r.id} className={lStyles.recordCard}>
                   <div
                     className={lStyles.recordIcon}
@@ -453,6 +398,28 @@ export default function ResolutionsPage({
               ))
             )}
           </div>
+          )}
+          {!fetchingPublished && publishedTotalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage <= 1}
+                onClick={() => setPublishedPage((p) => Math.max(p - 1, 1))}
+              >
+                <ChevronLeft size={13} /> Prev
+              </button>
+              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                Page {publishedPage} of {publishedTotalPages}
+              </span>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage >= publishedTotalPages}
+                onClick={() => setPublishedPage((p) => Math.min(p + 1, publishedTotalPages))}
+              >
+                Next <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -462,6 +429,9 @@ export default function ResolutionsPage({
           <div className={lStyles.resultCount}>
             Showing {pendingFiltered.length} drafts
           </div>
+          {fetchingPending ? (
+            <RecordListSkeleton count={3} />
+          ) : (
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -504,33 +474,27 @@ export default function ResolutionsPage({
                     >
                       <Eye size={13} /> View Draft
                     </button>
+                    {canManagePending && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: item.id,
+                            type: "resolution",
+                            name: item.title,
+                          })
+                        }
+                      >
+                        <Archive size={13} /> Archive
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
             )}
           </div>
+          )}
         </>
-      )}
-
-      {/* ── UPLOAD MODAL ─────────────────────────────────────────────────────── */}
-      {showUploadModal && (
-        <UploadModal
-          title="Add Final Resolution"
-          codePrefix="RES"
-          categories={[
-            "Finance",
-            "Health",
-            "Infrastructure",
-            "Education",
-            "Environment",
-            "Public Safety",
-          ]}
-          onClose={() => setShowUploadModal(false)}
-          onSubmit={(formData) => {
-            console.log("Publish resolution:", formData);
-            setShowUploadModal(false);
-          }}
-        />
       )}
 
       {/* ── VIEW RESOLUTION MODAL ────────────────────────────────────────────── */}
@@ -747,7 +711,7 @@ export default function ResolutionsPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {(isSecretary || isClerk) && (
+                  {(isSecretary || isClerk || isCouncilor) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -777,14 +741,17 @@ export default function ResolutionsPage({
                           }
                         />
                       </div>
-                      {reviewFile && viewTarget.status !== "needs_revision" && (
+                      {reviewFile && (
                         <button
                           className={`${lStyles.btn} ${lStyles.btnSm}`}
                           style={{ marginTop: 8 }}
                           disabled={reviewSubmitting}
                           onClick={() => handleReplaceFile(viewTarget.id)}
                         >
-                          <Upload size={13} /> Upload Replacement
+                          <Upload size={13} />{" "}
+                          {viewTarget.status === "needs_revision"
+                            ? "Replace File & Resubmit"
+                            : "Upload Replacement"}
                         </button>
                       )}
                     </div>
@@ -836,7 +803,7 @@ export default function ResolutionsPage({
                     )}
                   </div>
 
-                  {(isSecretary || isClerk) && (
+                  {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -847,7 +814,7 @@ export default function ResolutionsPage({
                       />
                       <button
                         className={`${lStyles.btn} ${lStyles.btnSm}`}
-                        disabled={reviewSubmitting || !reviewCommentText.trim()}
+                        disabled={commentSubmitting || !reviewCommentText.trim()}
                         onClick={handleSendComment}
                       >
                         <Send size={13} />
@@ -891,16 +858,6 @@ export default function ResolutionsPage({
                           Request Changes
                         </button>
                       </>
-                    )}
-
-                    {isClerk && viewTarget.status === "needs_revision" && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleResubmit(viewTarget.id)}
-                      >
-                        <Upload size={13} /> Replace File &amp; Resubmit
-                      </button>
                     )}
 
                     {isViceMayor &&

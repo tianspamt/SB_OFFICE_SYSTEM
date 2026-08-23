@@ -470,7 +470,7 @@ export default function AdminDashboard() {
   const fetchOrdinances = async () => {
     setFetchingOrdinances(true);
     try {
-      const d = await (await fetch(`${API}/api/ordinances`)).json();
+      const d = await (await authFetch(`${API}/api/ordinances?status=all`)).json();
       setOrdinances(Array.isArray(d) ? d : []);
     } catch {
       setOrdinances([]);
@@ -481,7 +481,7 @@ export default function AdminDashboard() {
   const fetchResolutions = async () => {
     setFetchingResolutions(true);
     try {
-      const d = await (await fetch(`${API}/api/resolutions`)).json();
+      const d = await (await authFetch(`${API}/api/resolutions?status=all`)).json();
       setResolutions(Array.isArray(d) ? d : []);
     } catch {
       setResolutions([]);
@@ -492,7 +492,7 @@ export default function AdminDashboard() {
   const fetchSessionMinutes = async () => {
     setFetchingMinutes(true);
     try {
-      const d = await (await fetch(`${API}/api/session-minutes`)).json();
+      const d = await (await authFetch(`${API}/api/session-minutes?status=all`)).json();
       setSessionMinutes(Array.isArray(d) ? d : []);
     } catch {
       setSessionMinutes([]);
@@ -1578,8 +1578,26 @@ export default function AdminDashboard() {
   const canManageUsers = isSecretary || isClerk;
   const canViewLogs = isSecretary;
   const canViewArchives = isSecretary;
-  const canPublishLegislative = isSecretary || isClerk || isViceMayor;
+  // Gates whether the Pending tab is visible at all (Secretary reviews it,
+  // Vice-Mayor approves from it, Clerk/Councilor draft in it).
+  const canPublishLegislative = isSecretary || isClerk || isViceMayor || isCouncilor;
+  // Gates edit/upload/delete on the Published tab specifically — Councilor
+  // stays read-only there even though they can draft on the Pending tab
+  // (see canManagePendingLegislative).
   const canEditLegislative = isSecretary || isClerk;
+  // Clerk and Councilor both draft: edit/withdraw a not-yet-published
+  // record (matches the backend's canManageLegislativeRecord) — Secretary
+  // does NOT get this one even though they can create (below): they review/
+  // approve a pending record rather than editing or archiving it directly.
+  const canManagePendingLegislative = isClerk || isCouncilor;
+  // All four positions can originate a new draft — Secretary and Vice-Mayor
+  // sometimes make the ordinance/resolution/session minutes directly rather
+  // than only reviewing/approving what Clerk/Councilor submit. Gates the
+  // "+Upload" button specifically, not the per-draft edit/archive actions
+  // above (Vice-Mayor still can't touch a draft's content after creating it
+  // — only Secretary/Clerk/Councilor can, via canManagePendingLegislative
+  // and the Published-tab canEditLegislative).
+  const canCreateLegislative = isSecretary || isClerk || isCouncilor || isViceMayor;
   const canManageOfficials = isSecretary || isClerk;
 
   // "users"/"admins"/"archives" are gated for every position; "logs" is the
@@ -1596,6 +1614,12 @@ export default function AdminDashboard() {
     fetchingMinutes ||
     fetchingResolutions ||
     fetchingAnnouncements;
+  // Narrower than pageLoading — only the fetches DashboardPage's own content
+  // actually depends on (fetchingUsers/fetchingOfficials feed Users/Admins/
+  // Officials, none of which this page renders), so its skeleton clears as
+  // soon as its own data is in, not whenever any unrelated tab is still loading.
+  const dashboardLoading =
+    fetchingOrdinances || fetchingResolutions || fetchingMinutes || fetchingAnnouncements;
 
   const MAlert = () => (
     <ModalAlert message={modalMessage} type={modalMessageType} />
@@ -1959,17 +1983,17 @@ export default function AdminDashboard() {
                 + Add Admin
               </button>
             )}
-            {activeTab === "ordinances" && isAdmin && (
+            {activeTab === "ordinances" && canCreateLegislative && (
               <button className={styles.addBtn} onClick={openOrdinanceModal}>
                 + Upload Ordinance
               </button>
             )}
-            {activeTab === "resolutions" && isAdmin && (
+            {activeTab === "resolutions" && canCreateLegislative && (
               <button className={styles.addBtn} onClick={openResolutionModal}>
                 + Upload Resolution
               </button>
             )}
-            {activeTab === "sessions" && isAdmin && (
+            {activeTab === "sessions" && canCreateLegislative && (
               <button className={styles.addBtn} onClick={openSessionModal}>
                 + Add Session
               </button>
@@ -2006,6 +2030,7 @@ export default function AdminDashboard() {
             sessionMinutes={sessionMinutes}
             announcements={announcements}
             unreadAnnouncements={unreadAnnouncements}
+            loading={dashboardLoading}
             onNavigate={handleTabChange}
             canQuickAdd={isAdmin}
             onAddOrdinance={openOrdinanceModal}
@@ -2015,6 +2040,7 @@ export default function AdminDashboard() {
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
+            isCouncilor={isCouncilor}
           />
         )}
         {activeTab === "users" && (
@@ -2038,30 +2064,36 @@ export default function AdminDashboard() {
             onResetPassword={setResetPasswordTarget}
           />
         )}
-        {activeTab === "ordinances" && !fetchingOrdinances && (
+        {activeTab === "ordinances" && (
           <OrdinancesPage
             ordinances={ordinances}
+            loading={fetchingOrdinances}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditOrdinance}
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
+            canManagePending={canManagePendingLegislative}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
+            isCouncilor={isCouncilor}
             onRefresh={fetchOrdinances}
             initialSubTab={activeTab === "ordinances" ? subTabRequest : null}
           />
         )}
-        {activeTab === "resolutions" && !fetchingResolutions && (
+        {activeTab === "resolutions" && (
           <ResolutionsPage
             resolutions={resolutions}
+            loading={fetchingResolutions}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditResolution}
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
+            canManagePending={canManagePendingLegislative}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
+            isCouncilor={isCouncilor}
             onRefresh={fetchResolutions}
             initialSubTab={activeTab === "resolutions" ? subTabRequest : null}
           />
@@ -2098,16 +2130,19 @@ export default function AdminDashboard() {
           />
         )}
 
-        {activeTab === "sessions" && !fetchingMinutes && (
+        {activeTab === "sessions" && (
           <SessionsPage
             sessionMinutes={sessionMinutes}
+            loading={fetchingMinutes}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditSession}
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
+            canManagePending={canManagePendingLegislative}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
+            isCouncilor={isCouncilor}
             onRefresh={fetchSessionMinutes}
             initialSubTab={activeTab === "sessions" ? subTabRequest : null}
           />

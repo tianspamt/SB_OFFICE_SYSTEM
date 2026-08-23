@@ -1,8 +1,16 @@
 const rateLimit = require('express-rate-limit')
 
+// 100/15min was sized for occasional API hits, not an SPA dashboard that
+// polls several endpoints (pending queues across three modules, comments,
+// council members, etc.) on every tab switch — real interactive use was
+// tripping it well before anything resembling abuse. Raised to something
+// that comfortably covers a busy multi-tab admin session; still keyed by IP,
+// so an office sharing one public IP gets one shared budget, not per-user —
+// if that becomes a problem, key by req.user.id for authenticated requests
+// instead of raising this further.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please try again later.' }

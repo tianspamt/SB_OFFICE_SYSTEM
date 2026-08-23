@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Printer,
   Eye,
@@ -13,19 +14,54 @@ import {
   X,
   Upload,
   Send,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { API, MONTHS, authFetch } from "./AdminContext";
+import { API, MONTHS, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
+import {
+  pendingStatusesForRole,
+  useReviewWorkflow,
+  useCommentThread,
+  useLegislativePublished,
+  useResetOnChange,
+  useDeepLinkedTab,
+} from "./useLegislativeReview";
 
 import {
   TabNavigation,
   SearchBar,
   FilterPanel,
-  UploadModal,
   EmptyState,
   StatsRow,
   StatusBadge,
+  RecordListSkeleton,
 } from "./LegislativeComponents";
+
+// Published records are paginated server-side (see GET /api/session-minutes'
+// opt-in page/limit) instead of fetching every session ever recorded — this
+// stays independent of the `sessionMinutes` prop, which the dashboard still
+// fetches in full for its own stats.
+const PAGE_SIZE = 20;
+
+// The print view now requires auth (see backend lockdown of GET .../print),
+// so a plain <a href> can no longer carry it — the browser's own navigation
+// has no way to attach an Authorization header. Open the tab synchronously
+// (before the await) so browsers don't treat it as an unrequested popup,
+// then fill it in once the authenticated fetch resolves.
+const handlePrintSession = async (id) => {
+  const win = window.open("", "_blank");
+  try {
+    const res = await authFetch(`${API}/api/session-minutes/${id}/print`);
+    const html = await res.text();
+    if (!win) return;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch {
+    win?.close();
+  }
+};
 
 // ─── SESSION CARD (Published) ─────────────────────────────────────────────────
 
@@ -138,14 +174,12 @@ function SessionPublishedCard({
         )}
       </div>
       <div className={lStyles.recordActions}>
-        <a
-          href={`${API}/api/session-minutes/${session.id}/print`}
-          target="_blank"
-          rel="noreferrer"
+        <button
           className={`${lStyles.btn} ${lStyles.btnSm}`}
+          onClick={() => handlePrintSession(session.id)}
         >
           <Printer size={13} /> Print
-        </a>
+        </button>
         <button
           className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
           onClick={() => onView(session)}
@@ -183,40 +217,76 @@ function SessionPublishedCard({
 
 export default function SessionsPage({
   sessionMinutes,
+  loading = false,
   setDeleteTarget,
   onEdit,
   readOnly = false,
   canPublish = false,
+  canManagePending = false,
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
+  isCouncilor = false,
   onRefresh,
   initialSubTab = null,
 }) {
-  const [activeTab, setActiveTab] = useState("published");
-
   // Lets the dashboard's "Needs your review" widget deep-link straight into
   // the Pending tab instead of landing on the default Published tab.
-  useEffect(() => {
-    if (initialSubTab) setActiveTab(initialSubTab);
-  }, [initialSubTab]);
+  const [activeTab, setActiveTab] = useDeepLinkedTab("published", initialSubTab);
   const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
-  const [pendingSessions, setPendingSessions] = useState([]);
-  const [fetchingPending, setFetchingPending] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [viewTarget, setViewTarget] = useState(null);
+  const queryClient = useQueryClient();
+  const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const { data: pendingSessions = [], isLoading: fetchingPending } = useQuery({
+    queryKey: pendingQueryKey("session-minutes", pendingStatusQ),
+    queryFn: () => fetchPendingList("session-minutes", pendingStatusQ),
+    enabled: activeTab === "pending" && canPublish,
+    staleTime: 15000,
+  });
+
+  // ── Published tab: server-paginated ─────────────────────────────────────────
+  const [publishedPage, setPublishedPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useResetOnChange([debouncedSearch, minutesTypeFilter, minutesYearFilter], setPublishedPage, 1);
+
+  const publishedParams = {
+    page: String(publishedPage),
+    limit: String(PAGE_SIZE),
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    ...(minutesYearFilter !== "all" ? { year: minutesYearFilter } : {}),
+    ...(minutesTypeFilter !== "all" ? { type: minutesTypeFilter } : {}),
+  };
+  const {
+    publishedList,
+    publishedTotal,
+    publishedTotalPages,
+    fetchingPublished,
+    refreshPublished: fetchPublishedSessions,
+  } = useLegislativePublished("session-minutes", publishedParams, sessionMinutes);
 
   // ── Review workflow ──────────────────────────────────────────────────────────
-  const [reviewComments, setReviewComments] = useState([]);
-  const [loadingComments, setLoadingComments] = useState(false);
+  // reviewCommentText/revise* stay local — page-specific glue (the textarea
+  // doubles as comment box + reject-reason input; revise* feed
+  // handleReviseSession below).
   const [reviewCommentText, setReviewCommentText] = useState("");
   const [reviseAgenda, setReviseAgenda] = useState("");
   const [reviseMinutes, setReviseMinutes] = useState("");
   const [reviseFile, setReviseFile] = useState(null);
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewError, setReviewError] = useState("");
+  const {
+    viewTarget, setViewTarget,
+    submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
+    runAction: runReviewAction,
+  } = useReviewWorkflow({ onRefresh: () => refreshAll() });
+  const {
+    comments: reviewComments, loadingComments, commentSubmitting,
+    fetchComments: fetchCommentsForId, sendComment,
+  } = useCommentThread();
+  const fetchComments = (id) => fetchCommentsForId("session_minutes", id);
 
   const minutesYears = [
     "all",
@@ -231,72 +301,15 @@ export default function SessionsPage({
     ),
   ].sort((a, b) => b - a);
 
-  const filteredPublished = sessionMinutes
-    .filter((s) => {
-      const ms =
-        !search ||
-        (s.session_number || "").toLowerCase().includes(search.toLowerCase()) ||
-        (s.venue || "").toLowerCase().includes(search.toLowerCase()) ||
-        (s.agenda || "").toLowerCase().includes(search.toLowerCase());
-      const t =
-        minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
-      const y =
-        minutesYearFilter === "all" ||
-        (s.session_date &&
-          new Date(s.session_date).getFullYear().toString() ===
-            minutesYearFilter);
-      return ms && t && y;
-    })
-    .filter((s) => s.status === "published" || !s.status);
-
-  useEffect(() => {
-    if (activeTab === "pending" && canPublish) {
-      fetchPendingSessions();
-    }
-  }, [activeTab]);
-
-  // Role-aware pending queue: each position only reviews the status it owns.
-  const pendingStatusesForRole = () => {
-    if (isSecretary) return "pending,approved";
-    if (isViceMayor) return "ready_to_publish";
-    if (isClerk) return "needs_revision";
-    return "pending,needs_revision,ready_to_publish,approved";
-  };
-
-  const fetchPendingSessions = async () => {
-    setFetchingPending(true);
-    try {
-      const res = await fetch(
-        `${API}/api/session-minutes?status=${pendingStatusesForRole()}`
-      );
-      const data = await res.json();
-      setPendingSessions(Array.isArray(data) ? data : []);
-    } catch {
-      setPendingSessions([]);
-    } finally {
-      setFetchingPending(false);
-    }
-  };
+  // Old call sites just call fetchPendingSessions() to refresh — keeping
+  // the name means refreshAll() below doesn't need to change.
+  const fetchPendingSessions = () =>
+    queryClient.invalidateQueries({ queryKey: pendingQueryKey("session-minutes", pendingStatusQ) });
 
   const refreshAll = () => {
     fetchPendingSessions();
+    fetchPublishedSessions();
     onRefresh?.();
-  };
-
-  // ── Comment thread ───────────────────────────────────────────────────────────
-  const fetchComments = async (sessionId) => {
-    setLoadingComments(true);
-    try {
-      const res = await authFetch(
-        `${API}/api/comments?entity_type=session_minutes&entity_id=${sessionId}`
-      );
-      const data = await res.json();
-      setReviewComments(Array.isArray(data) ? data : []);
-    } catch {
-      setReviewComments([]);
-    } finally {
-      setLoadingComments(false);
-    }
   };
 
   const handleOpenView = (item) => {
@@ -310,51 +323,10 @@ export default function SessionsPage({
   };
 
   const handleSendComment = async () => {
-    if (!reviewCommentText.trim() || !viewTarget) return;
-    setReviewSubmitting(true);
-    try {
-      const res = await authFetch(`${API}/api/comments`, {
-        method: "POST",
-        body: JSON.stringify({
-          entity_type: "session_minutes",
-          entity_id: viewTarget.id,
-          text: reviewCommentText.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setReviewCommentText("");
-        fetchComments(viewTarget.id);
-      } else setReviewError(data.error || "Failed to add comment.");
-    } catch {
-      setReviewError("Server error.");
-    } finally {
-      setReviewSubmitting(false);
-    }
-  };
-
-  // ── Review workflow actions ──────────────────────────────────────────────────
-  const runReviewAction = async (url, options, successUpdate) => {
-    setReviewSubmitting(true);
-    setReviewError("");
-    try {
-      const res = await authFetch(`${API}${url}`, options);
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setViewTarget((prev) =>
-          prev ? { ...prev, ...successUpdate(data.data) } : prev
-        );
-        refreshAll();
-        return true;
-      }
-      setReviewError(data.error || "Action failed.");
-      return false;
-    } catch {
-      setReviewError("Server error.");
-      return false;
-    } finally {
-      setReviewSubmitting(false);
-    }
+    if (!viewTarget) return;
+    const result = await sendComment("session_minutes", viewTarget.id, reviewCommentText);
+    if (result.ok) setReviewCommentText("");
+    else if (result.error) setReviewError(result.error);
   };
 
   const handleAccept = (id) =>
@@ -430,16 +402,6 @@ export default function SessionsPage({
     return ok;
   };
 
-  const handleResubmit = async (id) => {
-    const revised = await handleReviseSession(id);
-    if (!revised) return;
-    runReviewAction(
-      `/api/session-minutes/${id}/resubmit`,
-      { method: "PUT" },
-      (d) => ({ status: d.status })
-    );
-  };
-
   const pendingFiltered = pendingSessions.filter((s) => {
     return (
       !search ||
@@ -452,8 +414,9 @@ export default function SessionsPage({
     <>
       {/* STATS */}
       <StatsRow
+        loading={loading || (fetchingPublished && publishedTotal === 0)}
         stats={[
-          { value: filteredPublished.length, label: "Total Sessions" },
+          { value: publishedTotal, label: "Total Sessions" },
           {
             value: pendingCount,
             label: "Pending Review",
@@ -517,11 +480,14 @@ export default function SessionsPage({
       {activeTab === "published" && (
         <>
           <div className={lStyles.resultCount}>
-            Showing {filteredPublished.length} of {sessionMinutes.length}{" "}
-            sessions
+            Showing {publishedList.length === 0 ? 0 : (publishedPage - 1) * PAGE_SIZE + 1}
+            {publishedList.length > 0 ? `-${(publishedPage - 1) * PAGE_SIZE + publishedList.length}` : ""} of {publishedTotal} sessions
           </div>
+          {loading || fetchingPublished ? (
+            <RecordListSkeleton count={4} />
+          ) : (
           <div className={lStyles.recordList}>
-            {filteredPublished.length === 0 ? (
+            {publishedList.length === 0 ? (
               <EmptyState
                 title="No session records match your search"
                 text={
@@ -533,7 +499,7 @@ export default function SessionsPage({
                 }
               />
             ) : (
-              filteredPublished.map((s) => (
+              publishedList.map((s) => (
                 <SessionPublishedCard
                   key={s.id}
                   session={s}
@@ -546,6 +512,28 @@ export default function SessionsPage({
               ))
             )}
           </div>
+          )}
+          {!fetchingPublished && publishedTotalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage <= 1}
+                onClick={() => setPublishedPage((p) => Math.max(p - 1, 1))}
+              >
+                <ChevronLeft size={13} /> Prev
+              </button>
+              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                Page {publishedPage} of {publishedTotalPages}
+              </span>
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSm}`}
+                disabled={publishedPage >= publishedTotalPages}
+                onClick={() => setPublishedPage((p) => Math.min(p + 1, publishedTotalPages))}
+              >
+                Next <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -555,6 +543,9 @@ export default function SessionsPage({
           <div className={lStyles.resultCount}>
             Showing {pendingFiltered.length} drafts
           </div>
+          {fetchingPending ? (
+            <RecordListSkeleton count={3} />
+          ) : (
           <div className={lStyles.recordList}>
             {pendingFiltered.length === 0 ? (
               <EmptyState
@@ -590,24 +581,29 @@ export default function SessionsPage({
                     >
                       <Eye size={13} /> View Draft
                     </button>
+                    {canManagePending && (
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: item.id,
+                            type: "session",
+                            name:
+                              item.session_number ||
+                              new Date(item.session_date).toLocaleDateString("en-PH"),
+                          })
+                        }
+                      >
+                        <Archive size={13} /> Archive
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
             )}
           </div>
+          )}
         </>
-      )}
-
-      {/* ── UPLOAD MODAL ─────────────────────────────────────────────────────── */}
-      {showUploadModal && (
-        <UploadModal
-          title="Add Final Session Minutes"
-          onClose={() => setShowUploadModal(false)}
-          onSubmit={(formData) => {
-            console.log("Publish session minutes:", formData);
-            setShowUploadModal(false);
-          }}
-        />
       )}
 
       {/* ── VIEW SESSION MODAL ───────────────────────────────────────────────── */}
@@ -706,7 +702,7 @@ export default function SessionsPage({
               {/* ── Agenda + minutes (editable while under review, read-only once published) ── */}
               {(() => {
                 const isReviewer =
-                  (isSecretary || isClerk) &&
+                  (isSecretary || isClerk || isCouncilor) &&
                   viewTarget.status &&
                   viewTarget.status !== "published";
                 return (
@@ -771,7 +767,7 @@ export default function SessionsPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {(isSecretary || isClerk) && (
+                  {(isSecretary || isClerk || isCouncilor) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -801,16 +797,17 @@ export default function SessionsPage({
                           }
                         />
                       </div>
-                      {viewTarget.status !== "needs_revision" && (
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnSm}`}
-                          style={{ marginTop: 8 }}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleReviseSession(viewTarget.id)}
-                        >
-                          <Upload size={13} /> Save Revision
-                        </button>
-                      )}
+                      <button
+                        className={`${lStyles.btn} ${lStyles.btnSm}`}
+                        style={{ marginTop: 8 }}
+                        disabled={reviewSubmitting}
+                        onClick={() => handleReviseSession(viewTarget.id)}
+                      >
+                        <Upload size={13} />{" "}
+                        {viewTarget.status === "needs_revision"
+                          ? "Save & Resubmit"
+                          : "Save Revision"}
+                      </button>
                     </div>
                   )}
 
@@ -860,7 +857,7 @@ export default function SessionsPage({
                     )}
                   </div>
 
-                  {(isSecretary || isClerk) && (
+                  {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -871,7 +868,7 @@ export default function SessionsPage({
                       />
                       <button
                         className={`${lStyles.btn} ${lStyles.btnSm}`}
-                        disabled={reviewSubmitting || !reviewCommentText.trim()}
+                        disabled={commentSubmitting || !reviewCommentText.trim()}
                         onClick={handleSendComment}
                       >
                         <Send size={13} />
@@ -915,16 +912,6 @@ export default function SessionsPage({
                           Request Changes
                         </button>
                       </>
-                    )}
-
-                    {isClerk && viewTarget.status === "needs_revision" && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleResubmit(viewTarget.id)}
-                      >
-                        <Upload size={13} /> Save &amp; Resubmit
-                      </button>
                     )}
 
                     {isViceMayor &&

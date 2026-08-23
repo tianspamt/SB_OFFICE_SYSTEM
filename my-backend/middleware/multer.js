@@ -1,7 +1,13 @@
 const multer = require('multer')
 
+// 20MB per file — comfortably covers scanned PDFs/Word docs and OCR source
+// images while still capping the worst case (images[]=10 accepts up to 10
+// files, so an unbounded per-file size could add up to a very large request).
+const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
+
 const upload = multer({
   storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE_BYTES },
   fileFilter: (req, file, cb) => {
     const allowed = [
   'image/jpeg', 'image/png', 'image/jpg',
