@@ -11,8 +11,8 @@ const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/a
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause } = require('../helpers/utils')
-const { resolveCurrentTermId } = require('../helpers/officials')
+const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
+const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 
 // Historical-accuracy note: `term.position` is the specific membership
@@ -77,7 +77,21 @@ async function extractText(file) {
 // for a caller that explicitly asks for a page.
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { year, search } = req.query
+    const { year, search, category, author, date } = req.query
+
+    // Author searches the real `officials` relation (who's tagged on the
+    // record), not a free-text field — see findRecordIdsByAuthorName for why
+    // this is two plain queries instead of a single embedded-resource filter.
+    let authorOrdinanceIds = null
+    if (author) {
+      authorOrdinanceIds = await findRecordIdsByAuthorName('ordinance_officials', 'ordinance_id', author)
+      if (authorOrdinanceIds.length === 0) {
+        return res.json(req.query.page && req.query.limit
+          ? { data: [], total: 0, page: parseInt(req.query.page) || 1, limit: parseInt(req.query.limit) || 20, totalPages: 1 }
+          : [])
+      }
+    }
+
     let query = supabase
       .from('ordinances')
       .select(`*, ordinance_officials (
@@ -88,6 +102,12 @@ router.get('/', verifyToken, async (req, res) => {
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
     if (search) query = query.or(`${orIlikeClause('title', search)},${orIlikeClause('ordinance_number', search)}`)
+    if (category && category !== 'All') query = query.eq('category', category)
+    if (authorOrdinanceIds) query = query.in('id', authorOrdinanceIds)
+    if (date) {
+      const { start, end } = dayBoundsUTC(date)
+      query = query.gte('uploaded_at', start).lt('uploaded_at', end)
+    }
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
@@ -213,8 +233,10 @@ router.get('/:id', verifyToken, async (req, res) => {
 // approving what Clerk/Councilor submit.
 router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
-  const { ordinance_number, title, year, officials } = req.body
+  const { ordinance_number, title, year, category, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
+  const { year: parsedYear, error: yearError } = parseYearField(year)
+  if (yearError) return res.status(400).json({ error: yearError })
   const officialIds = safeParseJSON(officials, [])
 
   let fileName = null
@@ -228,7 +250,8 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
       .insert({
         ordinance_number: ordinance_number || null,
         title,
-        year: year ? parseInt(year) : null,
+        year: parsedYear,
+        category: category || null,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
         filepath: fileName,
@@ -269,8 +292,10 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
 // depends on data this handler has to fetch anyway.
 router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
-  const { ordinance_number, title, year, officials } = req.body
+  const { ordinance_number, title, year, category, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
+  const { year: parsedYear, error: yearError } = parseYearField(year)
+  if (yearError) return res.status(400).json({ error: yearError })
 
   try {
     const { data: existing, error: fetchErr } = await supabase
@@ -282,7 +307,8 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     const updateData = {
       ordinance_number: ordinance_number || null,
       title,
-      year: year ? parseInt(year) : null
+      year: parsedYear,
+      category: category || null,
     }
     // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
     // it goes straight back into the Secretary's queue instead of requiring

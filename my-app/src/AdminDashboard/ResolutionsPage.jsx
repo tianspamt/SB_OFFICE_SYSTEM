@@ -20,7 +20,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { pendingQueryKey, fetchPendingList } from "./AdminContext";
+import { pendingQueryKey, fetchPendingList, RESOLUTION_CATEGORIES } from "./AdminContext";
 import {
   pendingStatusesForRole,
   useReviewWorkflow,
@@ -40,16 +40,7 @@ import {
   RecordListSkeleton,
 } from "./LegislativeComponents";
 
-const CATEGORIES = [
-  "All",
-  "Finance",
-  "Health",
-  "Infrastructure",
-  "Education",
-  "Environment",
-  "Public Safety",
-  "Agriculture",
-];
+const CATEGORIES = RESOLUTION_CATEGORIES;
 
 // Published records are paginated server-side (see GET /api/resolutions'
 // opt-in page/limit) instead of fetching every resolution ever created —
@@ -98,13 +89,28 @@ export default function ResolutionsPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  useResetOnChange([debouncedSearch, yearFilter], setPublishedPage, 1);
+  // Same debouncing as search, and for the same reason — Author is a text
+  // input that hits the server (an ILIKE filter), unlike Category/Year/Date
+  // which are discrete pickers with no per-keystroke concern.
+  const [debouncedAuthor, setDebouncedAuthor] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAuthor(authorFilter.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [authorFilter]);
+  useResetOnChange(
+    [debouncedSearch, yearFilter, catFilter, debouncedAuthor, dateFilter],
+    setPublishedPage,
+    1
+  );
 
   const publishedParams = {
     page: String(publishedPage),
     limit: String(PAGE_SIZE),
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(yearFilter !== "all" ? { year: yearFilter } : {}),
+    ...(catFilter !== "All" ? { category: catFilter } : {}),
+    ...(debouncedAuthor ? { author: debouncedAuthor } : {}),
+    ...(dateFilter ? { date: dateFilter } : {}),
   };
   const {
     publishedList,
@@ -238,11 +244,23 @@ export default function ResolutionsPage({
   };
 
   const pendingFiltered = pendingResolutions.filter((r) => {
-    return (
+    const matchesSearch =
       !search ||
       (r.title || "").toLowerCase().includes(search.toLowerCase()) ||
-      (r.resolution_number || "").toLowerCase().includes(search.toLowerCase())
-    );
+      (r.resolution_number || "").toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = catFilter === "All" || r.category === catFilter;
+    // Searches the real officials relation (Tag Council Members), not a
+    // free-text author field — see the same change on the backend's
+    // GET /api/resolutions (findRecordIdsByAuthorName).
+    const matchesAuthor =
+      !authorFilter ||
+      (r.officials || []).some((off) =>
+        (off.full_name || "").toLowerCase().includes(authorFilter.toLowerCase())
+      );
+    const matchesYear = yearFilter === "all" || String(r.year) === yearFilter;
+    const matchesDate =
+      !dateFilter || (r.uploaded_at || "").slice(0, 10) === dateFilter;
+    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate;
   });
   const pendingCount = pendingResolutions.length;
 

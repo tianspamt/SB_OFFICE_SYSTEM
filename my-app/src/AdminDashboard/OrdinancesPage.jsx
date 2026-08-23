@@ -25,7 +25,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { pendingQueryKey, fetchPendingList } from "./AdminContext";
+import { pendingQueryKey, fetchPendingList, ORDINANCE_CATEGORIES } from "./AdminContext";
 import {
   pendingStatusesForRole,
   useReviewWorkflow,
@@ -45,19 +45,7 @@ import {
   RecordListSkeleton,
 } from "./LegislativeComponents";
 
-// ─── DUMMY DATA ───────────────────────────────────────────────────────────────
-// Remove when wiring to backend — replace with props or API calls
-
-const CATEGORIES = [
-  "All",
-  "Tax",
-  "Education",
-  "Agriculture",
-  "Environment",
-  "Public Works",
-  "Health",
-  "Infrastructure",
-];
+const CATEGORIES = ORDINANCE_CATEGORIES;
 
 // Published records are paginated server-side (see GET /api/ordinances'
 // opt-in page/limit) instead of fetching every ordinance ever created —
@@ -90,7 +78,6 @@ export default function OrdinancesPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
-  const [pdfError, setPdfError] = useState(false);
   const queryClient = useQueryClient();
   const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
   const { data: pendingOrdinances = [], isLoading: fetchingPending } = useQuery({
@@ -110,8 +97,20 @@ export default function OrdinancesPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
+  // Same debouncing as search, and for the same reason — Author is a text
+  // input that hits the server (an ILIKE filter), unlike Category/Year/Date
+  // which are discrete pickers with no per-keystroke concern.
+  const [debouncedAuthor, setDebouncedAuthor] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedAuthor(authorFilter.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [authorFilter]);
   // A filter change invalidates whatever page you were on.
-  useResetOnChange([debouncedSearch, yearFilter], setPublishedPage, 1);
+  useResetOnChange(
+    [debouncedSearch, yearFilter, catFilter, debouncedAuthor, dateFilter],
+    setPublishedPage,
+    1
+  );
 
   // Only the keys that are actually set — mirrors the old URLSearchParams
   // construction, and keeps the cache key stable so e.g. clearing the year
@@ -122,6 +121,9 @@ export default function OrdinancesPage({
     limit: String(PAGE_SIZE),
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(yearFilter !== "all" ? { year: yearFilter } : {}),
+    ...(catFilter !== "All" ? { category: catFilter } : {}),
+    ...(debouncedAuthor ? { author: debouncedAuthor } : {}),
+    ...(dateFilter ? { date: dateFilter } : {}),
   };
   const {
     publishedList,
@@ -165,22 +167,6 @@ export default function OrdinancesPage({
     ),
   ].sort((a, b) => b - a);
 
-  const filterPending = (list) =>
-    list.filter((o) => {
-      const s =
-        !search ||
-        (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-        (o.ordinance_number || "")
-          .toLowerCase()
-          .includes(search.toLowerCase()) ||
-        (o.author || "").toLowerCase().includes(search.toLowerCase());
-      const c = catFilter === "All" || o.category === catFilter;
-      const a =
-        !authorFilter ||
-        (o.author || "").toLowerCase().includes(authorFilter.toLowerCase());
-      return s && c && a;
-    });
-
   const resetFilters = () => {
     setSearch("");
     setCatFilter("All");
@@ -200,7 +186,6 @@ export default function OrdinancesPage({
   };
 
   const handleOpenView = (item) => {
-    setPdfError(false);
     setReviewError("");
     setReviewCommentText("");
     setReviewFile(null);
@@ -270,13 +255,27 @@ export default function OrdinancesPage({
   };
 
   // ── Pending count for badge ─────────────────────────────────────────────────
-
+  // The Pending list is already fully fetched client-side (it's not
+  // paginated like Published), so every filter here is a plain in-memory
+  // check — no server round-trip, no debouncing needed even for Author.
   const pendingFiltered = pendingOrdinances.filter((o) => {
-    return (
+    const matchesSearch =
       !search ||
       (o.title || "").toLowerCase().includes(search.toLowerCase()) ||
-      (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase())
-    );
+      (o.ordinance_number || "").toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = catFilter === "All" || o.category === catFilter;
+    // Searches the real officials relation (Tag Council Members), not a
+    // free-text author field — see the same change on the backend's
+    // GET /api/ordinances (findRecordIdsByAuthorName).
+    const matchesAuthor =
+      !authorFilter ||
+      (o.officials || []).some((off) =>
+        (off.full_name || "").toLowerCase().includes(authorFilter.toLowerCase())
+      );
+    const matchesYear = yearFilter === "all" || String(o.year) === yearFilter;
+    const matchesDate =
+      !dateFilter || (o.uploaded_at || "").slice(0, 10) === dateFilter;
+    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate;
   });
   const pendingCount = pendingOrdinances.length;
 

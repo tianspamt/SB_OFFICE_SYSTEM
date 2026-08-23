@@ -14,10 +14,21 @@ export const extractErrorMsg = (data, fallback = "Something went wrong.") => {
 };
 
 // ─── Auth helper ───────────────────────────────────────────────────────────────
-export const authFetch = (url, options = {}) => {
+// A 401 here always means the session itself is invalid — no token, or
+// verifyToken rejected it (expired past its 8h lifetime, malformed, or the
+// account was archived) — never a per-request permission problem, since
+// every authFetch call site is already an authenticated endpoint. Only one
+// call site (fetchUsers, in AdminDashboard.jsx) used to handle this; every
+// other page just let the 401 fall through and silently rendered empty
+// state, which is what showed up as "no data" with an "invalid token"
+// message buried somewhere and no clear next step. Centralizing it here
+// means an expired token now bounces every page straight back to a login
+// screen that explains why, instead of a confusing half-blank dashboard.
+let sessionExpiryHandled = false;
+export const authFetch = async (url, options = {}) => {
   const token = localStorage.getItem("token");
   const isFormData = options.body instanceof FormData;
-  return fetch(url, {
+  const res = await fetch(url, {
     ...options,
     headers: {
       ...(!isFormData && { "Content-Type": "application/json" }),
@@ -25,6 +36,15 @@ export const authFetch = (url, options = {}) => {
       ...options.headers,
     },
   });
+  // Several requests typically fire in parallel on mount — guard so a
+  // flood of simultaneous 401s doesn't redirect more than once.
+  if (res.status === 401 && !sessionExpiryHandled) {
+    sessionExpiryHandled = true;
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    window.location.replace("/?sessionExpired=1");
+  }
+  return res;
 };
 
 // ─── React Query: council members ──────────────────────────────────────────────
@@ -85,6 +105,24 @@ export const fetchPendingList = async (route, statusQ) => {
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 };
+
+// ─── Legislative categories ───────────────────────────────────────────────────
+// Shared between each module's own filter UI (OrdinancesPage/ResolutionsPage)
+// and AdminDashboard.jsx's upload/edit modals (the dropdown you pick a
+// category from when creating/editing a record) — both need the exact same
+// list, or a value you could pick at upload time could quietly fall outside
+// what the filter dropdown offers to search for it. "All" is the filter-only
+// sentinel meaning "no category filter applied"; upload/edit forms slice it
+// off since a record's actual category can't itself be "All".
+export const ORDINANCE_CATEGORIES = [
+  "All", "Tax", "Education", "Agriculture", "Environment",
+  "Public Works", "Health", "Infrastructure",
+];
+
+export const RESOLUTION_CATEGORIES = [
+  "All", "Finance", "Health", "Infrastructure", "Education",
+  "Environment", "Public Safety", "Agriculture",
+];
 
 // ─── React Query: published legislative records ─────────────────────────────────
 // Server-paginated, so the key includes page/search/year(/type) — each

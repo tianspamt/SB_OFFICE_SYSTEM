@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { User, Eye, EyeOff } from 'lucide-react'
 import './LogIn.css'
 
@@ -12,6 +12,19 @@ export default function Login() {
   const [loginError, setLoginError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+
+  // Set when authFetch (AdminContext.jsx) bounced here after a 401 — an
+  // expired (8h) or otherwise invalid token. Without this, landing back on
+  // a bare login form after being kicked out mid-session looks like the app
+  // just broke, not like the deliberate security behavior it actually is.
+  const [sessionExpiredMsg, setSessionExpiredMsg] = useState('')
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('sessionExpired') === '1') {
+      setSessionExpiredMsg('Your session has expired. Please log in again.')
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [])
 
   // Set when the account has must_change_password flagged (e.g. after an
   // admin-forced password reset) — holds the just-issued token/user in
@@ -143,6 +156,16 @@ export default function Login() {
         <h1>OFFICE OF SANGGUNIANG BAYAN</h1>
         <img src="src/assets/image/logo.png" alt="logo" />
         <h2>Log in with your username or email</h2>
+
+        {sessionExpiredMsg && (
+          <p style={{
+            background: '#fef3c7', color: '#92400e', fontSize: '13px',
+            padding: '10px 12px', borderRadius: '8px', marginBottom: '12px',
+            textAlign: 'center',
+          }}>
+            {sessionExpiredMsg}
+          </p>
+        )}
 
         <div className={`input-box ${identifierError ? 'input-error' : ''}`}>
           <input

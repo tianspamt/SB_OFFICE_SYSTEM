@@ -57,6 +57,8 @@ import {
   HOLIDAYS_STALE_TIME_MS,
   holidaysQueryKey,
   fetchHolidaysForYear,
+  ORDINANCE_CATEGORIES,
+  RESOLUTION_CATEGORIES,
 } from "./AdminContext";
 import {
   TermStatusBadge,
@@ -214,6 +216,7 @@ export default function AdminDashboard() {
   const [ordinanceTitle, setOrdinanceTitle] = useState("");
   const [ordinanceDate, setOrdinanceDate] = useState("");
   const [ordinanceFile, setOrdinanceFile] = useState(null);
+  const [ordinanceCategory, setOrdinanceCategory] = useState("");
   const [uploadType, setUploadType] = useState("");
   const [selectedOfficials, setSelectedOfficials] = useState([]);
   const [extractedText, setExtractedText] = useState("");
@@ -221,6 +224,7 @@ export default function AdminDashboard() {
   const [editOrdinanceNumber, setEditOrdinanceNumber] = useState("");
   const [editOrdinanceTitle, setEditOrdinanceTitle] = useState("");
   const [editOrdinanceDate, setEditOrdinanceDate] = useState("");
+  const [editOrdinanceCategory, setEditOrdinanceCategory] = useState("");
   const [editSelectedOfficials, setEditSelectedOfficials] = useState([]);
   const [editOrdinanceFile, setEditOrdinanceFile] = useState(null);
 
@@ -230,12 +234,14 @@ export default function AdminDashboard() {
   const [resolutionTitle, setResolutionTitle] = useState("");
   const [resolutionDate, setResolutionDate] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
+  const [resolutionCategory, setResolutionCategory] = useState("");
   const [selectedResolutionOfficials, setSelectedResolutionOfficials] =
     useState([]);
   const [editingResolution, setEditingResolution] = useState(null);
   const [editResolutionNumber, setEditResolutionNumber] = useState("");
   const [editResolutionTitle, setEditResolutionTitle] = useState("");
   const [editResolutionDate, setEditResolutionDate] = useState("");
+  const [editResolutionCategory, setEditResolutionCategory] = useState("");
   const [editResolutionSelectedOfficials, setEditResolutionSelectedOfficials] =
     useState([]);
   const [editResolutionFile, setEditResolutionFile] = useState(null);
@@ -451,14 +457,11 @@ export default function AdminDashboard() {
     setFetchingUsers(true);
     try {
       const res = await authFetch(`${API}/api/users`);
-      if (res.status === 401 || res.status === 403) {
-        if (admin?.role === "admin") {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          window.location.replace("/");
-        }
-        return;
-      }
+      // 401 (expired/invalid session) is now handled globally by authFetch
+      // itself — this only needs to guard against a genuine 403 (a real,
+      // still-logged-in non-admin account somehow calling an admin-only
+      // route), which authFetch correctly leaves alone.
+      if (res.status === 403) return;
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
     } catch {
@@ -763,6 +766,7 @@ export default function AdminDashboard() {
     fd.append("title", ordinanceTitle);
     fd.append("date", ordinanceDate);
     fd.append("year", ordinanceDate.split("-")[0]);
+    fd.append("category", ordinanceCategory);
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
     try {
@@ -781,6 +785,7 @@ export default function AdminDashboard() {
         setOrdinanceTitle("");
         setOrdinanceDate("");
         setOrdinanceFile(null);
+        setOrdinanceCategory("");
         setSelectedOfficials([]);
         setUploadType("");
         setShowOrdinanceModal(false);
@@ -797,6 +802,7 @@ export default function AdminDashboard() {
     setEditOrdinanceNumber(o.ordinance_number || "");
     setEditOrdinanceTitle(o.title);
     setEditOrdinanceDate(o.date || (o.year ? `${o.year}-01-01` : ""));
+    setEditOrdinanceCategory(o.category || "");
     setEditSelectedOfficials(o.officials ? o.officials.map((x) => x.id) : []);
     setEditOrdinanceFile(null);
     setModalMessage("");
@@ -831,6 +837,7 @@ export default function AdminDashboard() {
     fd.append("title", editOrdinanceTitle);
     fd.append("date", editOrdinanceDate);
     fd.append("year", editOrdinanceDate.split("-")[0]);
+    fd.append("category", editOrdinanceCategory);
     fd.append("officials", JSON.stringify(editSelectedOfficials));
     if (editOrdinanceFile) fd.append("file", editOrdinanceFile);
     try {
@@ -900,6 +907,7 @@ export default function AdminDashboard() {
     fd.append("title", resolutionTitle);
     fd.append("date", resolutionDate);
     fd.append("year", resolutionDate.split("-")[0]);
+    fd.append("category", resolutionCategory);
     fd.append("file", resolutionFile);
     fd.append("officials", JSON.stringify(selectedResolutionOfficials));
     try {
@@ -914,6 +922,7 @@ export default function AdminDashboard() {
         setResolutionTitle("");
         setResolutionDate("");
         setResolutionFile(null);
+        setResolutionCategory("");
         setSelectedResolutionOfficials([]);
         setShowResolutionModal(false);
         fetchResolutions();
@@ -929,6 +938,7 @@ export default function AdminDashboard() {
     setEditResolutionNumber(r.resolution_number || "");
     setEditResolutionTitle(r.title);
     setEditResolutionDate(r.date || (r.year ? `${r.year}-01-01` : ""));
+    setEditResolutionCategory(r.category || "");
     setEditResolutionSelectedOfficials(
       r.officials ? r.officials.map((x) => x.id) : []
     );
@@ -965,6 +975,7 @@ export default function AdminDashboard() {
     fd.append("title", editResolutionTitle);
     fd.append("date", editResolutionDate);
     fd.append("year", editResolutionDate.split("-")[0]);
+    fd.append("category", editResolutionCategory);
     fd.append("officials", JSON.stringify(editResolutionSelectedOfficials));
     if (editResolutionFile) fd.append("file", editResolutionFile);
     try {
@@ -3233,6 +3244,17 @@ export default function AdminDashboard() {
                   }
                 }}
               />
+              <label className={styles.fieldLabel}>Category</label>
+              <select
+                className={styles.input}
+                value={ordinanceCategory}
+                onChange={(e) => setOrdinanceCategory(e.target.value)}
+              >
+                <option value="">— Select category —</option>
+                {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
@@ -3405,6 +3427,17 @@ export default function AdminDashboard() {
                 value={editOrdinanceDate}
                 onChange={(e) => setEditOrdinanceDate(e.target.value)}
               />
+              <label className={styles.fieldLabel}>Category</label>
+              <select
+                className={styles.input}
+                value={editOrdinanceCategory}
+                onChange={(e) => setEditOrdinanceCategory(e.target.value)}
+              >
+                <option value="">— Select category —</option>
+                {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <p className={styles.officialsSelectLabel}>
                 Replace file (optional):
               </p>
@@ -3497,6 +3530,7 @@ export default function AdminDashboard() {
             setResolutionNumber("");
             setResolutionTitle("");
             setResolutionDate("");
+            setResolutionCategory("");
             setSelectedResolutionOfficials([]);
             setModalMessage("");
             lastResolutionSuggestion.current = "";
@@ -3537,6 +3571,7 @@ export default function AdminDashboard() {
                   setResolutionNumber("");
                   setResolutionTitle("");
                   setResolutionDate("");
+                  setResolutionCategory("");
                   setSelectedResolutionOfficials([]);
                   setModalMessage("");
                   lastResolutionSuggestion.current = "";
@@ -3608,6 +3643,17 @@ export default function AdminDashboard() {
                   }
                 }}
               />
+              <label className={styles.fieldLabel}>Category</label>
+              <select
+                className={styles.input}
+                value={resolutionCategory}
+                onChange={(e) => setResolutionCategory(e.target.value)}
+              >
+                <option value="">— Select category —</option>
+                {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
@@ -3668,6 +3714,7 @@ export default function AdminDashboard() {
                   setResolutionNumber("");
                   setResolutionTitle("");
                   setResolutionDate("");
+                  setResolutionCategory("");
                   setSelectedResolutionOfficials([]);
                   setModalMessage("");
                   lastResolutionSuggestion.current = "";
@@ -3779,6 +3826,17 @@ export default function AdminDashboard() {
                 value={editResolutionDate}
                 onChange={(e) => setEditResolutionDate(e.target.value)}
               />
+              <label className={styles.fieldLabel}>Category</label>
+              <select
+                className={styles.input}
+                value={editResolutionCategory}
+                onChange={(e) => setEditResolutionCategory(e.target.value)}
+              >
+                <option value="">— Select category —</option>
+                {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <p className={styles.officialsSelectLabel}>
                 Replace file (optional):
               </p>

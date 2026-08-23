@@ -403,10 +403,15 @@ export default function SessionsPage({
   };
 
   const pendingFiltered = pendingSessions.filter((s) => {
-    return (
+    const matchesSearch =
       !search ||
-      (s.session_number || "").toLowerCase().includes(search.toLowerCase())
-    );
+      (s.session_number || "").toLowerCase().includes(search.toLowerCase());
+    const matchesType =
+      minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
+    const matchesYear =
+      minutesYearFilter === "all" ||
+      (s.session_date || "").slice(0, 4) === minutesYearFilter;
+    return matchesSearch && matchesType && matchesYear;
   });
   const pendingCount = pendingSessions.length;
 
@@ -453,27 +458,25 @@ export default function SessionsPage({
             }
           />
         </div>
-        {activeTab === "published" && (
-          <FilterPanel
-            categoryValue={
-              minutesTypeFilter === "all" ? "All" : minutesTypeFilter
-            }
-            onCategoryChange={(v) =>
-              setMinutesTypeFilter(v === "All" ? "all" : v)
-            }
-            categories={["All", "regular", "special"]}
-            dateValue=""
-            onDateChange={() => {}}
-            yearValue={minutesYearFilter}
-            onYearChange={setMinutesYearFilter}
-            years={minutesYears.filter((y) => y !== "all")}
-            onReset={() => {
-              setSearch("");
-              setMinutesTypeFilter("all");
-              setMinutesYearFilter("all");
-            }}
-          />
-        )}
+        <FilterPanel
+          categoryValue={
+            minutesTypeFilter === "all" ? "All" : minutesTypeFilter
+          }
+          onCategoryChange={(v) =>
+            setMinutesTypeFilter(v === "All" ? "all" : v)
+          }
+          categories={["All", "regular", "special"]}
+          dateValue=""
+          onDateChange={() => {}}
+          yearValue={minutesYearFilter}
+          onYearChange={setMinutesYearFilter}
+          years={minutesYears.filter((y) => y !== "all")}
+          onReset={() => {
+            setSearch("");
+            setMinutesTypeFilter("all");
+            setMinutesYearFilter("all");
+          }}
+        />
       </div>
 
       {/* ── PUBLISHED TAB ────────────────────────────────────────────────────── */}

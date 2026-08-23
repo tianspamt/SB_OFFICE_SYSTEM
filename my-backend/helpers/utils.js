@@ -47,7 +47,33 @@ const orIlikeClause = (column, value) => {
   return `${column}.ilike."%${escaped}%"`
 }
 
+// Validates+parses a submitted "year" form field (ordinances/resolutions
+// upload and edit). A bare `year ? parseInt(year) : null` silently turns
+// garbage input ("abc", "12/2024") into NaN and stores that as-is instead
+// of rejecting the request — this makes "not provided" (year: null) and
+// "provided but invalid" (an error) two distinct, explicit outcomes.
+const parseYearField = (raw) => {
+  if (raw === undefined || raw === null || raw === '') return { year: null }
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1900 || n > 2100)
+    return { error: 'Year must be a valid year between 1900 and 2100.' }
+  return { year: n }
+}
+
+// Turns a plain "YYYY-MM-DD" (the Date filter on Ordinances/Resolutions,
+// matched against `uploaded_at`) into the [start, end) timestamp bounds for
+// that whole calendar day, for a `.gte(start).lt(end)` range query — day
+// boundaries in UTC, same simplicity level as the rest of this codebase's
+// date handling (nothing here is PH-timezone-exact).
+const dayBoundsUTC = (dateStr) => {
+  const start = `${dateStr}T00:00:00.000Z`
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + 1)
+  return { start, end: end.toISOString() }
+}
+
 module.exports = {
   isValidEmail, getIP, safeParseJSON, escapeHtml,
-  canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause,
+  canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, dayBoundsUTC,
+  parseYearField,
 }
