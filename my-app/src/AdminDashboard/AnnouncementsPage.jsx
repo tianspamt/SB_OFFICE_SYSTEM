@@ -21,7 +21,7 @@ const REACTIONS_LIST = ["👍", "❤️", "😂", "😮", "😢", "😡"];
 
 const ROLE_COLORS = {
   Admin:     { bg: "#ebf8ff", color: "#2b6cb0", border: "#bee3f8" },
-  Staff:     { bg: "#f0fff4", color: "#276749", border: "#9ae6b4" },
+  Staff:     { bg: "#eef2ff", color: "#380075", border: "#a5b4fc" },
   Councilor: { bg: "#faf5ff", color: "#6b46c1", border: "#d6bcfa" },
 };
 
@@ -138,7 +138,7 @@ function Avatar({ initials, photo, size = 36, style = {} }) {
   return (
     <div style={{
       width: size, height: size, minWidth: size, borderRadius: "50%",
-      background: "linear-gradient(135deg, #009439, #005822)",
+      background: "linear-gradient(135deg, #090446, #380075)",
       color: "#fff", fontWeight: 700, fontSize: size * 0.38,
       display: "flex", alignItems: "center", justifyContent: "center",
       flexShrink: 0, userSelect: "none", ...style,
@@ -195,10 +195,10 @@ function ReactionBar({ post, currentUserId, onReact }) {
             style={{
               display: "inline-flex", alignItems: "center", gap: 4,
               padding: "3px 9px", borderRadius: 20,
-              background: isMine ? "#e6f4ea" : "#f7fafc",
-              border: `1px solid ${isMine ? "#9ae6b4" : "#e2e8f0"}`,
+              background: isMine ? "#eef2ff" : "#f7fafc",
+              border: `1px solid ${isMine ? "#a5b4fc" : "#e2e8f0"}`,
               cursor: "pointer", fontSize: 13, fontWeight: 600,
-              color: isMine ? "#276749" : "#4a5568",
+              color: isMine ? "#380075" : "#4a5568",
               transition: "all 0.15s",
               transform: isMine ? "scale(1.05)" : "scale(1)",
             }}
@@ -217,8 +217,8 @@ function ReactionBar({ post, currentUserId, onReact }) {
           style={{
             display: "inline-flex", alignItems: "center", gap: 4,
             padding: "3px 10px", borderRadius: 20,
-            background: pickerOpen ? "#f0fff4" : "#f7fafc",
-            border: `1px solid ${pickerOpen ? "#9ae6b4" : "#e2e8f0"}`,
+            background: pickerOpen ? "#eef2ff" : "#f7fafc",
+            border: `1px solid ${pickerOpen ? "#a5b4fc" : "#e2e8f0"}`,
             cursor: "pointer", color: "#718096", fontSize: 12,
             transition: "all 0.15s",
           }}
@@ -240,7 +240,7 @@ function ReactionBar({ post, currentUserId, onReact }) {
                   key={emoji}
                   onClick={() => { onReact(post.id, emoji); setPickerOpen(false); }}
                   style={{
-                    fontSize: 20, background: isMine ? "#f0fff4" : "transparent",
+                    fontSize: 20, background: isMine ? "#eef2ff" : "transparent",
                     border: "none", cursor: "pointer", padding: "4px 6px",
                     borderRadius: 8, transition: "transform 0.1s",
                     transform: "scale(1)",
@@ -333,7 +333,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
                         onChange={(e) => setEditText(e.target.value)}
                         style={{
                           flex: 1, padding: "5px 8px", fontSize: 12,
-                          border: "1px solid #9ae6b4", borderRadius: 6, outline: "none",
+                          border: "1px solid #a5b4fc", borderRadius: 6, outline: "none",
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleSaveEdit(c.id);
@@ -345,7 +345,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
                         onClick={() => handleSaveEdit(c.id)}
                         disabled={savingEditId === c.id}
                         style={{
-                          background: "#009439", color: "#fff", border: "none",
+                          background: "#090446", color: "#fff", border: "none",
                           borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: 11,
                         }}
                       >{savingEditId === c.id ? "Saving..." : "Save"}</button>
@@ -398,7 +398,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
           borderRadius: 20, padding: "6px 8px 6px 14px",
           transition: "border-color 0.15s",
         }}
-          onFocusCapture={(e) => e.currentTarget.style.borderColor = "#009439"}
+          onFocusCapture={(e) => e.currentTarget.style.borderColor = "#090446"}
           onBlurCapture={(e) => e.currentTarget.style.borderColor = "#e2e8f0"}
         >
           <input
@@ -417,7 +417,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
             onClick={handleSubmit}
             disabled={!text.trim() || posting}
             style={{
-              background: text.trim() && !posting ? "linear-gradient(135deg,#009439,#005822)" : "#e2e8f0",
+              background: text.trim() && !posting ? "linear-gradient(135deg,#090446,#380075)" : "#e2e8f0",
               color: text.trim() && !posting ? "#fff" : "#a0aec0",
               border: "none", borderRadius: "50%", width: 28, height: 28,
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -461,7 +461,7 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
       opacity: isExpired ? 0.75 : 1,
       transition: "box-shadow 0.2s, transform 0.15s",
     }}
-      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,148,57,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(9, 4, 70,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 8px rgba(0,0,0,0.06)"; e.currentTarget.style.transform = "none"; }}
     >
       {/* ── Post Header ── */}
@@ -582,9 +582,9 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
           }}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
-            background: showComments ? "#f0fff4" : "none",
-            border: showComments ? "1px solid #9ae6b4" : "1px solid transparent",
-            color: showComments ? "#276749" : "#718096",
+            background: showComments ? "#eef2ff" : "none",
+            border: showComments ? "1px solid #a5b4fc" : "1px solid transparent",
+            color: showComments ? "#380075" : "#718096",
             borderRadius: 20, padding: "4px 12px", cursor: "pointer",
             fontSize: 12, fontWeight: 600, transition: "all 0.15s",
           }}
@@ -643,7 +643,7 @@ function CreateAnnouncementBox({ currentUser, onOpenComposer }) {
       onClick={onOpenComposer}
       style={{
         background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0",
-        boxShadow: "0 2px 12px rgba(0,148,57,0.06)", marginBottom: 20,
+        boxShadow: "0 2px 12px rgba(9, 4, 70,0.06)", marginBottom: 20,
         display: "flex", alignItems: "center", gap: 12, padding: "14px 18px",
         cursor: "pointer",
       }}
@@ -656,7 +656,7 @@ function CreateAnnouncementBox({ currentUser, onOpenComposer }) {
         userSelect: "none",
         transition: "border-color 0.15s, background 0.15s",
       }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#9ae6b4"; e.currentTarget.style.background = "#f0fff4"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#a5b4fc"; e.currentTarget.style.background = "#eef2ff"; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#f7fafc"; }}
       >
         Share an announcement…

@@ -270,9 +270,9 @@ export default function PendingRecordsWidget({
                       width: "100%",
                       fontSize: 11.5,
                       fontWeight: 700,
-                      color: "#009439",
-                      background: "#f0fdf4",
-                      border: "1px solid #9ae6b4",
+                      color: "#090446",
+                      background: "#eef2ff",
+                      border: "1px solid #a5b4fc",
                       borderRadius: 8,
                       padding: "6px 0",
                       cursor: "pointer",
@@ -652,7 +652,7 @@ function ReviewModal({
 
         <div className={lStyles.viewModalFooter}>
           <button
-            className={lStyles.viewModalFooterBtn}
+            className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnPrimary}`}
             onClick={onOpenFullRecord}
           >
             Open full record <ArrowUpRight size={13} />

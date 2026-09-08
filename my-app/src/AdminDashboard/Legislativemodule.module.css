@@ -1,15 +1,15 @@
 /* ============================================================
    LegislativeModule.module.css
-   Aligned with AdminDashboard.module.css — Green theme
+   Aligned with AdminDashboard.module.css — Blue/Violet theme
    ============================================================ */
 
 /* ─── COLOR TOKENS ─────────────────────────────────────────── */
 :root {
-  --leg-green: #009439;
-  --leg-green-dark: #005822;
-  --leg-green-50: #f0fff4;
-  --leg-green-100: #c6f6d5;
-  --leg-green-600: #276749;
+  --leg-green: #090446;
+  --leg-green-dark: #380075;
+  --leg-green-50: #eef2ff;
+  --leg-green-100: #ddd6fe;
+  --leg-green-600: #380075;
 
   --leg-amber-50: #fffbeb;
   --leg-amber-100: #fde68a;
@@ -49,8 +49,8 @@
   --red-50: #fff5f5;
   --red-100: #fed7d7;
   --red-600: #c53030;
-  --green-50: #f0fff4;
-  --green-600: #276749;
+  --green-50: #eef2ff;
+  --green-600: #380075;
   --gray-50: #f7fafc;
   --gray-100: #edf2f7;
   --gray-600: #4a5568;
@@ -70,7 +70,7 @@
 }
 
 /* ============================================================
-   STATS ROW  — matches AdminDashboard .statCard green gradient
+   STATS ROW  — matches AdminDashboard .statCard blue/violet gradient
    ============================================================ */
 .statsRow {
   display: flex;
@@ -82,11 +82,11 @@
 .statCard {
   flex: 1;
   min-width: 130px;
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
   border-radius: 14px;
   padding: 20px 18px;
   color: #fff;
-  box-shadow: 0 4px 14px rgba(0, 148, 57, 0.25);
+  box-shadow: 0 4px 14px rgba(9, 4, 70, 0.25);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -113,8 +113,8 @@
 }
 
 .statCardGreen {
-  background: linear-gradient(135deg, #38a169, #276749);
-  box-shadow: 0 4px 14px rgba(56, 161, 105, 0.25);
+  background: linear-gradient(135deg, #090446, #380075);
+  box-shadow: 0 4px 14px rgba(9, 4, 70, 0.25);
 }
 
 .statCardBlue {
@@ -166,8 +166,8 @@
 }
 
 .tabBtnActive {
-  color: #009439;
-  border-bottom-color: #009439;
+  color: #090446;
+  border-bottom-color: #090446;
   font-weight: 700;
 }
 
@@ -234,8 +234,8 @@
 }
 
 .searchInput:focus {
-  border-color: #009439;
-  box-shadow: 0 0 0 3px rgba(0, 148, 57, 0.1);
+  border-color: #090446;
+  box-shadow: 0 0 0 3px rgba(9, 4, 70, 0.1);
   background: #fff;
 }
 
@@ -267,6 +267,15 @@
   flex-shrink: 0;
 }
 
+/* Groups one label with its own select/input so the pair moves — and
+   wraps — as a single unit instead of the label and control being
+   independent flex items that can end up split across lines. */
+.filterField {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .filterLabel {
   font-size: 13px;
   font-weight: 600;
@@ -295,9 +304,9 @@
 }
 
 .filterBtnActive {
-  background: #009439;
+  background: #090446;
   color: #fff;
-  border-color: #009439;
+  border-color: #090446;
   font-weight: 600;
 }
 
@@ -315,10 +324,11 @@
 }
 
 .filterSelect:focus {
-  border-color: #009439;
+  border-color: #090446;
 }
 
 .filterDate {
+  width: 140px;
   padding: 6px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -378,25 +388,25 @@
 }
 
 .btnPrimary {
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
   color: #fff;
-  border-color: #009439;
-  box-shadow: 0 2px 8px rgba(0, 148, 57, 0.3);
+  border-color: #090446;
+  box-shadow: 0 2px 8px rgba(9, 4, 70, 0.3);
 }
 
 .btnPrimary:hover {
-  background: linear-gradient(135deg, #007a30, #004d1a);
-  border-color: #007a30;
+  background: linear-gradient(135deg, #000058, #240050);
+  border-color: #000058;
 }
 
 .btnSuccess {
-  background: #f0fff4;
-  color: #276749;
-  border-color: #9ae6b4;
+  background: #eef2ff;
+  color: #380075;
+  border-color: #a5b4fc;
 }
 
 .btnSuccess:hover {
-  background: #c6f6d5;
+  background: #ddd6fe;
 }
 
 .btnDanger {
@@ -451,8 +461,8 @@
 }
 
 .recordCard:hover {
-  box-shadow: 0 4px 16px rgba(0, 148, 57, 0.1);
-  border-color: #9ae6b4;
+  box-shadow: 0 4px 16px rgba(9, 4, 70, 0.1);
+  border-color: #a5b4fc;
   transform: translateY(-1px);
 }
 
@@ -466,14 +476,14 @@
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: #f0fff4;
-  color: #009439;
+  background: #eef2ff;
+  color: #090446;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   font-size: 18px;
-  border: 1px solid #c6f6d5;
+  border: 1px solid #ddd6fe;
 }
 
 .recordBody {
@@ -484,7 +494,7 @@
 .recordCode {
   font-size: 11px;
   font-weight: 700;
-  color: #009439;
+  color: #090446;
   font-family: var(--font-mono, monospace);
   letter-spacing: 0.4px;
   margin-bottom: 3px;
@@ -542,9 +552,9 @@
 }
 
 .statusApproved {
-  background: #f0fff4;
-  color: #276749;
-  border-color: #9ae6b4;
+  background: #eef2ff;
+  color: #380075;
+  border-color: #a5b4fc;
 }
 
 .statusRejected {
@@ -554,9 +564,9 @@
 }
 
 .statusPublished {
-  background: #f0fff4;
-  color: #009439;
-  border-color: #9ae6b4;
+  background: #eef2ff;
+  color: #090446;
+  border-color: #a5b4fc;
 }
 
 .categoryBadge {
@@ -727,8 +737,8 @@
 }
 
 .formInput:focus {
-  border-color: #009439;
-  box-shadow: 0 0 0 3px rgba(0, 148, 57, 0.1);
+  border-color: #090446;
+  box-shadow: 0 0 0 3px rgba(9, 4, 70, 0.1);
 }
 
 .formRow {
@@ -752,8 +762,8 @@
 }
 
 .uploadZone:hover {
-  border-color: #009439;
-  background: #f0fff4;
+  border-color: #090446;
+  background: #eef2ff;
 }
 
 .uploadIcon {
@@ -808,7 +818,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
 }
 
 .panelTitle {
@@ -904,8 +914,8 @@
 }
 
 .commentInput:focus {
-  border-color: #009439;
-  box-shadow: 0 0 0 3px rgba(0, 148, 57, 0.1);
+  border-color: #090446;
+  box-shadow: 0 0 0 3px rgba(9, 4, 70, 0.1);
   background: #fff;
 }
 
@@ -973,7 +983,7 @@
 }
 /* ── Header ── */
 .viewModalHeader {
-  background: linear-gradient(135deg, #009439 0%, #005822 100%);
+  background: linear-gradient(135deg, #090446 0%, #380075 100%);
   padding: 22px 24px 20px;
   position: relative;
   overflow: hidden;
@@ -1096,8 +1106,8 @@
   flex-shrink: 0;
 }
 .viewModalMetaIconGreen {
-  background: #f0fff4;
-  color: #276749;
+  background: #eef2ff;
+  color: #380075;
 }
 .viewModalMetaIconBlue {
   background: #ebf8ff;
@@ -1162,11 +1172,11 @@
 .pillActionBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .pillAccept {
-  background: #009439;
+  background: #090446;
   color: #fff;
-  box-shadow: 0 2px 8px rgba(0, 148, 57, 0.25);
+  box-shadow: 0 2px 8px rgba(9, 4, 70, 0.25);
 }
-.pillAccept:hover:not(:disabled) { background: #00792e; }
+.pillAccept:hover:not(:disabled) { background: #000058; }
 
 .pillReject {
   background: #dc2626;
@@ -1190,12 +1200,12 @@
   font-family: inherit;
 }
 .viewModalFileBtnPrimary {
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
   color: #fff;
-  box-shadow: 0 4px 14px rgba(0, 148, 57, 0.25);
+  box-shadow: 0 4px 14px rgba(9, 4, 70, 0.25);
 }
 .viewModalFileBtnPrimary:hover {
-  box-shadow: 0 6px 20px rgba(0, 148, 57, 0.35);
+  box-shadow: 0 6px 20px rgba(9, 4, 70, 0.35);
   transform: translateY(-1px);
 }
 .viewModalFileBtnSecondary {
@@ -1239,7 +1249,7 @@
   transition: border-color 0.2s;
 }
 .viewModalOcrText:focus {
-  border-color: #009439;
+  border-color: #090446;
 }
 /* ── Council members section ── */
 .viewModalCouncilSection {
@@ -1266,11 +1276,11 @@
 .viewModalCouncilCount {
   font-size: 11px;
   font-weight: 600;
-  color: #276749;
-  background: #f0fff4;
+  color: #380075;
+  background: #eef2ff;
   padding: 3px 9px;
   border-radius: 20px;
-  border: 1px solid #c6f6d5;
+  border: 1px solid #ddd6fe;
 }
 .viewModalCouncilGrid {
   display: grid;
@@ -1288,10 +1298,10 @@
   transition: all 0.2s ease;
 }
 .viewModalCouncilCard:hover {
-  background: #f0fff4;
-  border-color: #c6f6d5;
+  background: #eef2ff;
+  border-color: #ddd6fe;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 148, 57, 0.08);
+  box-shadow: 0 2px 8px rgba(9, 4, 70, 0.08);
 }
 .viewModalCouncilPhoto {
   width: 40px;
@@ -1306,7 +1316,7 @@
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
   color: #fff;
   display: flex;
   align-items: center;
@@ -1314,7 +1324,7 @@
   font-weight: 800;
   font-size: 15px;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(0, 148, 57, 0.2);
+  box-shadow: 0 2px 6px rgba(9, 4, 70, 0.2);
 }
 .viewModalCouncilName {
   font-size: 13px;
@@ -1358,6 +1368,19 @@
 .viewModalFooterBtnClose:hover {
   background: #edf2f7;
   color: #2d3748;
+}
+/* Same gradient as .viewModalFileBtnPrimary (Open PDF/Present, etc.) —
+   without an explicit variant, .viewModalFooterBtn falls back to the
+   browser's plain default button look. */
+.viewModalFooterBtnPrimary {
+  background: linear-gradient(135deg, #090446, #380075);
+  color: #fff;
+  border: none;
+  box-shadow: 0 2px 8px rgba(9, 4, 70, 0.25);
+}
+.viewModalFooterBtnPrimary:hover {
+  box-shadow: 0 4px 14px rgba(9, 4, 70, 0.35);
+  transform: translateY(-1px);
 }
 /* ── Status badge inside modal ── */
 .viewModalStatusBadge {
@@ -1466,6 +1489,35 @@
 
   .searchRow {
     flex-wrap: wrap;
+  }
+
+  /* The desktop .filterRow just lets label/select/input pairs wrap freely,
+     which at phone widths splits a field's label from its own control
+     onto separate lines (e.g. "Author:" alone on one line, its input on
+     the next). Laying it out as a real 2-column form grid instead keeps
+     every label with its control and gives each one room to be full width. */
+  .filterRow {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    align-items: start;
+  }
+  .filterIcon {
+    display: none;
+  }
+  .filterField {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .filterSelect,
+  .filterDate {
+    width: 100%;
+  }
+  .filterActions {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    justify-content: flex-end;
   }
 }
 

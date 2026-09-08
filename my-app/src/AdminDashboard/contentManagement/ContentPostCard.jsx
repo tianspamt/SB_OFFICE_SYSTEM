@@ -18,8 +18,8 @@ import { formatPostDate } from "./utils";
 import { ImageCarousel } from "./ImageCarousel";
 
 const BADGE_STYLE = {
-  activity: { background: "#f0fdf4", color: "#15803d", borderColor: "#bbf7d0" },
-  announcement: { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" },
+  activity: { background: "#eef2ff", color: "#380075", borderColor: "#a5b4fc" },
+  announcement: { background: "#eff6ff", color: "#000058", borderColor: "#bfdbfe" },
 };
 
 

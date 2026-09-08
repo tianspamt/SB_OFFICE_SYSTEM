@@ -1,5 +1,34 @@
+import { useEffect, useState } from "react";
+
 // ─── API Base URL ──────────────────────────────────────────────────────────────
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+// ─── Text truncation ─────────────────────────────────────────────────────────
+// Character-count truncation (not the CSS max-width/ellipsis approach — see
+// .tdTruncate in AdminDashboard.module.css) for table cells that need a
+// guaranteed, predictable cutoff regardless of font/column width.
+export const truncateText = (str, max) =>
+  str && str.length > max ? `${str.slice(0, max)}…` : str;
+
+// ─── Mobile layout switch ───────────────────────────────────────────────────────
+// Shared by every page that swaps its desktop layout (table, multi-section
+// grid, etc.) for a more compact mobile one below this width — 768px matches
+// the sidebar's own mobile breakpoint in AdminDashboard.module.css, so
+// everything switches together instead of each page picking its own point.
+export const MOBILE_BREAKPOINT = 768;
+export function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= breakpoint
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    handler(mq);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
 
 // ─── Error helper ──────────────────────────────────────────────────────────────
 // The backend responds with { error: "..." } for most failures, but
@@ -207,7 +236,7 @@ export const getLocalHolidays = (year) => [
 ];
 
 export const COLOR_SWATCHES = [
-  "#009439",
+  "#090446",
   "#3b82f6",
   "#eab308",
   "#ec4899",
@@ -221,7 +250,7 @@ export const ACTION_COLORS = {
   LOGIN: { bg: "#d1fae5", color: "#065f46" },
   LOGOUT: { bg: "#f3f4f6", color: "#374151" },
   REGISTER: { bg: "#dbeafe", color: "#1e40af" },
-  UPLOAD: { bg: "#ede9fe", color: "#5b21b6" },
+  UPLOAD: { bg: "#ede9fe", color: "#240050" },
   CREATE: { bg: "#fef9c3", color: "#854d0e" },
   UPDATE: { bg: "#ffedd5", color: "#9a3412" },
   DELETE: { bg: "#fee2e2", color: "#991b1b" },
@@ -231,7 +260,7 @@ export const ACTION_COLORS = {
   ACCEPT: { bg: "#d1fae5", color: "#065f46" },
   REQUEST_CHANGES: { bg: "#fee2e2", color: "#991b1b" },
   VM_APPROVE: { bg: "#dbeafe", color: "#1e40af" },
-  PUBLISH: { bg: "#ede9fe", color: "#5b21b6" },
+  PUBLISH: { bg: "#ede9fe", color: "#240050" },
   RESUBMIT: { bg: "#fef9c3", color: "#854d0e" },
   REPLACE_FILE: { bg: "#ffedd5", color: "#9a3412" },
   COMMENT: { bg: "#f3f4f6", color: "#374151" },
@@ -249,9 +278,9 @@ export const priorityConfig = {
   },
   normal: {
     label: "Normal",
-    color: "#276749",
-    bg: "#f0fff4",
-    border: "#9ae6b4",
+    color: "#380075",
+    bg: "#eef2ff",
+    border: "#a5b4fc",
   },
 };
 
@@ -373,6 +402,7 @@ export const tabTitles = {
   calendar: "Calendar & Schedule",
   announcements: "Announcements",
   sessions: "Session Minutes & Agenda",
+  session_agendas: "Session Agenda",
   ordinances: "Ordinances",
   resolutions: "Resolutions",
   officials: "Sangguniang Bayan Council Members",

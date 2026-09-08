@@ -1,6 +1,6 @@
 /* OfficialsPage.module.css
    Design system: matches AdminDashboard
-   Font: Nunito | Brand: #009439 / #005822 | Background: #f0f4f8
+   Font: Nunito | Brand: #090446 / #380075 | Background: #f0f4f8
    ─────────────────────────────────────────────────────────────── */
 
 /* ── Page wrapper ────────────────────────────────────────────── */
@@ -26,7 +26,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  background: linear-gradient(135deg, #009439 0%, #005822 100%);
+  background: linear-gradient(135deg, #090446 0%, #380075 100%);
   border-radius: 14px;
   padding: 22px 28px;
   margin-bottom: 24px;
@@ -112,7 +112,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  background: #009439;
+  background: #090446;
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -122,14 +122,14 @@
   cursor: pointer;
   font-family: inherit;
   transition: background 0.18s, transform 0.15s, box-shadow 0.18s;
-  box-shadow: 0 2px 8px rgba(0, 148, 57, 0.3);
+  box-shadow: 0 2px 8px rgba(9, 4, 70, 0.3);
   flex-shrink: 0;
 }
 
 .primaryBtn:hover:not(:disabled) {
-  background: #007a30;
+  background: #000058;
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(0, 148, 57, 0.35);
+  box-shadow: 0 4px 14px rgba(9, 4, 70, 0.35);
 }
 
 .primaryBtn:disabled {
@@ -172,8 +172,8 @@
 }
 
 .councilGroupOpen {
-  border-color: #9ae6b4;
-  box-shadow: 0 4px 16px rgba(0, 148, 57, 0.08);
+  border-color: #a5b4fc;
+  box-shadow: 0 4px 16px rgba(9, 4, 70, 0.08);
 }
 
 /* ── Council header row ──────────────────────────────────────── */
@@ -188,7 +188,7 @@
 }
 
 .councilGroupOpen .councilHeaderWrapper {
-  background: #f0fdf4;
+  background: #eef2ff;
   border-bottom-color: #e2e8f0;
 }
 
@@ -211,7 +211,7 @@
 }
 
 .councilGroupOpen .councilHeaderWrapper:hover {
-  background: #e6faf0;
+  background: #eef2ff;
 }
 
 .councilChevron {
@@ -223,14 +223,14 @@
 }
 
 .councilGroupOpen .councilChevron {
-  color: #009439;
+  color: #090446;
 }
 
 .councilAccent {
   width: 4px;
   height: 36px;
   border-radius: 4px;
-  background: linear-gradient(180deg, #009439, #005822);
+  background: linear-gradient(180deg, #090446, #380075);
   flex-shrink: 0;
 }
 
@@ -257,11 +257,11 @@
   display: inline-block;
   padding: 2px 8px;
   border-radius: 99px;
-  background: #f0fdf4;
-  color: #15803d;
+  background: #eef2ff;
+  color: #380075;
   font-size: 10px;
   font-weight: 700;
-  border: 1px solid #bbf7d0;
+  border: 1px solid #a5b4fc;
   letter-spacing: 0.3px;
 }
 
@@ -273,9 +273,9 @@
   padding: 6px 14px;
   font-size: 12px;
   border-radius: 20px;
-  border: 1px solid #9ae6b4;
-  background: #f0fdf4;
-  color: #009439;
+  border: 1px solid #a5b4fc;
+  background: #eef2ff;
+  color: #090446;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -285,9 +285,9 @@
 }
 
 .addMemberInlineBtn:hover {
-  background: #009439;
+  background: #090446;
   color: #fff;
-  border-color: #009439;
+  border-color: #090446;
 }
 
 /* ── Council expanded body ───────────────────────────────────── */
@@ -315,8 +315,8 @@
 }
 
 .searchBar:focus-within {
-  border-color: #009439;
-  box-shadow: 0 0 0 3px rgba(0, 148, 57, 0.1);
+  border-color: #090446;
+  box-shadow: 0 0 0 3px rgba(9, 4, 70, 0.1);
 }
 
 .searchBar input {
@@ -371,8 +371,8 @@
 }
 
 .memberCard:hover {
-  border-color: #9ae6b4;
-  box-shadow: 0 10px 24px rgba(0, 148, 57, 0.12);
+  border-color: #a5b4fc;
+  box-shadow: 0 10px 24px rgba(9, 4, 70, 0.12);
   transform: translateY(-3px);
 }
 
@@ -386,7 +386,7 @@
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #009439, #005822);
+  background: linear-gradient(135deg, #090446, #380075);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -406,7 +406,7 @@
   border-radius: 50%;
 }
 
-.avatarActive { box-shadow: 0 0 0 3px #bbf7d0; }
+.avatarActive { box-shadow: 0 0 0 3px #a5b4fc; }
 .avatarEnded { box-shadow: 0 0 0 3px #fde68a; }
 .avatarNoTerm { box-shadow: 0 0 0 3px #e2e8f0; }
 
@@ -455,9 +455,9 @@
 }
 
 .badgeActive {
-  background: #f0fdf4;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
+  background: #eef2ff;
+  color: #380075;
+  border: 1px solid #a5b4fc;
 }
 
 .badgeActive::before {
@@ -520,9 +520,9 @@
 }
 
 .iconBtn:hover {
-  background: #f0fdf4;
-  border-color: #9ae6b4;
-  color: #009439;
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  color: #090446;
 }
 
 .iconBtnDel {
@@ -661,8 +661,8 @@
 
 .formGroup input:focus,
 .formGroup select:focus {
-  border-color: #009439;
-  box-shadow: 0 0 0 3px rgba(0, 148, 57, 0.1);
+  border-color: #090446;
+  box-shadow: 0 0 0 3px rgba(9, 4, 70, 0.1);
 }
 
 .fieldError {

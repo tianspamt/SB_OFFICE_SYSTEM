@@ -14,7 +14,7 @@ const { uploadToStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 const { isValidEmail, getIP } = require('../helpers/utils')
 const { ROLE_POSITIONS } = require('../helpers/roles')
-const { emailShell, BRAND_GREEN } = require('../helpers/notify')
+const { emailShell, BRAND_PRIMARY } = require('../helpers/notify')
 
 const JWT_SECRET = process.env.JWT_SECRET
 const SALT_ROUNDS = 10
@@ -47,7 +47,7 @@ router.post('/send-otp', otpLimiter, async (req, res) => {
       bodyHtml: `
         <div style="text-align:center;">
           <p style="color:#555;font-size:14px;margin:0 0 8px;">Enter this code to continue:</p>
-          <div style="font-size:38px;font-weight:800;letter-spacing:12px;color:${BRAND_GREEN};text-align:center;margin:16px 0;padding:16px;background:#eafaf1;border-radius:10px;">${otp}</div>
+          <div style="font-size:38px;font-weight:800;letter-spacing:12px;color:${BRAND_PRIMARY};text-align:center;margin:16px 0;padding:16px;background:#eef2ff;border-radius:10px;">${otp}</div>
           <p style="color:#888;font-size:13px;margin-top:16px;">This code expires in <strong>10 minutes</strong>.<br/>Do not share this code with anyone.</p>
         </div>
       `,

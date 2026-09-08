@@ -1,11 +1,15 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, PlusCircle, Clock, MapPin, Pencil, Trash2, AlertCircle } from "lucide-react";
+import { useQueries } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, PlusCircle, Clock, MapPin, Pencil, Trash2 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import ConfirmModal from "./ConfirmModal";
-import { toIsoDate, toLocalIso, getLocalHolidays } from "./AdminContext";
+import {
+  toIsoDate, toLocalIso, getLocalHolidays,
+  holidaysQueryKey, fetchHolidaysForYear, HOLIDAYS_STALE_TIME_MS,
+} from "./AdminContext";
 
 export default function CalendarPage({
-  localEvents, phHolidays, fetchingHolidays, holidaysError,
+  localEvents,
   showHolidays, setShowHolidays,
   onAddEvent, onEditEvent, onDeleteEvent,
   isAdmin = false, currentUser = null,
@@ -20,6 +24,27 @@ export default function CalendarPage({
   const month = calendarViewDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // ── PH Holidays ── keyed to whatever year is actually on screen, not just
+  // the real "today" year — this used to live in AdminDashboard.jsx fetching
+  // only [thisYear, thisYear+1], so browsing the calendar to any other year
+  // (or even just last year, in January) silently lost every national/
+  // government holiday for it; only the hardcoded local ones (see
+  // getLocalHolidays) kept showing since those aren't fetched at all.
+  // `todayYear`/`todayYear+1` stay in the mix too since getUpcomingEvents()
+  // below always looks ahead from real "today", independent of which month
+  // is being browsed.
+  const todayYearForHolidays = new Date().getFullYear();
+  const holidayYears = [...new Set([todayYearForHolidays, todayYearForHolidays + 1, year, year + 1])];
+  const holidayQueries = useQueries({
+    queries: holidayYears.map((y) => ({
+      queryKey: holidaysQueryKey(y),
+      queryFn: () => fetchHolidaysForYear(y),
+      staleTime: HOLIDAYS_STALE_TIME_MS,
+    })),
+  });
+  const phHolidays = {};
+  holidayYears.forEach((y, i) => { phHolidays[y] = holidayQueries[i].data || []; });
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
   const today = new Date();
@@ -34,9 +59,9 @@ export default function CalendarPage({
       if (ev.holidayType === "special-working") return { bg: "#dcfce7", color: "#166534", dot: "#22c55e" };
       if (ev.holidayType === "local-fiesta")    return { bg: "#fce7f3", color: "#9d174d", dot: "#ec4899" };
       if (ev.holidayType === "special")         return { bg: "#fef9c3", color: "#854d0e", dot: "#eab308" };
-      return { bg: "#ede9fe", color: "#5b21b6", dot: "#8b5cf6" };
+      return { bg: "#ede9fe", color: "#240050", dot: "#8b5cf6" };
     }
-    const c = ev.color || "#009439";
+    const c = ev.color || "#090446";
     return { bg: c + "28", color: c, dot: c };
   };
 
@@ -68,7 +93,7 @@ export default function CalendarPage({
         return {
           id: `local-${ev.id}`, dbId: ev.id, summary: ev.title,
           location: ev.location, description: ev.description,
-          color: ev.color || "#009439", isLocal: true, all_day: ev.all_day,
+          color: ev.color || "#090446", isLocal: true, all_day: ev.all_day,
           start: { date: startIso, dateTime: ev.all_day ? null : `${startIso}T${ev.start_time || "00:00"}` },
           end: { date: endIso, dateTime: ev.all_day ? null : `${endIso}T${ev.end_time || "00:00"}` },
           raw: ev,
@@ -100,7 +125,7 @@ export default function CalendarPage({
         return {
           id: `local-${ev.id}`, dbId: ev.id, summary: ev.title,
           location: ev.location, description: ev.description,
-          color: ev.color || "#009439", isLocal: true, all_day: ev.all_day,
+          color: ev.color || "#090446", isLocal: true, all_day: ev.all_day,
           start: { date: startIso, dateTime: ev.all_day ? null : `${startIso}T${ev.start_time}` },
           end: { date: endIso, dateTime: ev.all_day ? null : `${endIso}T${ev.end_time}` },
           raw: ev,
@@ -136,29 +161,6 @@ export default function CalendarPage({
           </button>
         </div>
       </div>
-
-      {showHolidays && (
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: 11, alignItems: "center", padding: "6px 0" }}>
-          <span style={{ fontWeight: 600, color: "#64748b" }}>Holidays:</span>
-          {[
-            { label: "National Regular",    bg: "#fee2e2", color: "#991b1b" },
-            { label: "Special Non-Working", bg: "#fef9c3", color: "#854d0e" },
-            { label: "Special Working",     bg: "#dcfce7", color: "#166534" },
-            { label: "Local / Fiesta",      bg: "#fce7f3", color: "#9d174d" },
-          ].map((l) => (
-            <span key={l.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: l.bg, border: `1px solid ${l.color}`, display: "inline-block" }} />
-              <span style={{ color: l.color }}>{l.label}</span>
-            </span>
-          ))}
-          {fetchingHolidays && <span style={{ color: "#94a3b8", fontSize: 11 }}>Loading holidays...</span>}
-          {holidaysError && !fetchingHolidays && (
-            <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#c53030", fontSize: 11 }}>
-              <AlertCircle size={12} /> {holidaysError}
-            </span>
-          )}
-        </div>
-      )}
 
       <div className={styles.calCard}>
         <div className={styles.calDayHeaders}>{DAY_NAMES.map((d) => <div key={d} className={styles.calDayHeader}>{d}</div>)}</div>
@@ -204,6 +206,7 @@ export default function CalendarPage({
             {(selectedCalDay ? getEventsForDay(selectedCalDay) : upcoming).length !== 1 ? "s" : ""}
           </span>
         </div>
+
         <table className={styles.calEventsTable}>
           <thead className={styles.calEventsTableHead}><tr><th>Event</th><th>Date</th><th>Time</th><th>Location</th></tr></thead>
           <tbody>

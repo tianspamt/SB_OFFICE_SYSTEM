@@ -1,0 +1,18 @@
+/* ─── App-wide hidden scrollbars ─────────────────────────────────────────────
+   Plain element/pseudo-element selectors only (no classes) so this reaches
+   every scrollable area in the app — the sidebar, tables, modals, the
+   Archives/Users mobile "⋮" menus, etc. — without each page's own CSS
+   module needing its own copy. Scrolling itself (wheel/touch/keyboard) is
+   unaffected — this only hides the visible bar. Firefox uses
+   scrollbar-width: none; every Chromium/WebKit browser uses
+   ::-webkit-scrollbar { display: none } instead. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

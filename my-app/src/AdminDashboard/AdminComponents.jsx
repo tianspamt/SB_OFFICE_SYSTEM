@@ -6,7 +6,7 @@ export const UserAvatar = ({
   name,
   photo,
   size = 32,
-  fallbackBg = "linear-gradient(135deg, #009439, #005822)",
+  fallbackBg = "linear-gradient(135deg, #090446, #380075)",
   style = {},
 }) => {
   const initials = (name || "?").trim().charAt(0).toUpperCase() || "?";
@@ -62,9 +62,9 @@ export const ModalAlert = ({ message, type }) => message ? (
   <div style={{
     display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
     borderRadius: 8, marginBottom: 14, fontSize: 13,
-    background: type === "error" ? "#fff5f5" : "#f0fff4",
-    border: `1px solid ${type === "error" ? "#feb2b2" : "#9ae6b4"}`,
-    color: type === "error" ? "#c53030" : "#276749",
+    background: type === "error" ? "#fff5f5" : "#eef2ff",
+    border: `1px solid ${type === "error" ? "#feb2b2" : "#a5b4fc"}`,
+    color: type === "error" ? "#c53030" : "#380075",
   }}>
     <AlertCircle size={14} />{message}
   </div>
@@ -86,7 +86,7 @@ export const TermFormFields = ({ form, setForm, styles }) => (
     </select>
     <label className={styles.fieldLabel}>Term Period <span style={{ color: "#e53e3e" }}>*</span></label>
     <input className={styles.input} placeholder="e.g. 2022–2025" value={form.term_period}
-      onChange={(e) => setForm({ ...form, term_period: e.target.value })} />
+      onChange={(e) => setForm({ ...form, term_period: e.target.value.replace(/[^0-9\-–\s]/g, "") })} />
     <div style={{ display: "flex", gap: 10 }}>
       <div style={{ flex: 1 }}>
         <label className={styles.fieldLabel}>Start Date <span style={{ color: "#e53e3e" }}>*</span></label>

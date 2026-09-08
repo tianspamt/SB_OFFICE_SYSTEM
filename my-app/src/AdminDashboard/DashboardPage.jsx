@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ExternalLink,
   Calendar,
+  CalendarDays,
   Megaphone,
   BookOpen,
   ArrowUpRight,
@@ -18,11 +19,22 @@ import {
   MapPin,
   AlertCircle,
   Pin,
+  X,
+  Image,
+  Download,
+  Presentation,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
+import lStyles from "./LegislativeModule.module.css";
 import PendingRecordsWidget from "./PendingRecordsWidget";
+import { PresentOverlay } from "./LegislativeComponents";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
+import { useIsMobile } from "./AdminContext";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const getFileUrl = (filepath) =>
+  `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
@@ -68,14 +80,16 @@ const EmptyState = ({ icon: Icon, label }) => (
 // `styles.skeleton` is the shared shimmer block (see AdminDashboard.module.css
 // and its other use in LegislativeComponents.jsx's RecordListSkeleton) — a
 // plain gray shimmer, sized per-use via inline style. The top stat-chip row
-// sits on the dashboard's solid green header, where that gray shimmer would
-// be nearly invisible, so those use `styles.skeletonSolid` instead (already
-// built for exactly this — see its own comment in the CSS).
+// sits on the dashboard's solid gradient header, where that gray shimmer
+// would be nearly invisible, so those use `styles.skeletonSolid` instead
+// (already built for exactly this — see its own comment in the CSS).
 const DashStatChipSkeleton = () => (
   <div className={styles.dashStatChip}>
-    <div className={styles.skeletonSolid} style={{ width: 14, height: 14, borderRadius: 4 }} />
-    <div className={styles.skeletonSolid} style={{ width: 22, height: 13, borderRadius: 4 }} />
-    <div className={styles.skeletonSolid} style={{ width: 74, height: 10, borderRadius: 4 }} />
+    <div className={styles.dashStatChipTop}>
+      <div className={styles.skeletonSolid} style={{ width: 14, height: 14, borderRadius: 4 }} />
+      <div className={styles.skeletonSolid} style={{ width: 22, height: 13, borderRadius: 4 }} />
+    </div>
+    <div className={styles.skeletonSolid} style={{ width: "80%", height: 10, borderRadius: 4 }} />
   </div>
 );
 
@@ -134,14 +148,16 @@ const SectionHeader = ({ icon: Icon, title, color, count, onViewAll }) => (
 );
 
 // ─── Ordinance Card ───────────────────────────────────────────────────────────
-const OrdinanceCard = ({ item }) => (
+const OrdinanceCard = ({ item, onView }) => (
   <div className={styles.dashItemCard}>
     <div className={styles.dashCardTop}>
       <span className={styles.dashApprovedBadge}>Published</span>
-      <span className={styles.dashCardMeta}>
-        <Hash size={11} />
-        {item.ordinance_no}
-      </span>
+      {item.ordinance_number && (
+        <span className={styles.dashCardMeta}>
+          <Hash size={11} />
+          {item.ordinance_number}
+        </span>
+      )}
     </div>
     <h4 className={styles.dashCardTitle}>{item.title}</h4>
     {item.category && (
@@ -150,28 +166,20 @@ const OrdinanceCard = ({ item }) => (
         {item.category}
       </span>
     )}
-    {item.description && (
-      <p className={styles.dashCardDesc}>
-        {item.description.length > 100
-          ? item.description.substring(0, 100) + "…"
-          : item.description}
-      </p>
-    )}
-    {(item.author || item.officials?.length > 0) && (
+    {(item.officials?.length > 0) && (
       <span className={styles.dashCardAuthor}>
         <User size={11} />
-        {item.author ||
-          (item.officials.length === 1
-            ? item.officials[0].full_name
-            : `${item.officials.length} council members`)}
+        {item.officials.length === 1
+          ? item.officials[0].full_name
+          : `${item.officials.length} council members`}
       </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
         <Calendar size={11} />
-        {formatDate(item.date_approved)}
+        {formatTimestamp(item.uploaded_at)}
       </span>
-      <button className={styles.dashCardBtn}>
+      <button className={styles.dashCardBtn} onClick={onView}>
         View <ChevronRight size={12} />
       </button>
     </div>
@@ -179,14 +187,16 @@ const OrdinanceCard = ({ item }) => (
 );
 
 // ─── Resolution Card ──────────────────────────────────────────────────────────
-const ResolutionCard = ({ item }) => (
+const ResolutionCard = ({ item, onView }) => (
   <div className={styles.dashItemCard}>
     <div className={styles.dashCardTop}>
       <span className={styles.dashApprovedBadge}>Published</span>
-      <span className={styles.dashCardMeta}>
-        <Hash size={11} />
-        {item.resolution_no}
-      </span>
+      {item.resolution_number && (
+        <span className={styles.dashCardMeta}>
+          <Hash size={11} />
+          {item.resolution_number}
+        </span>
+      )}
     </div>
     <h4 className={styles.dashCardTitle}>{item.title}</h4>
     {item.category && (
@@ -195,34 +205,20 @@ const ResolutionCard = ({ item }) => (
         {item.category}
       </span>
     )}
-    {item.description && (
-      <p className={styles.dashCardDesc}>
-        {item.description.length > 100
-          ? item.description.substring(0, 100) + "…"
-          : item.description}
-      </p>
-    )}
-    {item.linked_ordinance && (
-      <div className={styles.dashLinkedBadge}>
-        <ExternalLink size={11} />
-        Based on Ordinance No. {item.linked_ordinance}
-      </div>
-    )}
-    {(item.author || item.officials?.length > 0) && (
+    {(item.officials?.length > 0) && (
       <span className={styles.dashCardAuthor}>
         <User size={11} />
-        {item.author ||
-          (item.officials.length === 1
-            ? item.officials[0].full_name
-            : `${item.officials.length} council members`)}
+        {item.officials.length === 1
+          ? item.officials[0].full_name
+          : `${item.officials.length} council members`}
       </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
         <Calendar size={11} />
-        {formatDate(item.date_approved)}
+        {formatTimestamp(item.uploaded_at)}
       </span>
-      <button className={styles.dashCardBtn}>
+      <button className={styles.dashCardBtn} onClick={onView}>
         View <ChevronRight size={12} />
       </button>
     </div>
@@ -230,18 +226,22 @@ const ResolutionCard = ({ item }) => (
 );
 
 // ─── Session Card ─────────────────────────────────────────────────────────────
-const SessionCard = ({ item }) => (
+const SessionCard = ({ item, onView }) => (
   <div className={styles.dashItemCard}>
     <div className={styles.dashCardTop}>
       <span className={styles.dashSessionBadge}>
-        {item.session_type || "Regular Session"}
+        {item.session_type === "special" ? "Special Session" : "Regular Session"}
       </span>
-      <span className={styles.dashCardMeta}>
-        <Clock size={11} />
-        {item.session_no ? `No. ${item.session_no}` : "—"}
-      </span>
+      {item.session_number && (
+        <span className={styles.dashCardMeta}>
+          <Clock size={11} />
+          {item.session_number}
+        </span>
+      )}
     </div>
-    <h4 className={styles.dashCardTitle}>{item.title}</h4>
+    <h4 className={styles.dashCardTitle}>
+      {item.session_number || formatDate(item.session_date)}
+    </h4>
     {item.venue && (
       <span className={styles.dashCardCategory}>
         <MapPin size={10} />
@@ -260,7 +260,7 @@ const SessionCard = ({ item }) => (
         <Calendar size={11} />
         {formatDate(item.session_date)}
       </span>
-      <button className={styles.dashCardBtn}>
+      <button className={styles.dashCardBtn} onClick={onView}>
         View <ChevronRight size={12} />
       </button>
     </div>
@@ -339,6 +339,16 @@ const DashboardPage = ({
 }) => {
   const [activityTab, setActivityTab] = useState("ordinances");
   const { toasts, showMsg, dismissToast } = useToasts();
+  const isMobile = useIsMobile();
+  const [mobileSection, setMobileSection] = useState("legislative");
+  const canSeePending = isViceMayor || isSecretary || isClerk || isCouncilor;
+  // Dashboard's own read-only View modal — same look as the Legislative
+  // Records pages' View modal (shares its CSS classes), but without their
+  // review-workflow machinery (accept/reject/comments), since everything
+  // shown here is already published. `type` picks which fields/actions
+  // render below; `item` is the raw ordinance/resolution/session_minutes row.
+  const [viewTarget, setViewTarget] = useState(null);
+  const [presentTarget, setPresentTarget] = useState(null);
 
   // "Latest X" only shows finished, public-facing records — a pending draft
   // isn't official yet, so it has no business appearing here (or counting
@@ -422,7 +432,9 @@ const DashboardPage = ({
       items: latestOrdinances,
       emptyIcon: ScrollText,
       emptyLabel: "ordinances",
-      renderItem: (item) => <OrdinanceCard key={item.id} item={item} />,
+      renderItem: (item) => (
+        <OrdinanceCard key={item.id} item={item} onView={() => setViewTarget({ type: "ordinance", item })} />
+      ),
     },
     {
       id: "resolutions",
@@ -433,7 +445,9 @@ const DashboardPage = ({
       items: latestResolutions,
       emptyIcon: FileText,
       emptyLabel: "resolutions",
-      renderItem: (item) => <ResolutionCard key={item.id} item={item} />,
+      renderItem: (item) => (
+        <ResolutionCard key={item.id} item={item} onView={() => setViewTarget({ type: "resolution", item })} />
+      ),
     },
     {
       id: "sessions",
@@ -444,12 +458,210 @@ const DashboardPage = ({
       items: latestSessions,
       emptyIcon: ClipboardList,
       emptyLabel: "session minutes",
-      renderItem: (item) => <SessionCard key={item.id} item={item} />,
+      renderItem: (item) => (
+        <SessionCard key={item.id} item={item} onView={() => setViewTarget({ type: "session", item })} />
+      ),
     },
   ];
 
   const activeTabConfig =
     ACTIVITY_TABS.find((t) => t.id === activityTab) || ACTIVITY_TABS[0];
+
+  // ── Mobile-only 4-tab switcher ──────────────────────────────────────────────
+  // Desktop shows every section at once (activity feed + sidebar + bottom
+  // row); on a phone that's a lot of scrolling just to reach e.g. Pending, so
+  // below MOBILE_BREAKPOINT the same section markup (built once below, so
+  // desktop and mobile never drift into two copies) is shown one at a time
+  // behind these tabs instead. Quick Actions isn't one of the tabs — it's
+  // short enough to just sit above the tab content on every tab instead of
+  // needing its own (see the isMobile branch below). Pending is only a real
+  // tab when that content would actually render for this role — matches the
+  // same role checks the desktop sidebar already uses below.
+  const MOBILE_SECTIONS = [
+    { id: "legislative", label: "Legislative", icon: ScrollText },
+    { id: "announcements", label: "Announcements", icon: Megaphone },
+    ...(canSeePending ? [{ id: "pending", label: "Pending", icon: AlertCircle }] : []),
+  ];
+  const activeMobileSection = MOBILE_SECTIONS.some((s) => s.id === mobileSection)
+    ? mobileSection
+    : MOBILE_SECTIONS[0].id;
+
+  const legislativeSection = (
+    <div className={styles.dashMainPanel}>
+      <div className={styles.dashTabRow}>
+        {ACTIVITY_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`${styles.dashTabBtn} ${
+              activityTab === tab.id ? styles.dashTabBtnActive : ""
+            }`}
+            onClick={() => setActivityTab(tab.id)}
+          >
+            <tab.icon size={14} strokeWidth={2} />
+            {tab.label}
+            {tab.count > 0 && (
+              <span className={styles.dashSectionCount}>{tab.count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <SectionHeader
+        icon={activeTabConfig.icon}
+        title={`Latest ${activeTabConfig.label}`}
+        color={activeTabConfig.color}
+        count={0}
+        onViewAll={onNavigate ? () => onNavigate(activeTabConfig.id) : null}
+      />
+
+      {loading ? (
+        <div className={styles.dashCardGrid}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <DashItemCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : activeTabConfig.items.length === 0 ? (
+        <EmptyState
+          icon={activeTabConfig.emptyIcon}
+          label={activeTabConfig.emptyLabel}
+        />
+      ) : (
+        <div className={styles.dashCardGrid}>
+          {activeTabConfig.items.map(activeTabConfig.renderItem)}
+        </div>
+      )}
+    </div>
+  );
+
+  const quickActionsSection = canQuickAdd ? (
+    <DashWidget icon={Plus} title="Quick actions">
+      <div className={styles.dashQuickActionsGrid}>
+        <button className={styles.quickActionIconBtn} onClick={onAddOrdinance}>
+          <ScrollText size={16} /> Ordinance
+        </button>
+        <button className={styles.quickActionIconBtn} onClick={onAddResolution}>
+          <Gavel size={16} /> Resolution
+        </button>
+        <button className={styles.quickActionIconBtn} onClick={onAddSession}>
+          <BookOpen size={16} /> Session
+        </button>
+        <button className={styles.quickActionIconBtn} onClick={onAddAnnouncement}>
+          <Megaphone size={16} /> Announce
+        </button>
+      </div>
+    </DashWidget>
+  ) : null;
+
+  const pendingSection = canSeePending ? (
+    <PendingRecordsWidget
+      isViceMayor={isViceMayor}
+      isSecretary={isSecretary}
+      isClerk={isClerk}
+      isCouncilor={isCouncilor}
+      onNavigate={onNavigate}
+      showMsg={showMsg}
+      style={{ flex: 1, minHeight: 0 }}
+    />
+  ) : null;
+
+  const announcementsSection = (
+    <>
+      <DashWidget icon={Megaphone} title="Latest announcements" badge={unreadAnnouncements}>
+        {loading ? (
+          <div className={styles.dashMiniAnnList}>
+            {Array.from({ length: 2 }).map((_, i) => (
+              <DashMiniAnnSkeleton key={i} />
+            ))}
+          </div>
+        ) : latestAnnouncements.length === 0 ? (
+          <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
+        ) : (
+          <div className={styles.dashMiniAnnList}>
+            {latestAnnouncements.map((post) => (
+              <div key={post.id} className={styles.dashMiniAnn}>
+                <div className={styles.dashMiniAnnHeader}>
+                  <div className={styles.dashMiniAnnTitle}>{post.title}</div>
+                  {(post.pinned || post.priority === "urgent") && (
+                    <div className={styles.dashMiniAnnBadges}>
+                      {post.pinned && (
+                        <span className={styles.dashMiniAnnPinned} title="Pinned">
+                          <Pin size={9} />
+                        </span>
+                      )}
+                      {post.priority === "urgent" && (
+                        <span className={styles.dashMiniAnnUrgent}>Urgent</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {post.body && (
+                  <p className={styles.dashMiniAnnSnippet}>
+                    {post.body.length > 90
+                      ? post.body.slice(0, 90) + "…"
+                      : post.body}
+                  </p>
+                )}
+                <div className={styles.dashMiniAnnMeta}>
+                  <span className={styles.dashMiniAnnAuthor}>
+                    <User size={10} />
+                    {/* Legacy rows posted before author tracking was added
+                        have no `author` relation — see AnnouncementsPage.jsx's
+                        same fallback for why "Admin" and not "Unknown". */}
+                    {post.author?.name || "Admin"}
+                  </span>
+                  <span className={styles.dashMiniAnnDate}>
+                    <Calendar size={10} />
+                    {formatDateTime(post.created_at)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {onNavigate && (
+          <button
+            className={styles.dashWidgetViewAll}
+            onClick={() => onNavigate("announcements")}
+          >
+            View all announcements <ArrowUpRight size={12} />
+          </button>
+        )}
+      </DashWidget>
+
+      <DashWidget icon={Clock} title="Upcoming sessions">
+        {loading ? (
+          <div className={styles.dashUpcomingList}>
+            {Array.from({ length: 2 }).map((_, i) => (
+              <DashUpcomingItemSkeleton key={i} />
+            ))}
+          </div>
+        ) : recentSessionsFallback.length === 0 ? (
+          <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
+        ) : (
+          <div className={styles.dashUpcomingList}>
+            {recentSessionsFallback.map((s) => (
+              <div key={s.id} className={styles.dashUpcomingItem}>
+                <div className={styles.dashUpcomingDate}>
+                  {formatDate(s.session_date)}
+                </div>
+                <div className={styles.dashUpcomingTitle}>
+                  {s.title || s.session_type || "Session"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {onNavigate && (
+          <button
+            className={styles.dashWidgetViewAll}
+            onClick={() => onNavigate("sessions")}
+          >
+            View all sessions <ArrowUpRight size={12} />
+          </button>
+        )}
+      </DashWidget>
+    </>
+  );
 
   return (
     <div className={styles.dashboardContainer}>
@@ -466,206 +678,322 @@ const DashboardPage = ({
             ? Array.from({ length: 4 }).map((_, i) => <DashStatChipSkeleton key={i} />)
             : stats.map((s) => (
                 <div key={s.label} className={styles.dashStatChip}>
-                  <s.icon size={14} strokeWidth={2} />
-                  <span className={styles.dashStatChipValue}>{s.value}</span>
+                  <div className={styles.dashStatChipTop}>
+                    <s.icon size={14} strokeWidth={2} />
+                    <span className={styles.dashStatChipValue}>{s.value}</span>
+                  </div>
                   <span className={styles.dashStatChipLabel}>{s.label}</span>
                 </div>
               ))}
         </div>
       </div>
 
-      {/* ── Body: main activity feed + sidebar ── */}
-      <div className={styles.dashBody}>
-        {/* Main — tabbed recent activity */}
-        <div className={styles.dashMainPanel}>
-          <div className={styles.dashTabRow}>
-            {ACTIVITY_TABS.map((tab) => (
+      {isMobile ? (
+        <>
+          {/* ── Mobile: one section at a time behind a tab switcher ── */}
+          <div
+            className={styles.dashMobileTabs}
+            style={{ gridTemplateColumns: `repeat(${MOBILE_SECTIONS.length}, 1fr)` }}
+          >
+            {MOBILE_SECTIONS.map((s) => (
               <button
-                key={tab.id}
-                className={`${styles.dashTabBtn} ${
-                  activityTab === tab.id ? styles.dashTabBtnActive : ""
+                key={s.id}
+                className={`${styles.dashMobileTabBtn} ${
+                  activeMobileSection === s.id ? styles.dashMobileTabBtnActive : ""
                 }`}
-                onClick={() => setActivityTab(tab.id)}
+                onClick={() => setMobileSection(s.id)}
               >
-                <tab.icon size={14} strokeWidth={2} />
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className={styles.dashSectionCount}>{tab.count}</span>
-                )}
+                <s.icon size={16} strokeWidth={2} />
+                {s.label}
               </button>
             ))}
           </div>
-
-          <SectionHeader
-            icon={activeTabConfig.icon}
-            title={`Latest ${activeTabConfig.label}`}
-            color={activeTabConfig.color}
-            count={0}
-            onViewAll={onNavigate ? () => onNavigate(activeTabConfig.id) : null}
-          />
-
-          {loading ? (
-            <div className={styles.dashCardGrid}>
-              {Array.from({ length: 6 }).map((_, i) => (
-                <DashItemCardSkeleton key={i} />
-              ))}
-            </div>
-          ) : activeTabConfig.items.length === 0 ? (
-            <EmptyState
-              icon={activeTabConfig.emptyIcon}
-              label={activeTabConfig.emptyLabel}
-            />
-          ) : (
-            <div className={styles.dashCardGrid}>
-              {activeTabConfig.items.map(activeTabConfig.renderItem)}
-            </div>
+          {/* Short enough to just sit above every tab's content instead of
+              needing a tab of its own. */}
+          {quickActionsSection && (
+            <div className={styles.dashMobileQuickActions}>{quickActionsSection}</div>
           )}
-        </div>
+          <div className={styles.dashMobileSectionBody}>
+            {activeMobileSection === "legislative" && legislativeSection}
+            {activeMobileSection === "announcements" && announcementsSection}
+            {activeMobileSection === "pending" && pendingSection}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ── Body: main activity feed + sidebar ── */}
+          <div className={styles.dashBody}>
+            {legislativeSection}
+            {/* Sidebar: Quick actions on top, Pending Review fills the rest */}
+            <div className={styles.dashSidebar}>
+              {quickActionsSection}
+              {pendingSection}
+            </div>
+          </div>
 
-        {/* Sidebar: Quick actions on top, Pending Review fills the rest */}
-        <div className={styles.dashSidebar}>
-          {canQuickAdd && (
-            <DashWidget icon={Plus} title="Quick actions">
-              <div className={styles.dashQuickActionsGrid}>
+          {/* ── Bottom row: Announcements + Upcoming session, side by side ── */}
+          <div className={styles.dashBottomRow}>{announcementsSection}</div>
+        </>
+      )}
+      {viewTarget && (
+        <div className={lStyles.viewModalOverlay} onClick={() => setViewTarget(null)}>
+          <div className={lStyles.viewModal} onClick={(e) => e.stopPropagation()}>
+            <div className={lStyles.viewModalHeader}>
+              <div className={lStyles.viewModalHeaderTop}>
+                <div className={lStyles.viewModalHeaderInfo}>
+                  {(viewTarget.item.ordinance_number ||
+                    viewTarget.item.resolution_number ||
+                    viewTarget.item.session_number) && (
+                    <div className={lStyles.viewModalOrdNumber}>
+                      <Hash size={12} />
+                      {viewTarget.item.ordinance_number ||
+                        viewTarget.item.resolution_number ||
+                        viewTarget.item.session_number}
+                    </div>
+                  )}
+                  <h2 className={lStyles.viewModalTitle}>
+                    {viewTarget.type === "session"
+                      ? viewTarget.item.session_type === "special"
+                        ? "Special Session"
+                        : "Regular Session"
+                      : viewTarget.item.title}
+                  </h2>
+                </div>
                 <button
-                  className={styles.quickActionIconBtn}
-                  onClick={onAddOrdinance}
+                  className={lStyles.viewModalCloseBtn}
+                  onClick={() => setViewTarget(null)}
+                  aria-label="Close modal"
                 >
-                  <ScrollText size={16} /> Ordinance
-                </button>
-                <button
-                  className={styles.quickActionIconBtn}
-                  onClick={onAddResolution}
-                >
-                  <Gavel size={16} /> Resolution
-                </button>
-                <button
-                  className={styles.quickActionIconBtn}
-                  onClick={onAddSession}
-                >
-                  <BookOpen size={16} /> Session
-                </button>
-                <button
-                  className={styles.quickActionIconBtn}
-                  onClick={onAddAnnouncement}
-                >
-                  <Megaphone size={16} /> Announce
+                  <X size={16} />
                 </button>
               </div>
-            </DashWidget>
-          )}
-
-          {(isViceMayor || isSecretary || isClerk || isCouncilor) && (
-            <PendingRecordsWidget
-              isViceMayor={isViceMayor}
-              isSecretary={isSecretary}
-              isClerk={isClerk}
-              isCouncilor={isCouncilor}
-              onNavigate={onNavigate}
-              showMsg={showMsg}
-              style={{ flex: 1, minHeight: 0 }}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* ── Bottom row: Announcements + Upcoming session, side by side ── */}
-      <div className={styles.dashBottomRow}>
-        <DashWidget icon={Megaphone} title="Latest announcements" badge={unreadAnnouncements}>
-          {loading ? (
-            <div className={styles.dashMiniAnnList}>
-              {Array.from({ length: 2 }).map((_, i) => (
-                <DashMiniAnnSkeleton key={i} />
-              ))}
             </div>
-          ) : latestAnnouncements.length === 0 ? (
-            <p className={styles.dashWidgetEmpty}>No announcements yet.</p>
-          ) : (
-            <div className={styles.dashMiniAnnList}>
-              {latestAnnouncements.map((post) => (
-                <div key={post.id} className={styles.dashMiniAnn}>
-                  <div className={styles.dashMiniAnnHeader}>
-                    <div className={styles.dashMiniAnnTitle}>{post.title}</div>
-                    {(post.pinned || post.priority === "urgent") && (
-                      <div className={styles.dashMiniAnnBadges}>
-                        {post.pinned && (
-                          <span className={styles.dashMiniAnnPinned} title="Pinned">
-                            <Pin size={9} />
-                          </span>
-                        )}
-                        {post.priority === "urgent" && (
-                          <span className={styles.dashMiniAnnUrgent}>Urgent</span>
-                        )}
+
+            <div className={lStyles.viewModalBody}>
+              <div className={lStyles.viewModalMeta}>
+                {viewTarget.type === "session" ? (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}>
+                      <CalendarDays size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Date</div>
+                      <div className={lStyles.viewModalMetaValue}>
+                        {viewTarget.item.session_date
+                          ? new Date(viewTarget.item.session_date + "T00:00:00").toLocaleDateString("en-PH", {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {viewTarget.item.year && (
+                      <div className={lStyles.viewModalMetaItem}>
+                        <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconBlue}`}>
+                          <CalendarDays size={16} />
+                        </div>
+                        <div>
+                          <div className={lStyles.viewModalMetaLabel}>Year</div>
+                          <div className={lStyles.viewModalMetaValue}>{viewTarget.item.year}</div>
+                        </div>
                       </div>
                     )}
+                    <div className={lStyles.viewModalMetaItem}>
+                      <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}>
+                        <CalendarDays size={16} />
+                      </div>
+                      <div>
+                        <div className={lStyles.viewModalMetaLabel}>Uploaded</div>
+                        <div className={lStyles.viewModalMetaValue}>
+                          {formatTimestamp(viewTarget.item.uploaded_at)}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {viewTarget.type !== "session" && viewTarget.item.category && (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconPurple}`}>
+                      <Tag size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Category</div>
+                      <div className={lStyles.viewModalMetaValue}>{viewTarget.item.category}</div>
+                    </div>
                   </div>
-                  {post.body && (
-                    <p className={styles.dashMiniAnnSnippet}>
-                      {post.body.length > 90
-                        ? post.body.slice(0, 90) + "…"
-                        : post.body}
-                    </p>
-                  )}
-                  <div className={styles.dashMiniAnnMeta}>
-                    <span className={styles.dashMiniAnnAuthor}>
-                      <User size={10} />
-                      {/* Legacy rows posted before author tracking was added
-                          have no `author` relation — see AnnouncementsPage.jsx's
-                          same fallback for why "Admin" and not "Unknown". */}
-                      {post.author?.name || "Admin"}
-                    </span>
-                    <span className={styles.dashMiniAnnDate}>
-                      <Calendar size={10} />
-                      {formatDateTime(post.created_at)}
-                    </span>
+                )}
+                {viewTarget.type === "session" && viewTarget.item.venue && (
+                  <div className={lStyles.viewModalMetaItem}>
+                    <div className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconGreen}`}>
+                      <MapPin size={16} />
+                    </div>
+                    <div>
+                      <div className={lStyles.viewModalMetaLabel}>Venue</div>
+                      <div className={lStyles.viewModalMetaValue}>{viewTarget.item.venue}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {onNavigate && (
-            <button
-              className={styles.dashWidgetViewAll}
-              onClick={() => onNavigate("announcements")}
-            >
-              View all announcements <ArrowUpRight size={12} />
-            </button>
-          )}
-        </DashWidget>
+                )}
+              </div>
 
-        <DashWidget icon={Clock} title="Upcoming sessions">
-          {loading ? (
-            <div className={styles.dashUpcomingList}>
-              {Array.from({ length: 2 }).map((_, i) => (
-                <DashUpcomingItemSkeleton key={i} />
-              ))}
-            </div>
-          ) : recentSessionsFallback.length === 0 ? (
-            <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
-          ) : (
-            <div className={styles.dashUpcomingList}>
-              {recentSessionsFallback.map((s) => (
-                <div key={s.id} className={styles.dashUpcomingItem}>
-                  <div className={styles.dashUpcomingDate}>
-                    {formatDate(s.session_date)}
+              <div className={lStyles.viewModalDivider} />
+
+              {viewTarget.type === "session" ? (
+                <>
+                  <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>
+                    Agenda
                   </div>
-                  <div className={styles.dashUpcomingTitle}>
-                    {s.title || s.session_type || "Session"}
+                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
+                    {viewTarget.item.agenda || "No agenda recorded."}
                   </div>
-                </div>
-              ))}
+                  <div className={lStyles.viewModalCouncilTitle} style={{ margin: "16px 0 8px" }}>
+                    Minutes
+                  </div>
+                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
+                    {viewTarget.item.minutes_text || "No minutes recorded."}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {viewTarget.item.filetype === "application/pdf" && (
+                    <div className={lStyles.viewModalFileActions}>
+                      <a
+                        href={getFileUrl(viewTarget.item.filepath)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                      >
+                        <FileText size={16} />
+                        Open PDF Document
+                      </a>
+                      <button
+                        className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                        onClick={() => setPresentTarget(viewTarget.item)}
+                      >
+                        <Presentation size={16} />
+                        Present
+                      </button>
+                    </div>
+                  )}
+                  {(viewTarget.item.filetype === "application/msword" ||
+                    viewTarget.item.filetype ===
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
+                    <div className={lStyles.viewModalFileActions}>
+                      <a
+                        href={getFileUrl(viewTarget.item.filepath)}
+                        download={viewTarget.item.filename}
+                        className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                      >
+                        <Download size={16} />
+                        Download Word Document
+                      </a>
+                      <button
+                        className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                        onClick={() => setPresentTarget(viewTarget.item)}
+                      >
+                        <Presentation size={16} />
+                        Present
+                      </button>
+                    </div>
+                  )}
+                  {viewTarget.item.filetype?.startsWith("image/") && (
+                    <div className={lStyles.viewModalOcrSection}>
+                      <img
+                        src={getFileUrl(viewTarget.item.filepath)}
+                        alt={viewTarget.item.title}
+                        className={lStyles.viewModalImagePreview}
+                      />
+                      <div className={lStyles.viewModalFileActions}>
+                        <button
+                          className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                          onClick={() => setPresentTarget(viewTarget.item)}
+                        >
+                          <Presentation size={16} />
+                          Present
+                        </button>
+                      </div>
+                      <div className={lStyles.viewModalOcrLabel}>
+                        <Image size={14} />
+                        Extracted Text (OCR)
+                      </div>
+                      <textarea
+                        className={lStyles.viewModalOcrText}
+                        readOnly
+                        rows={6}
+                        value={viewTarget.item.extracted_text || "No text could be extracted from this image."}
+                      />
+                    </div>
+                  )}
+
+                  {viewTarget.item.officials?.length > 0 && (
+                    <>
+                      <div className={lStyles.viewModalDivider} />
+                      <div className={lStyles.viewModalCouncilSection}>
+                        <div className={lStyles.viewModalCouncilHeader}>
+                          <div className={lStyles.viewModalCouncilTitle}>Author</div>
+                          <div className={lStyles.viewModalCouncilCount}>
+                            {viewTarget.item.officials.length} member
+                            {viewTarget.item.officials.length !== 1 ? "s" : ""}
+                          </div>
+                        </div>
+                        <div className={lStyles.viewModalCouncilGrid}>
+                          {viewTarget.item.officials.map((m) => (
+                            <div key={m.id} className={lStyles.viewModalCouncilCard}>
+                              {m.photo ? (
+                                <img src={m.photo} alt={m.full_name} className={lStyles.viewModalCouncilPhoto} />
+                              ) : (
+                                <div className={lStyles.viewModalCouncilAvatar}>{m.full_name?.charAt(0)}</div>
+                              )}
+                              <div>
+                                <div className={lStyles.viewModalCouncilName}>{m.full_name}</div>
+                                <div className={lStyles.viewModalCouncilPosition}>{m.position}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
-          )}
-          {onNavigate && (
-            <button
-              className={styles.dashWidgetViewAll}
-              onClick={() => onNavigate("sessions")}
-            >
-              View all sessions <ArrowUpRight size={12} />
-            </button>
-          )}
-        </DashWidget>
-      </div>
+
+            <div className={lStyles.viewModalFooter}>
+              {onNavigate && (
+                <button
+                  className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnPrimary}`}
+                  onClick={() => {
+                    setViewTarget(null);
+                    onNavigate(
+                      viewTarget.type === "ordinance"
+                        ? "ordinances"
+                        : viewTarget.type === "resolution"
+                        ? "resolutions"
+                        : "sessions"
+                    );
+                  }}
+                >
+                  Open full record <ArrowUpRight size={13} />
+                </button>
+              )}
+              <button
+                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
+                onClick={() => setViewTarget(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {presentTarget && (
+        <PresentOverlay record={presentTarget} onClose={() => setPresentTarget(null)} />
+      )}
+
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

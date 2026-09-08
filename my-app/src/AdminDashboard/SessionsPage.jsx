@@ -16,6 +16,7 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
+  Presentation,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
 import { API, MONTHS, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
@@ -36,6 +37,7 @@ import {
   StatsRow,
   StatusBadge,
   RecordListSkeleton,
+  PresentOverlay,
 } from "./LegislativeComponents";
 
 // Published records are paginated server-side (see GET /api/session-minutes'
@@ -274,6 +276,7 @@ export default function SessionsPage({
   // doubles as comment box + reject-reason input; revise* feed
   // handleReviseSession below).
   const [reviewCommentText, setReviewCommentText] = useState("");
+  const [presentTarget, setPresentTarget] = useState(null);
   const [reviseAgenda, setReviseAgenda] = useState("");
   const [reviseMinutes, setReviseMinutes] = useState("");
   const [reviseFile, setReviseFile] = useState(null);
@@ -320,6 +323,39 @@ export default function SessionsPage({
     setReviseFile(null);
     setViewTarget(item);
     if (item.status && item.status !== "published") fetchComments(item.id);
+  };
+
+  // Session minutes never keep the originally uploaded file (see
+  // routes/sessionMinutes.js — an upload only ever extracts text, it's
+  // never persisted to storage), so "Present" here always shows the typed
+  // agenda/minutes text in a big-font view rather than an embedded file.
+  const handleOpenPresent = (session) => {
+    setPresentTarget({
+      eyebrow: session.session_type === "special" ? "Special Session" : "Regular Session",
+      title:
+        session.session_number ||
+        (session.session_date
+          ? new Date(session.session_date + "T00:00:00").toLocaleDateString("en-PH", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })
+          : "Session"),
+      meta: [
+        session.session_date
+          ? new Date(session.session_date + "T00:00:00").toLocaleDateString("en-PH", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })
+          : null,
+        session.venue,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+      agenda: session.agenda ? session.agenda.split("\n").filter(Boolean) : [],
+      minutes: session.minutes_text || "",
+    });
   };
 
   const handleSendComment = async () => {
@@ -944,6 +980,12 @@ export default function SessionsPage({
 
             <div className={lStyles.viewModalFooter}>
               <button
+                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnPrimary}`}
+                onClick={() => handleOpenPresent(viewTarget)}
+              >
+                <Presentation size={13} /> Present
+              </button>
+              <button
                 className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
                 onClick={() => setViewTarget(null)}
               >
@@ -952,6 +994,10 @@ export default function SessionsPage({
             </div>
           </div>
         </div>
+      )}
+
+      {presentTarget && (
+        <PresentOverlay textContent={presentTarget} onClose={() => setPresentTarget(null)} />
       )}
     </>
   );

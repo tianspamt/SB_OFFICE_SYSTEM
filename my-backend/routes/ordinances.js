@@ -186,7 +186,7 @@ router.get('/:id/print', verifyToken, async (req, res) => {
         .meta { text-align:center; font-size:13px; color:#555; margin-bottom:32px; border-bottom:2px solid #000; padding-bottom:16px; }
         .content { font-size:14px; line-height:1.8; white-space:pre-wrap; }
         .print-btn { position:fixed; top:20px; right:20px; padding:10px 20px; background:#1a365d; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px; }
-        .download-btn { display:inline-block; margin:20px auto; padding:12px 24px; background:#009439; color:#fff; border-radius:8px; text-decoration:none; font-size:14px; }
+        .download-btn { display:inline-block; margin:20px auto; padding:12px 24px; background:#090446; color:#fff; border-radius:8px; text-decoration:none; font-size:14px; }
         @media print { .print-btn { display:none; } }
       </style>
       </head><body>

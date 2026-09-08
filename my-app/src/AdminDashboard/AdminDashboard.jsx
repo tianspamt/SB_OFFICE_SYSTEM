@@ -54,9 +54,6 @@ import {
   fetchOfficialsList,
   COUNCILS_QUERY_KEY,
   fetchCouncilsList,
-  HOLIDAYS_STALE_TIME_MS,
-  holidaysQueryKey,
-  fetchHolidaysForYear,
   ORDINANCE_CATEGORIES,
   RESOLUTION_CATEGORIES,
 } from "./AdminContext";
@@ -75,6 +72,7 @@ import OrdinancesPage from "./OrdinancesPage";
 import ResolutionsPage from "./ResolutionsPage";
 import OfficialsPage from "./OfficialsPage";
 import SessionsPage from "./SessionsPage";
+import SessionAgendaPage from "./SessionAgendaPage";
 import AnnouncementsPage from "./AnnouncementsPage";
 import CalendarPage from "./CalendarPage";
 import LogsPage from "./LogsPage";
@@ -105,6 +103,16 @@ export default function AdminDashboard() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // `sidebarCollapsed` only ever changes via desktop hover (see
+  // handleSidebarMouseEnter/Leave below) — hover never fires on a touch
+  // device, so it stays stuck at its default `true` forever on mobile. The
+  // mobile sidebar is a slide-in overlay (see .sidebar.mobileOpen in
+  // AdminDashboard.module.css), not the desktop hover rail, so it should
+  // always render fully expanded — labelled nav items, expandable Legislative
+  // Records/User Management sections — the same as the desktop sidebar looks
+  // once hovered open. This is what the sidebar's JSX actually keys off of
+  // instead of the raw `sidebarCollapsed` state.
+  const sidebarShowsCollapsed = sidebarCollapsed && !mobileOpen;
   const [legislativeOpen, setLegislativeOpen] = useState(false);
   const [userMgmtOpen, setUserMgmtOpen] = useState(false);
   // Set when navigating from the dashboard's "Needs your review" widget so
@@ -112,35 +120,17 @@ export default function AdminDashboard() {
   // directly on its Pending tab instead of the default Published tab.
   const [subTabRequest, setSubTabRequest] = useState(null);
 
-  // ── PH Holidays ── cached via React Query (staleTime: 24h, matching the
-  // backend's own cache + Cache-Control) instead of a plain fetch guarded by
-  // "already have this year" — only fetched once the Calendar tab is opened.
+  // PH Holidays now live entirely in CalendarPage.jsx — it owns the viewed
+  // month/year (calendarViewDate) and fetches holidays for whichever year is
+  // actually on screen, not just the real "today" year. Only the show/hide
+  // toggle preference stays here.
   const [showHolidays, setShowHolidays] = useState(true);
-  const currentYear = new Date().getFullYear();
-  const holidaysQueryThisYear = useQuery({
-    queryKey: holidaysQueryKey(currentYear),
-    queryFn: () => fetchHolidaysForYear(currentYear),
-    staleTime: HOLIDAYS_STALE_TIME_MS,
-    enabled: activeTab === "calendar",
-  });
-  const holidaysQueryNextYear = useQuery({
-    queryKey: holidaysQueryKey(currentYear + 1),
-    queryFn: () => fetchHolidaysForYear(currentYear + 1),
-    staleTime: HOLIDAYS_STALE_TIME_MS,
-    enabled: activeTab === "calendar",
-  });
-  const phHolidays = {
-    ...(holidaysQueryThisYear.data ? { [currentYear]: holidaysQueryThisYear.data } : {}),
-    ...(holidaysQueryNextYear.data ? { [currentYear + 1]: holidaysQueryNextYear.data } : {}),
-  };
-  const fetchingHolidays = holidaysQueryThisYear.isLoading || holidaysQueryNextYear.isLoading;
-  const holidaysError =
-    holidaysQueryThisYear.error?.message || holidaysQueryNextYear.error?.message || "";
 
   // ── loading flags ──
   const [fetchingUsers, setFetchingUsers] = useState(false);
   const [fetchingOrdinances, setFetchingOrdinances] = useState(false);
   const [fetchingMinutes, setFetchingMinutes] = useState(false);
+  const [fetchingAgendas, setFetchingAgendas] = useState(false);
   const [fetchingResolutions, setFetchingResolutions] = useState(false);
   const [fetchingAnnouncements, setFetchingAnnouncements] = useState(false);
 
@@ -166,6 +156,8 @@ export default function AdminDashboard() {
   const [showTextModal, setShowTextModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [showEditSessionModal, setShowEditSessionModal] = useState(false);
+  const [showAgendaModal, setShowAgendaModal] = useState(false);
+  const [showEditAgendaModal, setShowEditAgendaModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showEditAnnouncementModal, setShowEditAnnouncementModal] =
     useState(false);
@@ -335,6 +327,25 @@ export default function AdminDashboard() {
     minutes_text: "",
   });
 
+  // session agendas — no draft/review workflow (see routes/sessionAgendas.js):
+  // Secretary/Clerk upload a PDF/Word file and it's immediately live.
+  const [sessionAgendas, setSessionAgendas] = useState([]);
+  const [agendaForm, setAgendaForm] = useState({
+    session_number: "",
+    session_date: "",
+    session_type: "regular",
+    venue: "",
+  });
+  const [agendaFile, setAgendaFile] = useState(null);
+  const [editingAgenda, setEditingAgenda] = useState(null);
+  const [editAgendaForm, setEditAgendaForm] = useState({
+    session_number: "",
+    session_date: "",
+    session_type: "regular",
+    venue: "",
+  });
+  const [editAgendaFile, setEditAgendaFile] = useState(null);
+
   // announcements
   const [announcements, setAnnouncements] = useState([]);
   const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
@@ -371,7 +382,7 @@ export default function AdminDashboard() {
     end_date: "",
     end_time: "09:00",
     all_day: false,
-    color: "#009439",
+    color: "#090446",
   };
   const [localEventForm, setLocalEventForm] = useState(emptyEventForm);
   const [editEventForm, setEditEventForm] = useState(emptyEventForm);
@@ -401,6 +412,7 @@ export default function AdminDashboard() {
     fetchOrdinances();
     // officials load via the useQuery above — no manual kickoff needed here
     fetchSessionMinutes();
+    fetchSessionAgendas();
     fetchResolutions();
     fetchAnnouncements();
     fetchUnreadAnnouncements();
@@ -410,8 +422,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === "calendar") {
       fetchLocalEvents();
-      // PH holidays load via the useQuery pair above (enabled when this tab
-      // is active) — no manual kickoff needed here.
+      // PH holidays now load inside CalendarPage.jsx itself — no manual
+      // kickoff needed here.
     }
     if (activeTab === "logs") {
       fetchLogs();
@@ -501,6 +513,17 @@ export default function AdminDashboard() {
       setSessionMinutes([]);
     } finally {
       setFetchingMinutes(false);
+    }
+  };
+  const fetchSessionAgendas = async () => {
+    setFetchingAgendas(true);
+    try {
+      const d = await (await authFetch(`${API}/api/session-agendas`)).json();
+      setSessionAgendas(Array.isArray(d) ? d : []);
+    } catch {
+      setSessionAgendas([]);
+    } finally {
+      setFetchingAgendas(false);
     }
   };
   // `silent` skips the fetchingAnnouncements toggle — used for background
@@ -808,10 +831,10 @@ export default function AdminDashboard() {
     setModalMessage("");
     setShowEditOrdinanceModal(true);
   };
+  // Only one author per ordinance — selecting a different member replaces
+  // the current pick instead of adding to it.
   const toggleEditOfficial = (id) =>
-    setEditSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
-    );
+    setEditSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
   const handleUpdateOrdinance = async () => {
     if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceDate) {
       showModalMsg("All fields required!", "error");
@@ -872,10 +895,10 @@ export default function AdminDashboard() {
       showMsg("Error!", "error");
     }
   };
+  // Only one author per ordinance — selecting a different member replaces
+  // the current pick instead of adding to it.
   const toggleOfficial = (id) =>
-    setSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
-    );
+    setSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
 
   // ─── Resolutions ─────────────────────────────────────────────────────────────
   const handleUploadResolution = async () => {
@@ -946,10 +969,10 @@ export default function AdminDashboard() {
     setModalMessage("");
     setShowEditResolutionModal(true);
   };
+  // Only one author per resolution — selecting a different member replaces
+  // the current pick instead of adding to it.
   const toggleEditResolutionOfficial = (id) =>
-    setEditResolutionSelectedOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
-    );
+    setEditResolutionSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
   const handleUpdateResolution = async () => {
     if (!editResolutionNumber || !editResolutionTitle || !editResolutionDate) {
       showModalMsg("All fields required!", "error");
@@ -1010,10 +1033,10 @@ export default function AdminDashboard() {
       showMsg("Error!", "error");
     }
   };
+  // Only one author per resolution — selecting a different member replaces
+  // the current pick instead of adding to it.
   const toggleResolutionOfficial = (id) =>
-    setSelectedResolutionOfficials((p) =>
-      p.includes(id) ? p.filter((x) => x !== id) : [...p, id]
-    );
+    setSelectedResolutionOfficials((p) => (p.includes(id) ? [] : [id]));
 
   // ─── Officials ────────────────────────────────────────────────────────────────
   const handleAddOfficial = async () => {
@@ -1376,6 +1399,105 @@ export default function AdminDashboard() {
     }
   };
 
+  // ─── Session Agendas ─────────────────────────────────────────────────────────
+  // No draft/review workflow (see routes/sessionAgendas.js) — a Secretary/
+  // Clerk upload is immediately live, so this is just plain create/edit/
+  // delete, no accept/vm-approve/publish steps like Ordinances/Resolutions/
+  // Session Minutes above.
+  const resetAgendaForm = () => {
+    setAgendaForm({
+      session_number: "",
+      session_date: "",
+      session_type: "regular",
+      venue: "",
+    });
+    setAgendaFile(null);
+  };
+  const handleAddAgenda = async () => {
+    if (!agendaForm.session_date) {
+      showModalMsg("Session date is required!", "error");
+      return;
+    }
+    if (!agendaFile) {
+      showModalMsg("Please upload a PDF or Word file!", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      Object.entries(agendaForm).forEach(([k, v]) => fd.append(k, v));
+      fd.append("file", agendaFile);
+      const res = await authFetch(`${API}/api/session-agendas/upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Session agenda posted!");
+        resetAgendaForm();
+        setShowAgendaModal(false);
+        fetchSessionAgendas();
+      } else showModalMsg(data.error || "Upload failed!", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const handleOpenEditAgenda = (a) => {
+    setEditingAgenda(a);
+    setEditAgendaForm({
+      session_number: a.session_number || "",
+      session_date: a.session_date ? a.session_date.split("T")[0] : "",
+      session_type: a.session_type || "regular",
+      venue: a.venue || "",
+    });
+    setEditAgendaFile(null);
+    setModalMessage("");
+    setShowEditAgendaModal(true);
+  };
+  const handleUpdateAgenda = async () => {
+    if (!editAgendaForm.session_date) {
+      showModalMsg("Session date is required!", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      Object.entries(editAgendaForm).forEach(([k, v]) => fd.append(k, v));
+      if (editAgendaFile) fd.append("file", editAgendaFile);
+      const res = await authFetch(`${API}/api/session-agendas/${editingAgenda.id}`, {
+        method: "PUT",
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg("Session agenda updated!");
+        setShowEditAgendaModal(false);
+        setEditingAgenda(null);
+        fetchSessionAgendas();
+      } else showModalMsg(data.error || "Update failed!", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const handleDeleteAgenda = async (id) => {
+    try {
+      const res = await authFetch(`${API}/api/session-agendas/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMsg("Session agenda deleted!");
+        fetchSessionAgendas();
+      } else showMsg(data.error || "Error!", "error");
+    } catch {
+      showMsg("Error!", "error");
+    }
+  };
+
   // ─── Announcements ────────────────────────────────────────────────────────────
   const resetAnnouncementForm = () =>
     setAnnouncementForm({
@@ -1512,7 +1634,7 @@ export default function AdminDashboard() {
       end_date: toLocalIso(r.end_date) || "",
       end_time: r.end_time || "09:00",
       all_day: !!r.all_day,
-      color: r.color || "#009439",
+      color: r.color || "#090446",
     });
     setShowEditEventModal(true);
   };
@@ -1609,6 +1731,10 @@ export default function AdminDashboard() {
   // — only Secretary/Clerk/Councilor can, via canManagePendingLegislative
   // and the Published-tab canEditLegislative).
   const canCreateLegislative = isSecretary || isClerk || isCouncilor || isViceMayor;
+  // Session Agenda has no draft/review workflow (see routes/sessionAgendas.js)
+  // and is scoped to only these two positions, not the wider four-position
+  // canCreateLegislative — Councilor/Vice-Mayor don't post the agenda.
+  const canManageSessionAgenda = isSecretary || isClerk;
   const canManageOfficials = isSecretary || isClerk;
 
   // "users"/"admins"/"archives" are gated for every position; "logs" is the
@@ -1623,6 +1749,7 @@ export default function AdminDashboard() {
     fetchingOrdinances ||
     fetchingOfficials ||
     fetchingMinutes ||
+    fetchingAgendas ||
     fetchingResolutions ||
     fetchingAnnouncements;
   // Narrower than pageLoading — only the fetches DashboardPage's own content
@@ -1664,6 +1791,11 @@ export default function AdminDashboard() {
     resetSessionForm();
     setShowSessionModal(true);
   };
+  const openAgendaModal = () => {
+    setModalMessage("");
+    resetAgendaForm();
+    setShowAgendaModal(true);
+  };
   const openAnnouncementModal = () => {
     setModalMessage("");
     resetAnnouncementForm();
@@ -1700,7 +1832,7 @@ export default function AdminDashboard() {
       {/* ── SIDEBAR ── */}
       <div
         className={`${styles.sidebar} ${
-          sidebarCollapsed ? styles.collapsed : ""
+          sidebarShowsCollapsed ? styles.collapsed : ""
         } ${mobileOpen ? styles.mobileOpen : ""}`}
         onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
@@ -1708,7 +1840,7 @@ export default function AdminDashboard() {
         <div className={styles.sidebarHeader}>
           <img src={logo} alt="Balilihan Seal" className={styles.logoCircle} />
           <div className={styles.logoTextWrap}>
-            <div className={styles.logoText}>SANGGUNIANG BAYAN OFFICE</div>
+            <div className={styles.logoText}>eLEGIS-BALILIHAN</div>
             <div className={styles.logoSub}>Admin Portal</div>
           </div>
         </div>
@@ -1732,7 +1864,7 @@ export default function AdminDashboard() {
           <div className={styles.navSection}>
             <button
               className={styles.navSectionHeader}
-              onClick={() => !sidebarCollapsed && setLegislativeOpen((v) => !v)}
+              onClick={() => !sidebarShowsCollapsed && setLegislativeOpen((v) => !v)}
             >
               <span className={styles.navSectionIcon}>
                 <ScrollText size={14} strokeWidth={1.8} />
@@ -1740,7 +1872,7 @@ export default function AdminDashboard() {
               <span className={styles.navSectionLabel}>
                 Legislative Records
               </span>
-              {!sidebarCollapsed && (
+              {!sidebarShowsCollapsed && (
                 <span className={styles.navSectionChevron}>
                   {legislativeOpen ? (
                     <ChevronDown size={13} />
@@ -1752,7 +1884,7 @@ export default function AdminDashboard() {
             </button>
             <div
               className={`${styles.navSectionItems} ${
-                legislativeOpen && !sidebarCollapsed
+                legislativeOpen && !sidebarShowsCollapsed
                   ? styles.navSectionItemsOpen
                   : ""
               }`}
@@ -1772,6 +1904,11 @@ export default function AdminDashboard() {
                   key: "sessions",
                   icon: <BookOpen size={17} strokeWidth={1.5} />,
                   label: "Session Minutes",
+                },
+                {
+                  key: "session_agendas",
+                  icon: <ClipboardList size={17} strokeWidth={1.5} />,
+                  label: "Session Agenda",
                 },
               ].map((t) => (
                 <button
@@ -1869,7 +2006,7 @@ export default function AdminDashboard() {
                 <button
                   className={styles.navSectionHeader}
                   onClick={() =>
-                    !sidebarCollapsed && setUserMgmtOpen((v) => !v)
+                    !sidebarShowsCollapsed && setUserMgmtOpen((v) => !v)
                   }
                 >
                   <span className={styles.navSectionIcon}>
@@ -1878,7 +2015,7 @@ export default function AdminDashboard() {
                   <span className={styles.navSectionLabel}>
                     User Management
                   </span>
-                  {!sidebarCollapsed && (
+                  {!sidebarShowsCollapsed && (
                     <span className={styles.navSectionChevron}>
                       {userMgmtOpen ? (
                         <ChevronDown size={13} />
@@ -1890,7 +2027,7 @@ export default function AdminDashboard() {
                 </button>
                 <div
                   className={`${styles.navSectionItems} ${
-                    userMgmtOpen && !sidebarCollapsed
+                    userMgmtOpen && !sidebarShowsCollapsed
                       ? styles.navSectionItemsOpen
                       : ""
                   }`}
@@ -2009,9 +2146,9 @@ export default function AdminDashboard() {
                 + Add Session
               </button>
             )}
-            {activeTab === "announcements" && isAdmin && (
-              <button className={styles.addBtn} onClick={openAnnouncementModal}>
-                + New Announcement
+            {activeTab === "session_agendas" && canManageSessionAgenda && (
+              <button className={styles.addBtn} onClick={openAgendaModal}>
+                + Upload Agenda
               </button>
             )}
             {activeTab === "logs" && isAdmin && (
@@ -2058,7 +2195,6 @@ export default function AdminDashboard() {
           <UsersPage
             users={users}
             totalUsers={totalUsersCount}
-            totalAdmins={totalAdminsCount}
             loading={fetchingUsers}
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditUser}
@@ -2158,6 +2294,15 @@ export default function AdminDashboard() {
             initialSubTab={activeTab === "sessions" ? subTabRequest : null}
           />
         )}
+        {activeTab === "session_agendas" && (
+          <SessionAgendaPage
+            agendas={sessionAgendas}
+            loading={fetchingAgendas}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditAgenda}
+            readOnly={!canManageSessionAgenda}
+          />
+        )}
         {activeTab === "announcements" && !fetchingAnnouncements && (
           <AnnouncementsPage
             announcements={announcements}
@@ -2179,9 +2324,6 @@ export default function AdminDashboard() {
         {activeTab === "calendar" && (
           <CalendarPage
             localEvents={localEvents}
-            phHolidays={phHolidays}
-            fetchingHolidays={fetchingHolidays}
-            holidaysError={holidaysError}
             showHolidays={showHolidays}
             setShowHolidays={setShowHolidays}
             onAddEvent={(dateStr) => {
@@ -2407,7 +2549,10 @@ export default function AdminDashboard() {
                 placeholder="Full Name"
                 value={newOfficial.full_name}
                 onChange={(e) =>
-                  setNewOfficial({ ...newOfficial, full_name: e.target.value })
+                  setNewOfficial({
+                    ...newOfficial,
+                    full_name: e.target.value.replace(/[0-9]/g, ""),
+                  })
                 }
               />
 
@@ -2592,7 +2737,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Full Name"
                 value={editOfficialName}
-                onChange={(e) => setEditOfficialName(e.target.value)}
+                onChange={(e) => setEditOfficialName(e.target.value.replace(/[0-9]/g, ""))}
               />
               <p className={styles.fieldHint} style={{ marginTop: 4 }}>
                 Position is set per term now — edit it from this member's
@@ -2761,7 +2906,7 @@ export default function AdminDashboard() {
                         borderRadius: 8,
                         border: "1px solid #e2e8f0",
                         background:
-                          term.status === "active" ? "#f0fff4" : "#f8fafc",
+                          term.status === "active" ? "#eef2ff" : "#f8fafc",
                         display: "flex",
                         alignItems: "flex-start",
                         justifyContent: "space-between",
@@ -3283,7 +3428,7 @@ export default function AdminDashboard() {
 
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag Council Members who passed this ordinance:
+                  Tag the Council Member who authored this ordinance:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
@@ -3474,7 +3619,7 @@ export default function AdminDashboard() {
               </div>
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag Council Members who passed this ordinance:
+                  Tag the Council Member who authored this ordinance:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
@@ -3682,7 +3827,7 @@ export default function AdminDashboard() {
 
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag Council Members who passed this resolution:
+                  Tag the Council Member who authored this resolution:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
@@ -3873,7 +4018,7 @@ export default function AdminDashboard() {
               </div>
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag Council Members who passed this resolution:
+                  Tag the Council Member who authored this resolution:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
@@ -4518,6 +4663,403 @@ export default function AdminDashboard() {
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateSession}
+                disabled={submitting}
+              >
+                {submitting ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Session Agenda */}
+      {showAgendaModal && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowAgendaModal(false);
+            resetAgendaForm();
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <ClipboardList size={18} strokeWidth={1.5} /> Upload Session
+                Agenda
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAgendaModal(false);
+                  resetAgendaForm();
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <div className={styles.sessionFormGrid}>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Number</label>
+                  <input
+                    className={styles.input}
+                    placeholder="e.g. 12th Regular Session"
+                    value={agendaForm.session_number}
+                    onChange={(e) =>
+                      setAgendaForm({
+                        ...agendaForm,
+                        session_number: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>
+                    Session Date <span style={{ color: "#e53e3e" }}>*</span>
+                  </label>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={agendaForm.session_date}
+                    onChange={(e) =>
+                      setAgendaForm({
+                        ...agendaForm,
+                        session_date: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Type</label>
+                  <select
+                    className={styles.input}
+                    value={agendaForm.session_type}
+                    onChange={(e) =>
+                      setAgendaForm({
+                        ...agendaForm,
+                        session_type: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="regular">Regular Session</option>
+                    <option value="special">Special Session</option>
+                  </select>
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Venue</label>
+                  <input
+                    className={styles.input}
+                    placeholder="e.g. Session Hall"
+                    value={agendaForm.venue}
+                    onChange={(e) =>
+                      setAgendaForm({ ...agendaForm, venue: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  id="agendaFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setAgendaFile(e.target.files[0])}
+                />
+                <label htmlFor="agendaFileInput" className={styles.fileLabel}>
+                  {agendaFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {agendaFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to choose
+                      file
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Accepted: PDF or Word (.doc/.docx) only — the system
+                  auto-detects which.
+                </p>
+              </div>
+              <MAlert />
+            </div>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowAgendaModal(false);
+                  resetAgendaForm();
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleAddAgenda}
+                disabled={submitting}
+              >
+                {submitting ? "Uploading..." : "Upload Agenda"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Session Agenda */}
+      {showEditAgendaModal && editingAgenda && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => {
+            setShowEditAgendaModal(false);
+            setEditingAgenda(null);
+            setModalMessage("");
+          }}
+        >
+          <div
+            className={`${styles.modal} ${styles.sessionModal}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+              overflow: "hidden",
+            }}
+          >
+            {/* ── Sticky header ── */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "20px 24px 16px",
+                borderBottom: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h2
+                className={styles.modalTitle}
+                style={{ margin: 0, fontSize: 18 }}
+              >
+                <Pencil size={16} strokeWidth={1.5} /> Edit Session Agenda
+              </h2>
+              <button
+                onClick={() => {
+                  setShowEditAgendaModal(false);
+                  setEditingAgenda(null);
+                  setModalMessage("");
+                }}
+                aria-label="Close modal"
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                  width: 32,
+                  height: 32,
+                  minWidth: 32,
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* ── Scrollable body ── */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "20px 24px",
+                overscrollBehavior: "contain",
+              }}
+            >
+              <div className={styles.sessionFormGrid}>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Number</label>
+                  <input
+                    className={styles.input}
+                    placeholder="e.g. 12th Regular Session"
+                    value={editAgendaForm.session_number}
+                    onChange={(e) =>
+                      setEditAgendaForm({
+                        ...editAgendaForm,
+                        session_number: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>
+                    Session Date <span style={{ color: "#e53e3e" }}>*</span>
+                  </label>
+                  <input
+                    className={styles.input}
+                    type="date"
+                    value={editAgendaForm.session_date}
+                    onChange={(e) =>
+                      setEditAgendaForm({
+                        ...editAgendaForm,
+                        session_date: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Session Type</label>
+                  <select
+                    className={styles.input}
+                    value={editAgendaForm.session_type}
+                    onChange={(e) =>
+                      setEditAgendaForm({
+                        ...editAgendaForm,
+                        session_type: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="regular">Regular Session</option>
+                    <option value="special">Special Session</option>
+                  </select>
+                </div>
+                <div className={styles.sessionFormCol}>
+                  <label className={styles.fieldLabel}>Venue</label>
+                  <input
+                    className={styles.input}
+                    placeholder="Venue"
+                    value={editAgendaForm.venue}
+                    onChange={(e) =>
+                      setEditAgendaForm({
+                        ...editAgendaForm,
+                        venue: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  id="editAgendaFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => setEditAgendaFile(e.target.files[0])}
+                />
+                <label
+                  htmlFor="editAgendaFileInput"
+                  className={styles.fileLabel}
+                >
+                  {editAgendaFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editAgendaFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to replace
+                      the file
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  Current file: {editingAgenda.filename}. Leave unchanged to
+                  keep it, or choose a new PDF/Word file to replace it.
+                </p>
+              </div>
+              <MAlert />
+            </div>
+
+            {/* ── Sticky footer ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                padding: "16px 24px 20px",
+                borderTop: "1px solid #f1f5f9",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                className={styles.cancelBtn}
+                onClick={() => {
+                  setShowEditAgendaModal(false);
+                  setEditingAgenda(null);
+                  setModalMessage("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.confirmBtn}
+                onClick={handleUpdateAgenda}
                 disabled={submitting}
               >
                 {submitting ? "Saving..." : "Save Changes"}
@@ -5204,6 +5746,8 @@ export default function AdminDashboard() {
               handleDeleteOfficial(deleteTarget.id);
             else if (deleteTarget.type === "session")
               handleDeleteSession(deleteTarget.id);
+            else if (deleteTarget.type === "session_agenda")
+              handleDeleteAgenda(deleteTarget.id);
             else if (deleteTarget.type === "announcement")
               handleDeleteAnnouncement(deleteTarget.id);
             else if (deleteTarget.type === "term")

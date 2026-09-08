@@ -67,7 +67,7 @@ router.post('/', verifyToken, async (req, res) => {
         end_date: end_date || start_date,
         end_time: all_day ? null : (end_time || null),
         all_day: !!all_day,
-        color: color || '#009439',
+        color: color || '#090446',
         is_admin_event: canManageOfficialEvents(req.user),
         created_by: userId,
       }])
@@ -135,7 +135,7 @@ router.put('/:id', verifyToken, async (req, res) => {
         end_date: end_date || start_date,
         end_time: all_day ? null : (end_time || null),
         all_day: !!all_day,
-        color: color || '#009439',
+        color: color || '#090446',
       })
       .eq('id', eventId)
       .select()

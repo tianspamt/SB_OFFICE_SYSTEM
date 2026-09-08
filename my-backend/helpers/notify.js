@@ -2,14 +2,14 @@ const supabase = require('../config/supabase')
 const { sendEmail } = require('./email')
 const { escapeHtml } = require('./utils')
 
-// Same green used for the dashboard's sidebar/header gradient (see
+// Same blue-violet gradient used for the dashboard's sidebar/header (see
 // AdminDashboard.module.css) — kept as the one source of truth so every
 // outbound email visually matches the app instead of drifting independently.
-const BRAND_GREEN = '#009439'
-const BRAND_GREEN_DARK = '#005822'
+const BRAND_PRIMARY = '#090446'
+const BRAND_PRIMARY_DARK = '#380075'
 
 // Shared visual shell for every outbound email (notifications, OTP, urgent
-// announcements) — a green header band with the office wordmark, a round
+// announcements) — a gradient header band with the office wordmark, a round
 // icon, headline, free-form body, and a footer note. `icon` is a single
 // emoji rather than an inline SVG: email clients (Outlook's Word rendering
 // engine especially) have unreliable SVG/flexbox support, so an emoji is the
@@ -21,16 +21,16 @@ const emailShell = ({
   footerNote = "you're receiving this because you have email notifications enabled.",
 }) => `
   <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;background:#ffffff;border:1px solid #e0e0e0;border-radius:16px;overflow:hidden;">
-    <div style="background:linear-gradient(135deg,${BRAND_GREEN},${BRAND_GREEN_DARK});padding:26px 32px;text-align:center;">
+    <div style="background:linear-gradient(135deg,${BRAND_PRIMARY},${BRAND_PRIMARY_DARK});padding:26px 32px;text-align:center;">
       <p style="margin:0;font-size:19px;font-weight:800;color:#ffffff;">Office of Sangguniang Bayan</p>
-      <p style="margin:2px 0 0;font-size:11px;color:#d7f5df;letter-spacing:1px;text-transform:uppercase;">Municipality of Balilihan, Bohol</p>
+      <p style="margin:2px 0 0;font-size:11px;color:#dbeafe;letter-spacing:1px;text-transform:uppercase;">Municipality of Balilihan, Bohol</p>
     </div>
     <div style="padding:36px 32px 8px;text-align:center;">
-      <div style="width:60px;height:60px;line-height:60px;margin:0 auto 18px;border-radius:50%;background:#eafaf1;font-size:26px;text-align:center;">${icon}</div>
+      <div style="width:60px;height:60px;line-height:60px;margin:0 auto 18px;border-radius:50%;background:#eef2ff;font-size:26px;text-align:center;">${icon}</div>
       <h1 style="margin:0 0 14px;font-size:21px;color:#1a365d;">${escapeHtml(heading)}</h1>
       <div style="color:#4a5568;font-size:14px;line-height:1.7;text-align:left;padding-bottom:28px;">${bodyHtml}</div>
     </div>
-    <div style="background:#f7fdf9;padding:16px 32px;text-align:center;border-top:1px solid #eef7f1;">
+    <div style="background:#f5f3ff;padding:16px 32px;text-align:center;border-top:1px solid #ede9fe;">
       <p style="margin:0;color:#9ba7ac;font-size:11px;">Sangguniang Bayan Office System — ${footerNote}</p>
     </div>
   </div>
@@ -100,5 +100,5 @@ async function notifyAllStaff(fields) {
 
 module.exports = {
   notify, notifyMany, notifyByPosition, notifyAllStaff,
-  notificationEmailHtml, emailShell, BRAND_GREEN, BRAND_GREEN_DARK,
+  notificationEmailHtml, emailShell, BRAND_PRIMARY, BRAND_PRIMARY_DARK,
 }

@@ -17,7 +17,7 @@
 import { CheckCircle2, AlertCircle, X } from "lucide-react";
 
 const TYPE_STYLES = {
-  success: { bg: "#f0fff4", border: "#9ae6b4", color: "#276749" },
+  success: { bg: "#eef2ff", border: "#a5b4fc", color: "#380075" },
   error: { bg: "#fff5f5", border: "#fc8181", color: "#c53030" },
 };
 

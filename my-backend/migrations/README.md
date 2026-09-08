@@ -46,6 +46,7 @@ with real data in it.
 | 015 | `015_add_notifications.sql` | Adds `users.email_notifications` (default true), `created_by` (FK) on `ordinances`/`resolutions`/`session_minutes`, and the `notifications` table backing the two-channel (email + in-app) notification workflow — see `helpers/notify.js`. |
 | 016 | `016_add_calendar_reminder_sent.sql` | Adds `calendar_events.reminder_sent` (default false), so the daily 8am reminder job (`helpers/reminderJob.js`) doesn't re-notify the same event twice. |
 | 017 | `017_drop_notifications_table.sql` | Drops the `notifications` table added in 015 — the workflow moved to email-only, so there's no in-app bell/list backing it anymore. `users.email_notifications` and `calendar_events.reminder_sent` stay. |
+| 018 | `018_create_session_agendas_table.sql` | Adds `session_agendas` (session_number, session_date, session_type, venue, filename/filetype/filepath, created_by) for the new Session Agenda module — Secretary/Clerk upload a PDF or Word agenda for an upcoming session. Unlike ordinances/resolutions/session_minutes, there's no status/review-workflow column: an upload is immediately live, and deletes are a plain hard delete rather than going through the `archives` table. |
 
 Also required once, outside the numbered files (a raw `CREATE TABLE` in the
 SQL Editor doesn't inherit the grants Supabase's Table Editor UI applies

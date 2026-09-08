@@ -5,7 +5,7 @@ const supabase = require('../config/supabase')
 const { verifyToken, adminOnly } = require('../middleware/auth')
 const { logActivity } = require('../helpers/logger')
 const { sendEmail } = require('../helpers/email')
-const { emailShell, BRAND_GREEN_DARK } = require('../helpers/notify')
+const { emailShell, BRAND_PRIMARY_DARK } = require('../helpers/notify')
 const { escapeHtml } = require('../helpers/utils')
 
 const AUTHOR_SELECT = '*, author:users!created_by(name, photo, position, role), announcement_reactions(emoji, user_id), announcement_reads(user_id, reader:users!user_id(name))'
@@ -34,9 +34,10 @@ const assertPinAllowed = async () => {
 // email_notifications opt-out, same as every other trigger in the app (the
 // old version BCC'd every active user regardless, which was an inconsistency
 // rather than a deliberate "urgent bypasses opt-out" design). Urgent posts
-// get a bold dark-green "URGENT" pill above the title instead of the old red
-// badge — kept off red so it stays on-brand with the rest of the system's
-// green, but still visually distinct from a normal announcement. Fire-and-
+// get a bold "URGENT" pill (in the brand's dark violet) above the title
+// instead of the old red badge — kept off red so it stays on-brand with the
+// rest of the system, but still visually distinct from a normal
+// announcement. Fire-and-
 // forget from the route handlers below — a slow/failed email should never
 // block or fail the announcement itself.
 const notifyAnnouncement = async (announcement) => {
@@ -55,7 +56,7 @@ const notifyAnnouncement = async (announcement) => {
     const bodyHtml = `
       ${isUrgent ? `
         <div style="text-align:center;margin-bottom:16px;">
-          <span style="display:inline-block;background:${BRAND_GREEN_DARK};color:#fff;font-weight:bold;font-size:11px;letter-spacing:1px;padding:5px 14px;border-radius:20px;">URGENT ANNOUNCEMENT</span>
+          <span style="display:inline-block;background:${BRAND_PRIMARY_DARK};color:#fff;font-weight:bold;font-size:11px;letter-spacing:1px;padding:5px 14px;border-radius:20px;">URGENT ANNOUNCEMENT</span>
         </div>
       ` : ''}
       <span style="white-space:pre-wrap;">${escapeHtml(announcement.body)}</span>

@@ -18,6 +18,7 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
+  Presentation,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
 import { pendingQueryKey, fetchPendingList, RESOLUTION_CATEGORIES } from "./AdminContext";
@@ -38,6 +39,7 @@ import {
   StatsRow,
   StatusBadge,
   RecordListSkeleton,
+  PresentOverlay,
 } from "./LegislativeComponents";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
@@ -73,6 +75,7 @@ export default function ResolutionsPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
+  const [presentTarget, setPresentTarget] = useState(null);
   const queryClient = useQueryClient();
   const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
   const { data: pendingResolutions = [], isLoading: fetchingPending } = useQuery({
@@ -620,6 +623,13 @@ export default function ResolutionsPage({
                     <FileText size={16} />
                     Open PDF Document
                   </a>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                    onClick={() => setPresentTarget(viewTarget)}
+                  >
+                    <Presentation size={16} />
+                    Present
+                  </button>
                 </div>
               )}
 
@@ -652,6 +662,13 @@ export default function ResolutionsPage({
                     <Download size={16} />
                     Download Word Document
                   </button>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                    onClick={() => setPresentTarget(viewTarget)}
+                  >
+                    <Presentation size={16} />
+                    Present
+                  </button>
                 </div>
               )}
 
@@ -662,6 +679,15 @@ export default function ResolutionsPage({
                     alt={viewTarget.title}
                     className={lStyles.viewModalImagePreview}
                   />
+                  <div className={lStyles.viewModalFileActions}>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                      onClick={() => setPresentTarget(viewTarget)}
+                    >
+                      <Presentation size={16} />
+                      Present
+                    </button>
+                  </div>
                   <div className={lStyles.viewModalOcrLabel}>
                     <Image size={14} />
                     Extracted Text (OCR)
@@ -914,6 +940,10 @@ export default function ResolutionsPage({
             </div>
           </div>
         </div>
+      )}
+
+      {presentTarget && (
+        <PresentOverlay record={presentTarget} onClose={() => setPresentTarget(null)} />
       )}
     </>
   );

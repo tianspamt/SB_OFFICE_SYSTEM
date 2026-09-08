@@ -14,12 +14,13 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
+  MoreVertical,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import ConfirmModal from "./ConfirmModal";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
-import { API, authFetch } from "./AdminContext";
+import { API, authFetch, useIsMobile } from "./AdminContext";
 
 const MODULE_OPTIONS = [
   { value: "all", label: "All Modules" },
@@ -70,6 +71,11 @@ export default function ArchivesPage() {
   const [selected, setSelected] = useState(() => new Set());
   const [confirmTarget, setConfirmTarget] = useState(null); // { row, action: "restore" | "delete" }
   const [bulkAction, setBulkAction] = useState(null); // "restore" | "delete" | null
+  const isMobile = useIsMobile();
+  // Which row's mobile "more details" menu (date/archived-by/actions) is
+  // open — the row list only has room for the type + name at this width
+  // (see the isMobile branch below), so everything else lives behind this.
+  const [openMenuKey, setOpenMenuKey] = useState(null);
   const [processing, setProcessing] = useState(false);
   const { toasts, showMsg, dismissToast } = useToasts();
   const selectAllRef = useRef(null);
@@ -273,8 +279,8 @@ export default function ArchivesPage() {
         </div>
 
         {selected.size > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "6px 10px" }}>
-            <span style={{ fontSize: 13, color: "#166534", fontWeight: 600 }}>{selected.size} selected</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#eef2ff", border: "1px solid #a5b4fc", borderRadius: 8, padding: "6px 10px" }}>
+            <span style={{ fontSize: 13, color: "#380075", fontWeight: 600 }}>{selected.size} selected</span>
             <button
               className={styles.addBtn}
               style={{ padding: "5px 10px", fontSize: 12 }}
@@ -285,7 +291,10 @@ export default function ArchivesPage() {
             {selectedDeletable.length > 0 && (
               <button
                 className={styles.deleteBtn}
-                style={{ padding: "5px 10px", fontSize: 12 }}
+                style={{
+                  padding: "5px 10px", fontSize: 12,
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                }}
                 onClick={() => setBulkAction("delete")}
               >
                 <Trash2 size={12} /> Delete Permanently ({selectedDeletable.length})
@@ -320,6 +329,90 @@ export default function ArchivesPage() {
         </div>
       ) : (
         <div className={styles.tableCard}>
+          {isMobile ? (
+            <div className={styles.mobileRowList}>
+              {rows.length === 0 ? (
+                <div className={styles.empty}>No archived records.</div>
+              ) : (
+                rows.map((row) => {
+                  const Icon = ENTITY_ICONS[row.entity_type] || FileText;
+                  const key = rowKey(row);
+                  const menuOpen = openMenuKey === key;
+                  return (
+                    <div key={key} className={styles.mobileRowCard}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(key)}
+                        onChange={() => toggleRow(row)}
+                      />
+                      <div className={styles.mobileRowMain}>
+                        <span className={styles.mobileRowMeta}>
+                          <Icon size={12} /> {ENTITY_LABELS[row.entity_type] || row.entity_type}
+                        </span>
+                        <span className={styles.mobileRowTitle}>{row.title || "—"}</span>
+                      </div>
+                      <button
+                        className={styles.mobileIconBtn}
+                        onClick={() => setConfirmTarget({ row, action: "restore" })}
+                        aria-label="Restore"
+                        title="Restore"
+                      >
+                        <RotateCcw size={15} />
+                      </button>
+                      {row.source === "content" ? (
+                        <button
+                          className={`${styles.mobileIconBtn} ${styles.mobileIconBtnDanger}`}
+                          onClick={() => setConfirmTarget({ row, action: "delete" })}
+                          aria-label="Delete permanently"
+                          title="Delete permanently"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      ) : (
+                        // Same footprint as the Delete button above, just
+                        // invisible — without it, Restore/⋮ shift left on
+                        // rows that don't get a Delete button (users/
+                        // officials), so they no longer line up column-for-
+                        // column with rows that do.
+                        <div className={styles.mobileIconBtnSpacer} aria-hidden="true" />
+                      )}
+                      <div style={{ position: "relative" }}>
+                        <button
+                          className={styles.mobileMenuBtn}
+                          onClick={() => setOpenMenuKey(menuOpen ? null : key)}
+                          aria-label="More details"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        {menuOpen && (
+                          <>
+                            <div
+                              className={styles.mobileMenuBackdrop}
+                              onClick={() => setOpenMenuKey(null)}
+                            />
+                            <div className={styles.mobileMenu}>
+                              <div className={styles.mobileMenuRow}>
+                                <span>Archived</span>
+                                <span>
+                                  {row.archived_at
+                                    ? new Date(row.archived_at).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })
+                                    : "—"}
+                                </span>
+                              </div>
+                              <div className={styles.mobileMenuRow}>
+                                <span>By</span>
+                                <span>{row.archived_by_name || "—"}</span>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
           <table className={styles.table}>
             <thead>
               <tr>
@@ -344,7 +437,7 @@ export default function ArchivesPage() {
                     Archived
                     <span style={{
                       display: "inline-flex", alignItems: "center", gap: 2,
-                      background: "#fff", color: "#009439", fontWeight: 700, fontSize: 10.5,
+                      background: "#fff", color: "#090446", fontWeight: 700, fontSize: 10.5,
                       textTransform: "none", borderRadius: 20, padding: "2px 7px",
                     }}>
                       {sort === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
@@ -398,9 +491,14 @@ export default function ArchivesPage() {
                         {row.source === "content" && (
                           <button
                             className={styles.deleteBtn}
+                            style={{
+                              padding: "6px 10px", fontSize: 12,
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              whiteSpace: "nowrap",
+                            }}
                             onClick={() => setConfirmTarget({ row, action: "delete" })}
                           >
-                            <Trash2 size={13} /> Delete Permanently
+                            <Trash2 size={13} /> Delete
                           </button>
                         )}
                       </div>
@@ -410,6 +508,7 @@ export default function ArchivesPage() {
               })}
             </tbody>
           </table>
+          )}
 
           {totalPages > 1 && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
