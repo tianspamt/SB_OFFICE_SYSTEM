@@ -14,6 +14,7 @@ import {
   X,
   Upload,
   Send,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Presentation,
@@ -39,6 +40,7 @@ import {
   RecordListSkeleton,
   PresentOverlay,
 } from "./LegislativeComponents";
+import { ModalAlert } from "./AdminComponents";
 
 // Published records are paginated server-side (see GET /api/session-minutes'
 // opt-in page/limit) instead of fetching every session ever recorded — this
@@ -651,6 +653,7 @@ export default function SessionsPage({
           className={lStyles.viewModalOverlay}
           onClick={() => setViewTarget(null)}
         >
+          <ModalAlert message={reviewError} type="error" />
           <div
             className={lStyles.viewModal}
             onClick={(e) => e.stopPropagation()}
@@ -734,6 +737,18 @@ export default function SessionsPage({
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className={lStyles.viewModalDivider} />
+
+              <div className={lStyles.viewModalFileActions}>
+                <button
+                  className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                  onClick={() => handleOpenPresent(viewTarget)}
+                >
+                  <Presentation size={16} />
+                  Present
+                </button>
               </div>
 
               <div className={lStyles.viewModalDivider} />
@@ -915,14 +930,6 @@ export default function SessionsPage({
                     </div>
                   )}
 
-                  {reviewError && (
-                    <div
-                      style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}
-                    >
-                      {reviewError}
-                    </div>
-                  )}
-
                   <div
                     className={lStyles.viewModalFileActions}
                     style={{ marginTop: 16 }}
@@ -956,11 +963,11 @@ export default function SessionsPage({
                     {isViceMayor &&
                       viewTarget.status === "ready_to_publish" && (
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          className={lStyles.pillApprove}
                           disabled={reviewSubmitting}
                           onClick={() => handleVMApprove(viewTarget.id)}
                         >
-                          ✅ Approve
+                          <CheckCircle2 size={16} /> Approve
                         </button>
                       )}
 
@@ -976,21 +983,6 @@ export default function SessionsPage({
                   </div>
                 </>
               )}
-            </div>
-
-            <div className={lStyles.viewModalFooter}>
-              <button
-                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnPrimary}`}
-                onClick={() => handleOpenPresent(viewTarget)}
-              >
-                <Presentation size={13} /> Present
-              </button>
-              <button
-                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
-                onClick={() => setViewTarget(null)}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>

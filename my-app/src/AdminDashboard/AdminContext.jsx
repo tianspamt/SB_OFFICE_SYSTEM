@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── API Base URL ──────────────────────────────────────────────────────────────
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -28,6 +28,35 @@ export function useIsMobile(breakpoint = MOBILE_BREAKPOINT) {
     return () => mq.removeEventListener("change", handler);
   }, [breakpoint]);
   return isMobile;
+}
+
+// ─── Modal form-error banner ────────────────────────────────────────────────
+// Backs a modal's blocking validation/submit error — rendered via
+// <ModalAlert> (AdminComponents.jsx) as a fixed banner pinned to the top of
+// the viewport, so it's seen immediately even on a long scrollable form,
+// instead of sitting inline at the bottom where it's invisible until
+// scrolled to. Auto-clears itself after 5s so callers don't each need to
+// remember their own timer (and don't leave a stale timer clearing a
+// *different*, newer error out from under it).
+const MODAL_ERROR_VISIBLE_MS = 5000;
+export function useModalError() {
+  const [error, setErrorState] = useState("");
+  const timerRef = useRef(null);
+
+  const showError = useCallback((msg) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setErrorState(msg);
+    timerRef.current = setTimeout(() => setErrorState(""), MODAL_ERROR_VISIBLE_MS);
+  }, []);
+
+  const clearError = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setErrorState("");
+  }, []);
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  return [error, showError, clearError];
 }
 
 // ─── Error helper ──────────────────────────────────────────────────────────────

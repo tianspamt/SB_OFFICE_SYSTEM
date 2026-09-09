@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
 import ConfirmModal from "../ConfirmModal";
+import { ModalAlert } from "../AdminComponents";
+import { useModalError } from "../AdminContext";
 import { useTrivia } from "./useTrivia";
 
 export function TriviaManager({ isAdmin = false, showMsg }) {
@@ -19,7 +21,7 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
   const [editTarget, setEditTarget] = useState(null);
   const [factText, setFactText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [modalError, setModalError] = useState("");
+  const [modalError, showModalError, clearModalError] = useModalError();
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -27,23 +29,23 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
   const openAdd = () => {
     setEditTarget(null);
     setFactText("");
-    setModalError("");
+    clearModalError();
     setShowModal(true);
   };
   const openEdit = (f) => {
     setEditTarget(f);
     setFactText(f.fact_text);
-    setModalError("");
+    clearModalError();
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!factText.trim()) {
-      setModalError("Fact text is required.");
+      showModalError("Fact text is required.");
       return;
     }
     setSaving(true);
-    setModalError("");
+    clearModalError();
     try {
       await saveFact(editTarget, {
         fact_text: factText.trim(),
@@ -52,7 +54,7 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
       showMsg?.(editTarget ? "Trivia fact updated!" : "Trivia fact added!");
       setShowModal(false);
     } catch (err) {
-      setModalError(err.message || "Something went wrong.");
+      showModalError(err.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -81,6 +83,7 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
 
   return (
     <div>
+      <ModalAlert message={modalError} type="error" />
       <p
         style={{
           fontSize: 14,
@@ -201,16 +204,8 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
                 value={factText}
                 onChange={(e) => setFactText(e.target.value)}
               />
-              {modalError && (
-                <div className={styles.modalError}>
-                  <AlertCircle size={14} /> {modalError}
-                </div>
-              )}
             </div>
             <div className={styles.modalFooter}>
-              <button type="button" className={styles.cancelBtn} onClick={() => setShowModal(false)}>
-                Cancel
-              </button>
               <button
                 type="button"
                 className={styles.saveBtn}

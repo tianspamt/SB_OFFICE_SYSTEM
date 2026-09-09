@@ -439,7 +439,7 @@ export default function AdminDashboard() {
   const showModalMsg = (msg, type = "success") => {
     setModalMessage(msg);
     setModalMessageType(type);
-    setTimeout(() => setModalMessage(""), 3500);
+    setTimeout(() => setModalMessage(""), 5000);
   };
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -1731,9 +1731,11 @@ export default function AdminDashboard() {
   // — only Secretary/Clerk/Councilor can, via canManagePendingLegislative
   // and the Published-tab canEditLegislative).
   const canCreateLegislative = isSecretary || isClerk || isCouncilor || isViceMayor;
-  // Session Agenda has no draft/review workflow (see routes/sessionAgendas.js)
-  // and is scoped to only these two positions, not the wider four-position
-  // canCreateLegislative — Councilor/Vice-Mayor don't post the agenda.
+  // Session Agenda has no draft/review workflow (see routes/sessionAgendas.js).
+  // Uploading is open to all four positions — any of them may need to post
+  // the agenda ahead of a session — but editing/deleting an already-posted
+  // agenda stays Secretary/Clerk only, same as canEditLegislative.
+  const canUploadSessionAgenda = isSecretary || isClerk || isViceMayor || isCouncilor;
   const canManageSessionAgenda = isSecretary || isClerk;
   const canManageOfficials = isSecretary || isClerk;
 
@@ -1758,10 +1760,6 @@ export default function AdminDashboard() {
   // soon as its own data is in, not whenever any unrelated tab is still loading.
   const dashboardLoading =
     fetchingOrdinances || fetchingResolutions || fetchingMinutes || fetchingAnnouncements;
-
-  const MAlert = () => (
-    <ModalAlert message={modalMessage} type={modalMessageType} />
-  );
 
   // ── Quick-action openers ── shared by the sidebar "+ Add" buttons and the
   // Dashboard's Quick Actions panel, so number-suggestion logic lives in one place.
@@ -1806,6 +1804,7 @@ export default function AdminDashboard() {
   return (
     <div className={styles.container}>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ModalAlert message={modalMessage} type={modalMessageType} />
 
       <div
         className={`${styles.mobileBackdrop} ${
@@ -1841,7 +1840,7 @@ export default function AdminDashboard() {
           <img src={logo} alt="Balilihan Seal" className={styles.logoCircle} />
           <div className={styles.logoTextWrap}>
             <div className={styles.logoText}>eLEGIS-BALILIHAN</div>
-            <div className={styles.logoSub}>Admin Portal</div>
+            <div className={styles.logoSub}>Office of Sangguniang Bayan</div>
           </div>
         </div>
         <nav className={styles.nav}>
@@ -2146,7 +2145,7 @@ export default function AdminDashboard() {
                 + Add Session
               </button>
             )}
-            {activeTab === "session_agendas" && canManageSessionAgenda && (
+            {activeTab === "session_agendas" && canUploadSessionAgenda && (
               <button className={styles.addBtn} onClick={openAgendaModal}>
                 + Upload Agenda
               </button>
@@ -2376,8 +2375,6 @@ export default function AdminDashboard() {
           onFieldChange={(field, value) => setNewAdmin({ ...newAdmin, [field]: value })}
           photo={newAdminPhoto}
           onPhotoChange={setNewAdminPhoto}
-          modalMessage={modalMessage}
-          modalMessageType={modalMessageType}
           submitting={submitting}
           submitLabel="Add Admin"
           submittingLabel="Adding..."
@@ -2398,8 +2395,6 @@ export default function AdminDashboard() {
           onFieldChange={(field, value) => setNewUser({ ...newUser, [field]: value })}
           photo={newUserPhoto}
           onPhotoChange={setNewUserPhoto}
-          modalMessage={modalMessage}
-          modalMessageType={modalMessageType}
           submitting={submitting}
           submitLabel="Add User"
           submittingLabel="Adding..."
@@ -2422,8 +2417,6 @@ export default function AdminDashboard() {
           onPhotoChange={setEditUserPhoto}
           currentPhotoUrl={editingUser.photo}
           excludeUserId={editingUser.id}
-          modalMessage={modalMessage}
-          modalMessageType={modalMessageType}
           submitting={submitting}
           submitLabel="Save Changes"
           submittingLabel="Saving..."
@@ -2621,7 +2614,6 @@ export default function AdminDashboard() {
                 />
               </div>
 
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -2639,15 +2631,6 @@ export default function AdminDashboard() {
                 zIndex: 2,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowOfficialModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleAddOfficial}
@@ -2769,7 +2752,6 @@ export default function AdminDashboard() {
                   <p className={styles.fileHint}>Current photo on file</p>
                 )}
               </div>
-              <MAlert />
             </div>
             <div
               style={{
@@ -2782,16 +2764,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditOfficialModal(false);
-                  setEditingOfficial(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateOfficial}
@@ -2814,6 +2786,13 @@ export default function AdminDashboard() {
             className={styles.profileModal}
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              className={styles.profileModalCloseBtn}
+              onClick={() => setShowOfficialProfile(false)}
+              aria-label="Close modal"
+            >
+              <X size={16} />
+            </button>
             <div className={styles.profileHeader}>
               {selectedOfficialProfile.photo ? (
                 <img
@@ -2875,13 +2854,15 @@ export default function AdminDashboard() {
                   <History size={14} strokeWidth={1.5} /> Term History (
                   {(selectedOfficialProfile.terms || []).length})
                 </h3>
-                <button
-                  className={styles.addBtn}
-                  style={{ fontSize: 11, padding: "4px 10px" }}
-                  onClick={() => handleOpenAddTerm(selectedOfficialProfile.id)}
-                >
-                  + Add Term
-                </button>
+                {canManageOfficials && (
+                  <button
+                    className={styles.addBtn}
+                    style={{ fontSize: 11, padding: "4px 10px" }}
+                    onClick={() => handleOpenAddTerm(selectedOfficialProfile.id)}
+                  >
+                    + Add Term
+                  </button>
+                )}
               </div>
               {(selectedOfficialProfile.terms || []).length === 0 ? (
                 <p
@@ -2962,31 +2943,33 @@ export default function AdminDashboard() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                        <button
-                          className={styles.editBtn}
-                          style={{ fontSize: 11, padding: "3px 8px" }}
-                          onClick={() =>
-                            handleOpenEditTerm(selectedOfficialProfile.id, term)
-                          }
-                        >
-                          <Pencil size={11} /> Edit
-                        </button>
-                        <button
-                          className={styles.deleteBtn}
-                          style={{ fontSize: 11, padding: "3px 8px" }}
-                          onClick={() =>
-                            setDeleteTarget({
-                              id: term.id,
-                              type: "term",
-                              name: term.term_period,
-                              memberId: selectedOfficialProfile.id,
-                            })
-                          }
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </div>
+                      {canManageOfficials && (
+                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                          <button
+                            className={styles.editBtn}
+                            style={{ fontSize: 11, padding: "3px 8px" }}
+                            onClick={() =>
+                              handleOpenEditTerm(selectedOfficialProfile.id, term)
+                            }
+                          >
+                            <Pencil size={11} /> Edit
+                          </button>
+                          <button
+                            className={styles.deleteBtn}
+                            style={{ fontSize: 11, padding: "3px 8px" }}
+                            onClick={() =>
+                              setDeleteTarget({
+                                id: term.id,
+                                type: "term",
+                                name: term.term_period,
+                                memberId: selectedOfficialProfile.id,
+                              })
+                            }
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -3037,14 +3020,6 @@ export default function AdminDashboard() {
                   </div>
                 ))
               )}
-            </div>
-            <div className={styles.modalBtns}>
-              <button
-                className={styles.confirmBtn}
-                onClick={() => setShowOfficialProfile(false)}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>
@@ -3123,7 +3098,6 @@ export default function AdminDashboard() {
                 setForm={setTermForm}
                 styles={styles}
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -3136,15 +3110,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAddTermModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleSaveTerm}
@@ -3230,7 +3195,6 @@ export default function AdminDashboard() {
                 setForm={setTermForm}
                 styles={styles}
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -3243,15 +3207,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditTermModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateTerm}
@@ -3437,7 +3392,6 @@ export default function AdminDashboard() {
                   styles={styles}
                 />
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -3452,22 +3406,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowOrdinanceModal(false);
-                  setOrdinanceFile(null);
-                  setOrdinanceNumber("");
-                  setOrdinanceTitle("");
-                  setOrdinanceDate("");
-                  setSelectedOfficials([]);
-                  setUploadType("");
-                  setModalMessage("");
-                  lastOrdinanceSuggestion.current = "";
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUploadOrdinance}
@@ -3628,7 +3566,6 @@ export default function AdminDashboard() {
                   styles={styles}
                 />
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -3643,16 +3580,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditOrdinanceModal(false);
-                  setEditingOrdinance(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateOrdinance}
@@ -3836,7 +3763,6 @@ export default function AdminDashboard() {
                   styles={styles}
                 />
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -3851,22 +3777,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowResolutionModal(false);
-                  setResolutionFile(null);
-                  setResolutionNumber("");
-                  setResolutionTitle("");
-                  setResolutionDate("");
-                  setResolutionCategory("");
-                  setSelectedResolutionOfficials([]);
-                  setModalMessage("");
-                  lastResolutionSuggestion.current = "";
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUploadResolution}
@@ -4027,7 +3937,6 @@ export default function AdminDashboard() {
                   styles={styles}
                 />
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -4042,16 +3951,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditResolutionModal(false);
-                  setEditingResolution(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateResolution}
@@ -4151,12 +4050,6 @@ export default function AdminDashboard() {
                 }}
               >
                 <Copy size={13} /> Copy Text
-              </button>
-              <button
-                className={styles.confirmBtn}
-                onClick={() => setShowTextModal(false)}
-              >
-                Close
               </button>
             </div>
           </div>
@@ -4431,7 +4324,6 @@ export default function AdminDashboard() {
                   </div>
                 </>
               )}
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -4446,16 +4338,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowSessionModal(false);
-                  resetSessionForm();
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleAddSession}
@@ -4635,7 +4517,6 @@ export default function AdminDashboard() {
                 }
                 rows={8}
               />
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -4650,16 +4531,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditSessionModal(false);
-                  setEditingSession(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateSession}
@@ -4831,7 +4702,6 @@ export default function AdminDashboard() {
                   auto-detects which.
                 </p>
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -4846,16 +4716,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAgendaModal(false);
-                  resetAgendaForm();
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleAddAgenda}
@@ -5032,7 +4892,6 @@ export default function AdminDashboard() {
                   keep it, or choose a new PDF/Word file to replace it.
                 </p>
               </div>
-              <MAlert />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -5047,16 +4906,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditAgendaModal(false);
-                  setEditingAgenda(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateAgenda}
@@ -5251,7 +5100,6 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -5264,16 +5112,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowAnnouncementModal(false);
-                  resetAnnouncementForm();
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleAddAnnouncement}
@@ -5465,7 +5303,6 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -5478,16 +5315,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditAnnouncementModal(false);
-                  setEditingAnnouncement(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateAnnouncement}
@@ -5573,7 +5400,6 @@ export default function AdminDashboard() {
                 setForm={setLocalEventForm}
                 styles={styles}
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -5586,15 +5412,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowLocalEventModal(false);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleSaveLocalEvent}
@@ -5682,7 +5499,6 @@ export default function AdminDashboard() {
                 setForm={setEditEventForm}
                 styles={styles}
               />
-              <MAlert />
             </div>
             <div
               style={{
@@ -5695,16 +5511,6 @@ export default function AdminDashboard() {
                 flexShrink: 0,
               }}
             >
-              <button
-                className={styles.cancelBtn}
-                onClick={() => {
-                  setShowEditEventModal(false);
-                  setEditingEvent(null);
-                  setModalMessage("");
-                }}
-              >
-                Cancel
-              </button>
               <button
                 className={styles.confirmBtn}
                 onClick={handleUpdateEvent}

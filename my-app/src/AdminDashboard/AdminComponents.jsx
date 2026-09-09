@@ -58,16 +58,45 @@ export const TermStatusBadge = ({ status }) => {
 };
 
 // ─── Modal Alert ──────────────────────────────────────────────────────────────
+// Fixed-position banner, not inline form content — a modal's own state (like
+// modalMessage) is shared across every field on the form, so an error tucked
+// at the bottom of a long scrollable form is invisible until the user
+// scrolls all the way down. Pinning it to the top of the viewport instead
+// means it's seen the instant it appears, no matter how tall the form is or
+// where the user has scrolled to.
 export const ModalAlert = ({ message, type }) => message ? (
-  <div style={{
-    display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
-    borderRadius: 8, marginBottom: 14, fontSize: 13,
-    background: type === "error" ? "#fff5f5" : "#eef2ff",
-    border: `1px solid ${type === "error" ? "#feb2b2" : "#a5b4fc"}`,
-    color: type === "error" ? "#c53030" : "#380075",
-  }}>
-    <AlertCircle size={14} />{message}
-  </div>
+  <>
+    <style>{`
+      @keyframes modalAlertSlideDown {
+        from { opacity: 0; transform: translate(-50%, -10px); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+      }
+    `}</style>
+    <div style={{
+      position: "fixed",
+      top: 20,
+      left: "50%",
+      transform: "translateX(-50%)",
+      zIndex: 10001,
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "13px 20px",
+      borderRadius: 12,
+      fontSize: 14,
+      fontWeight: 600,
+      maxWidth: "min(480px, calc(100vw - 32px))",
+      background: type === "error"
+        ? "linear-gradient(135deg, #ff6b6b, #ee3b3b)"
+        : "linear-gradient(135deg, #090446, #380075)",
+      color: "#fff",
+      boxShadow: type === "error"
+        ? "0 8px 24px rgba(238, 59, 59, 0.4)"
+        : "0 8px 24px rgba(9, 4, 70, 0.3)",
+      animation: "modalAlertSlideDown 0.25s ease-out",
+    }}>
+      <AlertCircle size={16} style={{ flexShrink: 0 }} />
+      <span>{message}</span>
+    </div>
+  </>
 ) : null;
 
 // ─── Term Form Fields ─────────────────────────────────────────────────────────

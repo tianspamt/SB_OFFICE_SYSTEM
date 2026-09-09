@@ -16,6 +16,8 @@ import {
 import styles from "./AdminDashboard.module.css";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
+import { useModalError } from "./AdminContext";
+import { ModalAlert } from "./AdminComponents";
 import { COPY, CATEGORY_OPTIONS } from "./contentManagement/constants";
 import { ContentEmptyState } from "./contentManagement/ContentEmptyState";
 import { ContentPostCard } from "./contentManagement/ContentPostCard";
@@ -55,8 +57,8 @@ export default function ContentManagementPage({ isAdmin = false }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [modalError, setModalError] = useState("");
-  const [deleteError, setDeleteError] = useState("");
+  const [modalError, showModalError, clearModalError] = useModalError();
+  const [deleteError, showDeleteError, clearDeleteError] = useModalError();
   const { toasts, showMsg, dismissToast } = useToasts();
 
   const sorted = useMemo(() => {
@@ -69,14 +71,14 @@ export default function ContentManagementPage({ isAdmin = false }) {
 
   const handleSave = async (formData) => {
     setSaving(true);
-    setModalError("");
+    clearModalError();
     try {
       await savePost(editTarget, formData);
       showMsg(editTarget ? "Post updated!" : "Post published!");
       setShowAddModal(false);
       setEditTarget(null);
     } catch (err) {
-      setModalError(err.message || "Something went wrong.");
+      showModalError(err.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -85,13 +87,13 @@ export default function ContentManagementPage({ isAdmin = false }) {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
-    setDeleteError("");
+    clearDeleteError();
     try {
       await deletePost(deleteTarget);
       showMsg("Post deleted!");
       setDeleteTarget(null);
     } catch (err) {
-      setDeleteError(err.message || "Failed to delete post.");
+      showDeleteError(err.message || "Failed to delete post.");
     } finally {
       setDeleting(false);
     }
@@ -121,6 +123,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
   return (
     <div className={styles.page}>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ModalAlert message={modalError || deleteError} type="error" />
 
       <div className={styles.viewToggle} style={{ marginBottom: 16, width: "fit-content" }}>
         {SECTIONS.map((s) => (
@@ -178,7 +181,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
             type="button"
             className={styles.addBtn}
             onClick={() => {
-              setModalError("");
+              clearModalError();
               setShowAddModal(true);
             }}
           >
@@ -281,11 +284,11 @@ export default function ContentManagementPage({ isAdmin = false }) {
               view={view}
               readOnly={!isAdmin}
               onEdit={(p) => {
-                setModalError("");
+                clearModalError();
                 setEditTarget(p);
               }}
               onDelete={(p) => {
-                setDeleteError("");
+                clearDeleteError();
                 setDeleteTarget(p);
               }}
               onTogglePublish={handleTogglePublish}
@@ -306,7 +309,6 @@ export default function ContentManagementPage({ isAdmin = false }) {
           }}
           onSave={handleSave}
           saving={saving}
-          error={modalError}
         />
       )}
       {deleteTarget && (
@@ -315,7 +317,6 @@ export default function ContentManagementPage({ isAdmin = false }) {
           onCancel={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
           deleting={deleting}
-          error={deleteError}
         />
       )}
       </>

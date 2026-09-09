@@ -6,7 +6,6 @@ import {
   Eye,
   EyeOff,
   Pin,
-  AlertCircle,
 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
 import { COPY, CATEGORY_OPTIONS, DEFAULT_POST_CATEGORY } from "./constants";
@@ -26,7 +25,6 @@ export function ContentPostModal({
   onClose,
   onSave,
   saving,
-  error,
 }) {
   const [form, setForm] = useState(() => ({
     ...emptyForm,
@@ -163,18 +161,9 @@ export function ContentPostModal({
               </span>
             </label>
           </div>
-
-          {error && (
-            <div className={styles.modalError}>
-              <AlertCircle size={14} /> {error}
-            </div>
-          )}
         </div>
 
         <div className={styles.modalFooter}>
-          <button type="button" className={styles.cancelBtn} onClick={onClose}>
-            Cancel
-          </button>
           <button
             type="button"
             className={styles.saveBtn}

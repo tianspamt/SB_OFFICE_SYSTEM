@@ -370,15 +370,6 @@ export default function SessionAgendaPage({
                 </button>
               </div>
             </div>
-
-            <div className={lStyles.viewModalFooter}>
-              <button
-                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
-                onClick={() => setViewTarget(null)}
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}

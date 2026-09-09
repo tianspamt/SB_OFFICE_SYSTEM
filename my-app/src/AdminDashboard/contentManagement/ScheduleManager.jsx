@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
 import ConfirmModal from "../ConfirmModal";
+import { ModalAlert } from "../AdminComponents";
+import { useModalError } from "../AdminContext";
 import { useSchedules } from "./useSchedules";
 
 const emptyForm = {
@@ -49,7 +51,7 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
   const [editTarget, setEditTarget] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [modalError, setModalError] = useState("");
+  const [modalError, showModalError, clearModalError] = useModalError();
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -57,7 +59,7 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
   const openAdd = () => {
     setEditTarget(null);
     setForm(emptyForm);
-    setModalError("");
+    clearModalError();
     setShowModal(true);
   };
   const openEdit = (s) => {
@@ -70,23 +72,23 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
       event_time: s.event_time || "",
       published: s.published,
     });
-    setModalError("");
+    clearModalError();
     setShowModal(true);
   };
 
   const handleSave = async () => {
     if (!form.title.trim() || !form.event_date) {
-      setModalError("Title and event date are required.");
+      showModalError("Title and event date are required.");
       return;
     }
     setSaving(true);
-    setModalError("");
+    clearModalError();
     try {
       await saveSchedule(editTarget, form);
       showMsg?.(editTarget ? "Schedule updated!" : "Schedule added!");
       setShowModal(false);
     } catch (err) {
-      setModalError(err.message || "Something went wrong.");
+      showModalError(err.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -115,6 +117,7 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
 
   return (
     <div>
+      <ModalAlert message={modalError} type="error" />
       <p
         style={{
           fontSize: 14,
@@ -327,17 +330,8 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
                   )}
                 </span>
               </label>
-
-              {modalError && (
-                <div className={styles.modalError}>
-                  <AlertCircle size={14} /> {modalError}
-                </div>
-              )}
             </div>
             <div className={styles.modalFooter}>
-              <button type="button" className={styles.cancelBtn} onClick={() => setShowModal(false)}>
-                Cancel
-              </button>
               <button
                 type="button"
                 className={styles.saveBtn}

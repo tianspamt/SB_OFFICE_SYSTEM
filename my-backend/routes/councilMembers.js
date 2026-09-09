@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly, secretaryOnly } = require('../middleware/auth')
+const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity, autoEndTerms } = require('../helpers/logger')
@@ -96,7 +96,7 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/sb-council-members/add
-router.post('/add', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
+router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('photo'), handleMulterError, async (req, res) => {
   const { full_name, position, term_period, term_start, term_end, is_reelected, notes, force } = req.body
   if (!full_name)
     return res.status(400).json({ error: 'Full name is required.' })
@@ -169,7 +169,7 @@ router.post('/add', verifyToken, adminOnly, upload.single('photo'), handleMulter
 })
 
 // PUT /api/sb-council-members/:id
-router.put('/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterError, async (req, res) => {
+router.put('/:id', verifyToken, adminOnly, secretaryOrClerk, upload.single('photo'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { full_name } = req.body
   if (!full_name)
@@ -201,7 +201,7 @@ router.put('/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterE
 // Archives the council member instead of a hard delete: the row stays in place
 // (so already-published ordinances/resolutions keep showing their name/photo)
 // and is just hidden from active lists and "select author" pickers.
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
+router.delete('/:id', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
   try {
     const { data: member } = await supabase
       .from('sb_council_members')
@@ -260,7 +260,7 @@ router.get('/:id/terms', async (req, res) => {
 })
 
 // POST /api/sb-council-members/:id/terms
-router.post('/:id/terms', verifyToken, adminOnly, async (req, res) => {
+router.post('/:id/terms', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
   const { id } = req.params
   const { term_period, term_start, term_end, status, position, is_reelected, notes, force } = req.body
   if (!term_period || !term_start)
@@ -353,7 +353,7 @@ router.post('/:id/terms', verifyToken, adminOnly, async (req, res) => {
 })
 
 // PUT /api/sb-council-members/:memberId/terms/:termId
-router.put('/:memberId/terms/:termId', verifyToken, adminOnly, async (req, res) => {
+router.put('/:memberId/terms/:termId', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
   const { memberId, termId } = req.params
   const { term_period, term_start, term_end, status, position, is_reelected, notes, force } = req.body
   if (!term_period || !term_start)
@@ -414,7 +414,7 @@ router.put('/:memberId/terms/:termId', verifyToken, adminOnly, async (req, res) 
 })
 
 // DELETE /api/sb-council-members/:memberId/terms/:termId
-router.delete('/:memberId/terms/:termId', verifyToken, adminOnly, async (req, res) => {
+router.delete('/:memberId/terms/:termId', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
   const { memberId, termId } = req.params
   try {
     const { data: existing, error: fetchErr } = await supabase

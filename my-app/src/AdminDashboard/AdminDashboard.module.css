@@ -29,8 +29,7 @@
   flex-direction: column;
   color: #fff;
   height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -73,6 +72,7 @@
   overflow: hidden;
   white-space: nowrap;
   min-height: 80px;
+  flex-shrink: 0;
 }
 /* ============================================================
    SIDEBAR NAV SECTIONS (User Management collapsible group)
@@ -1431,6 +1431,8 @@
   transition: opacity 0.2s, width 0.3s;
   opacity: 1;
   width: auto;
+  flex: 1;
+  text-align: center;
 }
 
 .sidebar.collapsed .logoTextWrap {
@@ -1441,12 +1443,13 @@
 
 .logoText {
   font-weight: bold;
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.3;
 }
 
 .logoSub {
-  font-size: 13px;
+  font-size: 11.4px;
+  white-space: nowrap;
   color: rgba(255,255,255,0.6);
 }
 
@@ -1489,6 +1492,9 @@
 .nav {
   padding: 16px 8px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .navBtn {
@@ -1591,6 +1597,7 @@
   padding: 16px 10px;
   border-top: 1px solid rgba(255,255,255,0.1);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .adminInfo {
@@ -2837,6 +2844,7 @@
 
 /* ── Profile Modal ── */
 .profileModal {
+  position: relative;
   background: #fff;
   border-radius: 14px;
   padding: 28px;
@@ -2845,6 +2853,28 @@
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.profileModalCloseBtn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: #f1f5f9;
+  border: none;
+  cursor: pointer;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.profileModalCloseBtn:hover {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 .profileHeader {
@@ -3274,7 +3304,7 @@
 }
 
 .dashWelcomeTitle {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 800;
   margin: 0 0 4px 0;
   color: #fff;
@@ -3582,7 +3612,11 @@
 
 /* Compact top bar — greeting + inline stat chips combined, replacing the
    separate welcome banner + full stats row so the page needs less vertical
-   space before getting to the actionable content. */
+   space before getting to the actionable content. Hero-style: bleeds edge
+   to edge, so its negative margin has to cancel BOTH its own
+   .dashboardContainer's padding AND the ancestor .main's padding (32/24 by
+   default) — not just the immediate parent's — matching each of their
+   breakpoints below. */
 .dashTopBar {
   display: flex;
   align-items: center;
@@ -3590,10 +3624,45 @@
   flex-wrap: wrap;
   gap: 12px;
   background: linear-gradient(135deg, #090446 0%, #380075 100%);
-  border-radius: 14px;
-  padding: 14px 22px;
-  margin-bottom: 20px;
+  border-radius: 0;
+  padding: 14px 56px;
+  margin: -56px -56px 20px -56px;
   color: #fff;
+}
+
+/* .main padding drops to 24px in this range (see .main's own 1024/769
+   breakpoint); .dashboardContainer stays 24px until 640px. */
+@media (max-width: 1024px) and (min-width: 641px) {
+  .dashTopBar {
+    padding: 14px 48px;
+    margin: -48px -48px 20px -48px;
+  }
+}
+
+/* .main switches to its mobile padding (72px top, 16px sides) at 768px,
+   independently of .dashboardContainer's own 640px breakpoint — so 641-768
+   and 481-640 need distinct combined totals. */
+@media (max-width: 768px) and (min-width: 641px) {
+  .dashTopBar {
+    padding: 14px 40px;
+    margin: -96px -40px 20px -40px;
+  }
+}
+
+@media (max-width: 640px) and (min-width: 481px) {
+  .dashTopBar {
+    padding: 14px 32px;
+    margin: -88px -32px 20px -32px;
+  }
+}
+
+/* .main's smallest padding step (64px top, 12px sides) plus
+   .dashboardContainer's 16px. */
+@media (max-width: 480px) {
+  .dashTopBar {
+    padding: 14px 28px;
+    margin: -80px -28px 20px -28px;
+  }
 }
 
 /* A fixed 4-column grid (not flex-wrap) so the four chips always line up
@@ -4201,7 +4270,7 @@
     padding: 18px 20px;
   }
   .dashWelcomeTitle {
-    font-size: 17px;
+    font-size: 19px;
   }
   .dashTopBar {
     flex-direction: column;

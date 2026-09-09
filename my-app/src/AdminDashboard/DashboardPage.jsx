@@ -668,7 +668,7 @@ const DashboardPage = ({
       {/* ── Top bar: greeting + inline stat chips combined ── */}
       <div className={styles.dashTopBar}>
         <div className={styles.dashWelcomeText}>
-          <h2 className={styles.dashWelcomeTitle}>Welcome back 👋</h2>
+          <h2 className={styles.dashWelcomeTitle}>Welcome back</h2>
           <p className={styles.dashWelcomeSub}>
             Here's what's happening in the Sangguniang Bayan Office today.
           </p>
@@ -979,12 +979,6 @@ const DashboardPage = ({
                   Open full record <ArrowUpRight size={13} />
                 </button>
               )}
-              <button
-                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
-                onClick={() => setViewTarget(null)}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>

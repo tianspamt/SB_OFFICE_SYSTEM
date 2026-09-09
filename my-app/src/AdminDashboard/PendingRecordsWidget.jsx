@@ -21,8 +21,9 @@ import {
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
-import { API, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
+import { API, authFetch, pendingQueryKey, fetchPendingList, useModalError } from "./AdminContext";
 import { StatusBadge } from "./LegislativeComponents";
+import { ModalAlert } from "./AdminComponents";
 import { pendingStatusesForRole, useCommentThread } from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
@@ -333,7 +334,7 @@ function ReviewModal({
   const [commentText, setCommentText] = useState("");
   const [replacementFile, setReplacementFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, showError, clearError] = useModalError();
   const { comments, loadingComments, commentSubmitting, fetchComments, sendComment } = useCommentThread();
 
   useEffect(() => {
@@ -343,7 +344,7 @@ function ReviewModal({
 
   const runAction = async (path, options = {}, successMsg) => {
     setSubmitting(true);
-    setError("");
+    clearError();
     try {
       const res = await authFetch(`${API}${path}`, options);
       const data = await res.json();
@@ -352,10 +353,10 @@ function ReviewModal({
         onActionComplete();
         return true;
       }
-      setError(data.error || "Action failed.");
+      showError(data.error || "Action failed.");
       return false;
     } catch {
-      setError("Server error.");
+      showError("Server error.");
       return false;
     } finally {
       setSubmitting(false);
@@ -365,7 +366,7 @@ function ReviewModal({
   const handleSendComment = async () => {
     const result = await sendComment(cfg.entityType, item.id, commentText);
     if (result.ok) setCommentText("");
-    else if (result.error) setError(result.error);
+    else if (result.error) showError(result.error);
   };
 
   const handleAccept = () =>
@@ -377,7 +378,7 @@ function ReviewModal({
 
   const handleRequestChanges = () => {
     if (!commentText.trim()) {
-      setError("Add a comment above explaining the requested changes.");
+      showError("Add a comment above explaining the requested changes.");
       return;
     }
     runAction(
@@ -406,7 +407,7 @@ function ReviewModal({
   // there's no separate "resubmit" call to chain afterward.
   const handleReplaceFile = () => {
     if (!replacementFile) {
-      setError("Choose a replacement file first.");
+      showError("Choose a replacement file first.");
       return;
     }
     const fd = new FormData();
@@ -421,6 +422,7 @@ function ReviewModal({
 
   return (
     <div className={lStyles.viewModalOverlay} onClick={onClose}>
+      <ModalAlert message={error} type="error" />
       <div className={lStyles.viewModal} onClick={(e) => e.stopPropagation()}>
         <div className={lStyles.viewModalHeader}>
           <div className={lStyles.viewModalHeaderTop}>
@@ -583,12 +585,6 @@ function ReviewModal({
             </div>
           )}
 
-          {error && (
-            <div style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}>
-              {error}
-            </div>
-          )}
-
           <div
             className={lStyles.viewModalFileActions}
             style={{ marginTop: 16 }}
@@ -656,12 +652,6 @@ function ReviewModal({
             onClick={onOpenFullRecord}
           >
             Open full record <ArrowUpRight size={13} />
-          </button>
-          <button
-            className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
-            onClick={onClose}
-          >
-            Close
           </button>
         </div>
       </div>

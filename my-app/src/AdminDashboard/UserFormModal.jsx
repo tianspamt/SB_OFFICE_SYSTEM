@@ -15,7 +15,6 @@
 //   photo={file} onPhotoChange={(file) => ...}
 //   currentPhotoUrl={editingUser?.photo}   // edit only, for the "current photo" hint
 //   excludeUserId={editingUser?.id}        // edit only, so the availability check ignores the user's own current name/email
-//   modalMessage={modalMessage} modalMessageType={modalMessageType}
 //   submitting={submitting} submitLabel="Add Admin" submittingLabel="Adding..."
 //   onSubmit={handleAddAdmin} onClose={() => setShowAddAdminModal(false)}
 // />
@@ -23,7 +22,6 @@
 import { useEffect, useState } from "react";
 import { X, Upload, CheckSquare } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
-import { ModalAlert } from "./AdminComponents";
 import { API, authFetch } from "./AdminContext";
 
 const POSITION_OPTIONS = {
@@ -86,8 +84,6 @@ export default function UserFormModal({
   onPhotoChange,
   currentPhotoUrl,
   excludeUserId,
-  modalMessage,
-  modalMessageType,
   submitting,
   submitLabel,
   submittingLabel,
@@ -195,8 +191,6 @@ export default function UserFormModal({
               <p className={styles.fileHint}>Current photo on file</p>
             )}
           </div>
-
-          <ModalAlert message={modalMessage} type={modalMessageType} />
         </div>
 
         <div
@@ -205,7 +199,6 @@ export default function UserFormModal({
             padding: "16px 24px 20px", borderTop: "1px solid #f1f5f9", background: "#fff", flexShrink: 0,
           }}
         >
-          <button className={styles.cancelBtn} onClick={onClose}>Cancel</button>
           <button className={styles.confirmBtn} onClick={onSubmit} disabled={submitting}>
             {submitting ? submittingLabel : submitLabel}
           </button>

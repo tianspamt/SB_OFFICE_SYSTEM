@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 
 const supabase = require('../config/supabase')
-const { verifyToken, secretaryOrClerk } = require('../middleware/auth')
+const { verifyToken, secretaryOrClerk, canCreateDraft } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
@@ -68,10 +68,12 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 })
 
-// POST /api/session-agendas/upload — Secretary/Clerk only. No draft/review
-// step: the agenda is meant to be seen ahead of the meeting it's for, so it
-// goes live the moment it's uploaded.
-router.post('/upload', verifyToken, secretaryOrClerk, upload.single('file'), handleMulterError, async (req, res) => {
+// POST /api/session-agendas/upload — open to all four positions (Secretary,
+// Clerk, Councilor, Vice-Mayor), same as canCreateDraft for the other
+// legislative record types. No draft/review step: the agenda is meant to be
+// seen ahead of the meeting it's for, so it goes live the moment it's
+// uploaded.
+router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   if (!ALLOWED_MIMES.includes(req.file.mimetype))
     return res.status(400).json({ error: 'Only PDF or Word documents are allowed for a session agenda.' })

@@ -1,8 +1,8 @@
-import { AlertCircle, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import styles from "../AdminDashboard.module.css";
 import { COPY } from "./constants";
 
-export function DeleteContentPostModal({ post, onCancel, onConfirm, deleting, error }) {
+export function DeleteContentPostModal({ post, onCancel, onConfirm, deleting }) {
   return (
     <div className={styles.modalOverlay}>
       <div className={`${styles.modal} ${styles.modalSm}`}>
@@ -14,11 +14,6 @@ export function DeleteContentPostModal({ post, onCancel, onConfirm, deleting, er
           <strong>{post.title}</strong> — {COPY.deleteConfirmIntro}. This cannot
           be undone.
         </p>
-        {error && (
-          <div className={styles.modalError}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
         <div className={styles.modalFooter}>
           <button type="button" className={styles.cancelBtn} onClick={onCancel}>
             Cancel

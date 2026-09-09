@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { User, Eye, EyeOff } from 'lucide-react'
+import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import './LogIn.css'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
@@ -107,124 +107,125 @@ export default function Login() {
     }
   }
 
+  const BrandPanel = () => (
+    <div className="login-left">
+      <img src="src/assets/image/logo.png" alt="logo" className="brand-logo" />
+      <h1 className="system-name">eLEGIS</h1>
+      <p className="brand-sub">OFFICE OF SANGGUNIANG BAYAN</p>
+      <p className="brand-tagline">Legislative Management System of Balilihan, Bohol</p>
+    </div>
+  )
+
   if (forcedChange) {
     return (
-      <div className="wrapper">
-        <form onSubmit={handleForcedChange}>
-          <h1>OFFICE OF SANGGUNIANG BAYAN</h1>
-          <img src="src/assets/image/logo.png" alt="logo" />
-          <h2>Set a new password to continue</h2>
-          <p style={{ fontSize: '13px', color: '#555', marginTop: '-8px', marginBottom: '12px' }}>
-            Your password was reset by an administrator. Choose a new password before continuing.
-          </p>
-
-          <div className="input-box">
-            <input
-              type="password"
-              placeholder="New Password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-            />
-          </div>
-
-          <div className="input-box">
-            <input
-              type="password"
-              placeholder="Confirm New Password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-          </div>
-
-          {changeError && (
-            <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>
-              {changeError}
+      <div className="login-page">
+        <BrandPanel />
+        <div className="login-right">
+          <form className="login-form" onSubmit={handleForcedChange}>
+            <h2 className="welcome-title">Set a New Password</h2>
+            <p className="welcome-sub">
+              Your password was reset by an administrator. Choose a new password before continuing.
             </p>
-          )}
 
-          <button type="submit" className="btn" disabled={changing}>
-            {changing ? 'Saving...' : 'Set New Password'}
-          </button>
-        </form>
+            <label className="field-label">New Password</label>
+            <div className="input-box">
+              <Lock className="input-icon-left" size={18} />
+              <input
+                type="password"
+                placeholder="New Password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+
+            <label className="field-label">Confirm New Password</label>
+            <div className="input-box">
+              <Lock className="input-icon-left" size={18} />
+              <input
+                type="password"
+                placeholder="Confirm New Password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+
+            {changeError && <p className="form-error">{changeError}</p>}
+
+            <button type="submit" className="btn" disabled={changing}>
+              {changing ? 'Saving...' : 'Set New Password'}
+            </button>
+          </form>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="wrapper">
-      <form onSubmit={handleSubmit}>
-        <h1>OFFICE OF SANGGUNIANG BAYAN</h1>
-        <img src="src/assets/image/logo.png" alt="logo" />
-        <h2>Log in with your username or email</h2>
+    <div className="login-page">
+      <BrandPanel />
+      <div className="login-right">
+        <form className="login-form" onSubmit={handleSubmit}>
+          <h2 className="welcome-title">Welcome Back</h2>
+          <p className="welcome-sub">Sign in to access your dashboard and manage legislative records.</p>
 
-        {sessionExpiredMsg && (
-          <p style={{
-            background: '#fef3c7', color: '#92400e', fontSize: '13px',
-            padding: '10px 12px', borderRadius: '8px', marginBottom: '12px',
-            textAlign: 'center',
-          }}>
-            {sessionExpiredMsg}
-          </p>
-        )}
-
-        <div className={`input-box ${identifierError ? 'input-error' : ''}`}>
-          <input
-            type="text"
-            placeholder={identifierError ? 'Username or email is required' : 'Username or Email'}
-            value={identifier}
-            onChange={(e) => {
-              setIdentifier(e.target.value)
-              if (e.target.value) setIdentifierError(false)
-            }}
-          />
-          <User className="input-icon" size={20} />
-        </div>
-
-        <div className={`input-box ${passwordError ? 'input-error' : ''}`}>
-          <input
-            type={showPassword ? 'text' : 'password'}
-            placeholder={passwordError ? 'Password is required' : 'Password'}
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              if (e.target.value) setPasswordError(false)
-            }}
-          />
-          {showPassword ? (
-            <EyeOff
-              className="input-icon toggle-password"
-              size={20}
-              onClick={() => setShowPassword(false)}
-              role="button"
-              tabIndex={0}
-              aria-label="Hide password"
-            />
-          ) : (
-            <Eye
-              className="input-icon toggle-password"
-              size={20}
-              onClick={() => setShowPassword(true)}
-              role="button"
-              tabIndex={0}
-              aria-label="Show password"
-            />
+          {sessionExpiredMsg && (
+            <p className="form-notice">{sessionExpiredMsg}</p>
           )}
-        </div>
 
-        {loginError && (
-          <p style={{ color: 'red', fontSize: '13px', marginTop: '6px' }}>
-            {loginError}
-          </p>
-        )}
+          <label className="field-label">Username or Email</label>
+          <div className={`input-box ${identifierError ? 'input-error' : ''}`}>
+            <User className="input-icon-left" size={18} />
+            <input
+              type="text"
+              placeholder={identifierError ? 'Username or email is required' : 'Username or Email'}
+              value={identifier}
+              onChange={(e) => {
+                setIdentifier(e.target.value)
+                if (e.target.value) setIdentifierError(false)
+              }}
+            />
+          </div>
 
-        <button type="submit" className="btn" disabled={loading}>
-          {loading ? 'Logging in...' : 'Login'}
-        </button>
+          <label className="field-label">Password</label>
+          <div className={`input-box ${passwordError ? 'input-error' : ''}`}>
+            <Lock className="input-icon-left" size={18} />
+            <input
+              type={showPassword ? 'text' : 'password'}
+              placeholder={passwordError ? 'Password is required' : 'Password'}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                if (e.target.value) setPasswordError(false)
+              }}
+            />
+            {showPassword ? (
+              <EyeOff
+                className="input-icon-right toggle-password"
+                size={18}
+                onClick={() => setShowPassword(false)}
+                role="button"
+                tabIndex={0}
+                aria-label="Hide password"
+              />
+            ) : (
+              <Eye
+                className="input-icon-right toggle-password"
+                size={18}
+                onClick={() => setShowPassword(true)}
+                role="button"
+                tabIndex={0}
+                aria-label="Show password"
+              />
+            )}
+          </div>
 
-        <div className="register-link">
-          <p>Official Legislative Management System of the Sangguniang Bayan ng Balilihan, Bohol</p>
-        </div>
-      </form>
+          {loginError && <p className="form-error">{loginError}</p>}
+
+          <button type="submit" className="btn" disabled={loading}>
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   Download,
   Upload,
   Send,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Presentation,
@@ -41,6 +42,7 @@ import {
   RecordListSkeleton,
   PresentOverlay,
 } from "./LegislativeComponents";
+import { ModalAlert } from "./AdminComponents";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
 
@@ -524,6 +526,7 @@ export default function ResolutionsPage({
           className={lStyles.viewModalOverlay}
           onClick={() => setViewTarget(null)}
         >
+          <ModalAlert message={reviewError} type="error" />
           <div
             className={lStyles.viewModal}
             onClick={(e) => e.stopPropagation()}
@@ -866,14 +869,6 @@ export default function ResolutionsPage({
                     </div>
                   )}
 
-                  {reviewError && (
-                    <div
-                      style={{ color: "#c53030", fontSize: 12, marginTop: 8 }}
-                    >
-                      {reviewError}
-                    </div>
-                  )}
-
                   <div
                     className={lStyles.viewModalFileActions}
                     style={{ marginTop: 16 }}
@@ -907,11 +902,11 @@ export default function ResolutionsPage({
                     {isViceMayor &&
                       viewTarget.status === "ready_to_publish" && (
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          className={lStyles.pillApprove}
                           disabled={reviewSubmitting}
                           onClick={() => handleVMApprove(viewTarget.id)}
                         >
-                          ✅ Approve
+                          <CheckCircle2 size={16} /> Approve
                         </button>
                       )}
 
@@ -927,16 +922,6 @@ export default function ResolutionsPage({
                   </div>
                 </>
               )}
-            </div>
-
-            {/* ── Footer ── */}
-            <div className={lStyles.viewModalFooter}>
-              <button
-                className={`${lStyles.viewModalFooterBtn} ${lStyles.viewModalFooterBtnClose}`}
-                onClick={() => setViewTarget(null)}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>

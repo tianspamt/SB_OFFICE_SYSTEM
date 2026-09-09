@@ -5,7 +5,7 @@
 // flag went dead in three of the four without anyone noticing.
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { API, authFetch, publishedQueryKey, fetchPublishedList } from "./AdminContext";
+import { API, authFetch, publishedQueryKey, fetchPublishedList, useModalError } from "./AdminContext";
 
 // Role-aware pending queue: Secretary/Vice-Mayor only see the slice they
 // act on; Clerk/Councilor draft across the whole pending bucket, so they
@@ -102,11 +102,11 @@ export function useDeepLinkedTab(defaultTab, initialSubTab) {
 export function useReviewWorkflow({ onRefresh } = {}) {
   const [viewTarget, setViewTarget] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, showError, clearError] = useModalError();
 
   const runAction = async (url, options, applyUpdate) => {
     setSubmitting(true);
-    setError("");
+    clearError();
     try {
       const res = await authFetch(`${API}${url}`, options);
       const data = await res.json();
@@ -115,17 +115,17 @@ export function useReviewWorkflow({ onRefresh } = {}) {
         onRefresh?.();
         return true;
       }
-      setError(data.error || "Action failed.");
+      showError(data.error || "Action failed.");
       return false;
     } catch {
-      setError("Server error.");
+      showError("Server error.");
       return false;
     } finally {
       setSubmitting(false);
     }
   };
 
-  return { viewTarget, setViewTarget, submitting, error, setError, runAction };
+  return { viewTarget, setViewTarget, submitting, error, setError: showError, runAction };
 }
 
 // Comment thread fetch/post, generic over entity type so PendingRecordsWidget

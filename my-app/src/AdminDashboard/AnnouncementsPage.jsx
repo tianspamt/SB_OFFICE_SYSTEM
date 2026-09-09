@@ -5,7 +5,8 @@ import {
   SmilePlus, Pin, Eye,
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
-import { API, authFetch, extractErrorMsg, priorityConfig } from "./AdminContext";
+import { API, authFetch, extractErrorMsg, priorityConfig, useModalError } from "./AdminContext";
+import { ModalAlert } from "./AdminComponents";
 
 /* ─────────────────────────────────────────────
    MOCK DATA — replace with Supabase queries
@@ -266,7 +267,7 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
   const [editText, setEditText] = useState("");
   const [posting, setPosting] = useState(false);
   const [savingEditId, setSavingEditId] = useState(null);
-  const [error, setError] = useState("");
+  const [error, showError, clearError] = useModalError();
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -276,11 +277,11 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
   async function handleSubmit() {
     if (!text.trim() || posting) return;
     setPosting(true);
-    setError("");
+    clearError();
     const result = await onAddComment(post.id, text.trim());
     setPosting(false);
     if (!result?.success) {
-      setError(result?.error || "Failed to add comment.");
+      showError(result?.error || "Failed to add comment.");
       return;
     }
     setText("");
@@ -289,26 +290,27 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
   async function handleSaveEdit(commentId) {
     if (!editText.trim()) return;
     setSavingEditId(commentId);
-    setError("");
+    clearError();
     const result = await onEditComment(post.id, commentId, editText.trim());
     setSavingEditId(null);
     if (!result?.success) {
-      setError(result?.error || "Failed to update comment.");
+      showError(result?.error || "Failed to update comment.");
       return;
     }
     setEditingId(null);
   }
 
   async function handleDelete(commentId) {
-    setError("");
+    clearError();
     const result = await onDeleteComment(post.id, commentId);
-    if (!result?.success) setError(result?.error || "Failed to delete comment.");
+    if (!result?.success) showError(result?.error || "Failed to delete comment.");
   }
 
   return (
     <div style={{
       borderTop: "1px solid #edf2f7", paddingTop: 14, marginTop: 14,
     }}>
+      <ModalAlert message={error} type="error" />
       {/* Comment list */}
       {post.comments.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
@@ -379,13 +381,6 @@ function CommentSection({ post, currentUser, onAddComment, onDeleteComment, onEd
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div style={{ fontSize: 11, color: "#c53030", marginBottom: 8, paddingLeft: 4 }}>
-          {error}
         </div>
       )}
 

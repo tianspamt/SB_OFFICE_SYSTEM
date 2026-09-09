@@ -270,6 +270,19 @@ export default function ArchivesPage() {
             ))}
           </select>
         </div>
+
+        <div className={styles.filterGroup}>
+          <button
+            type="button"
+            className={styles.filterBtn}
+            onClick={toggleSort}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title={sort === "asc" ? "Sorted oldest first — click to sort newest first" : "Sorted newest first — click to sort oldest first"}
+          >
+            {sort === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {sort === "asc" ? "Oldest first" : "Newest first"}
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -433,16 +446,9 @@ export default function ArchivesPage() {
                   onClick={toggleSort}
                   title={sort === "asc" ? "Sorted oldest first — click to sort newest first" : "Sorted newest first — click to sort oldest first"}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                     Archived
-                    <span style={{
-                      display: "inline-flex", alignItems: "center", gap: 2,
-                      background: "#fff", color: "#090446", fontWeight: 700, fontSize: 10.5,
-                      textTransform: "none", borderRadius: 20, padding: "2px 7px",
-                    }}>
-                      {sort === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                      {sort === "asc" ? "Oldest first" : "Newest first"}
-                    </span>
+                    {sort === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                   </span>
                 </th>
                 <th className={styles.th}>Archived By</th>

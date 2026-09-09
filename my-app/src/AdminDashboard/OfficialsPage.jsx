@@ -13,6 +13,8 @@ import {
   UserPlus,
 } from "lucide-react";
 import styles from "./OfficialsPage.module.css";
+import { ModalAlert } from "./AdminComponents";
+import { useModalError } from "./AdminContext";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -184,17 +186,17 @@ function MemberCard({
 
 function AddCouncilModal({ onClose, onConfirm }) {
   const [termPeriod, setTermPeriod] = useState("");
-  const [error, setError] = useState("");
+  const [error, showError, clearError] = useModalError();
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
     const val = termPeriod.trim();
     if (!val) {
-      setError("Please enter the term period.");
+      showError("Please enter the term period.");
       return;
     }
     setSubmitting(true);
-    setError("");
+    clearError();
     // onConfirm actually creates the council server-side now (POST
     // /api/councils) instead of just tracking a client-only placeholder —
     // it resolves to { success, error? } so a duplicate-label conflict (or
@@ -202,13 +204,14 @@ function AddCouncilModal({ onClose, onConfirm }) {
     const result = await onConfirm(val);
     setSubmitting(false);
     if (result && result.success === false) {
-      setError(result.error || "Failed to add council.");
+      showError(result.error || "Failed to add council.");
     }
   };
 
   return (
     <div className={styles.modalBg} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <ModalAlert message={error} type="error" />
         <div className={styles.modalHeader}>
           <h3>
             <CalendarDays
@@ -232,12 +235,11 @@ function AddCouncilModal({ onClose, onConfirm }) {
             value={termPeriod}
             onChange={(e) => {
               setTermPeriod(e.target.value);
-              setError("");
+              clearError();
             }}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
             autoFocus
           />
-          {error && <p className={styles.fieldError}>{error}</p>}
           <p className={styles.fieldHint}>
             This becomes the council group label. Members whose term records use
             this exact term period will appear here automatically.
@@ -245,9 +247,6 @@ function AddCouncilModal({ onClose, onConfirm }) {
         </div>
 
         <div className={styles.modalActions}>
-          <button className={styles.cancelBtn} onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
           <button className={styles.primaryBtn} onClick={handleSubmit} disabled={submitting}>
             <Plus size={14} /> {submitting ? "Creating..." : "Create Council"}
           </button>
