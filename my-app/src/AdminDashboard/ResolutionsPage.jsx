@@ -22,9 +22,18 @@ import {
   Presentation,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { pendingQueryKey, fetchPendingList, RESOLUTION_CATEGORIES } from "./AdminContext";
+import {
+  pendingQueryKey,
+  fetchPendingList,
+  RESOLUTION_CATEGORIES,
+  isDuplicateRecordNumber,
+  suggestResolutionNumber,
+} from "./AdminContext";
 import {
   pendingStatusesForRole,
+  READY_TO_PUBLISH_STATUSES,
+  READING_STATUSES,
+  isLockedStatus,
   useReviewWorkflow,
   useCommentThread,
   useLegislativePublished,
@@ -39,10 +48,14 @@ import {
   EmptyState,
   StatsRow,
   StatusBadge,
+  statusLabel,
+  nextReadingActionLabel,
   RecordListSkeleton,
   PresentOverlay,
+  PublishNumberModal,
 } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
+import ConfirmModal from "./ConfirmModal";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
 
@@ -62,6 +75,7 @@ export default function ResolutionsPage({
   readOnly = false,
   canPublish = false,
   canManagePending = false,
+  currentUserId = null,
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
@@ -77,13 +91,22 @@ export default function ResolutionsPage({
   const [dateFilter, setDateFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [presentTarget, setPresentTarget] = useState(null);
   const queryClient = useQueryClient();
-  const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const pendingStatusQ = pendingStatusesForRole({ isSecretary });
   const { data: pendingResolutions = [], isLoading: fetchingPending } = useQuery({
     queryKey: pendingQueryKey("resolutions", pendingStatusQ),
     queryFn: () => fetchPendingList("resolutions", pendingStatusQ),
     enabled: activeTab === "pending" && canPublish,
+    staleTime: 15000,
+  });
+  // Ready to Publish: its own tab (see READY_TO_PUBLISH_STATUSES) — Vice-Mayor
+  // approves from here, everyone else can still track what's awaiting them.
+  const { data: readyToPublishResolutions = [], isLoading: fetchingReadyToPublish } = useQuery({
+    queryKey: pendingQueryKey("resolutions", READY_TO_PUBLISH_STATUSES),
+    queryFn: () => fetchPendingList("resolutions", READY_TO_PUBLISH_STATUSES),
+    enabled: activeTab === "ready_to_publish" && canPublish,
     staleTime: 15000,
   });
 
@@ -134,8 +157,15 @@ export default function ResolutionsPage({
   const {
     viewTarget, setViewTarget,
     submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
+    successMsg: reviewSuccessMsg, clearSuccessMsg: clearReviewSuccessMsg,
     runAction: runReviewAction,
   } = useReviewWorkflow({ onRefresh: () => refreshAll() });
+
+  // ── Publish: collects the resolution number at the moment it's actually
+  // published (see PublishNumberModal) instead of at draft-upload time.
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishNumberValue, setPublishNumberValue] = useState("");
+  const [publishNumberError, setPublishNumberError] = useState("");
   const {
     comments: reviewComments, loadingComments, commentSubmitting,
     fetchComments: fetchCommentsForId, sendComment,
@@ -164,12 +194,15 @@ export default function ResolutionsPage({
     setDateFilter("");
     setAuthorFilter("");
     setYearFilter("all");
+    setStatusFilter("all");
   };
 
   // Old call sites just call fetchPendingResolutions() to refresh — keeping
   // the name means refreshAll() below doesn't need to change.
-  const fetchPendingResolutions = () =>
+  const fetchPendingResolutions = () => {
     queryClient.invalidateQueries({ queryKey: pendingQueryKey("resolutions", pendingStatusQ) });
+    queryClient.invalidateQueries({ queryKey: pendingQueryKey("resolutions", READY_TO_PUBLISH_STATUSES) });
+  };
 
   const refreshAll = () => {
     fetchPendingResolutions();
@@ -196,8 +229,25 @@ export default function ResolutionsPage({
     runReviewAction(
       `/api/resolutions/${id}/accept`,
       { method: "PUT" },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Accepted — now in First Reading!"
     );
+
+  const handleAdvanceReading = (id) => {
+    const label = nextReadingActionLabel(viewTarget?.status);
+    const successMsg =
+      label === "Send for VM Approval"
+        ? "Third reading complete — sent to the Vice-Mayor!"
+        : label
+        ? `${label.replace("Mark ", "")}!`
+        : undefined;
+    return runReviewAction(
+      `/api/resolutions/${id}/advance-reading`,
+      { method: "PUT" },
+      (d) => ({ status: d.status }),
+      successMsg
+    );
+  };
 
   const handleRequestChanges = async () => {
     if (!reviewCommentText.trim() || !viewTarget) return;
@@ -207,7 +257,8 @@ export default function ResolutionsPage({
         method: "PUT",
         body: JSON.stringify({ comment: reviewCommentText.trim() }),
       },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Changes requested!"
     );
     if (ok) {
       setReviewCommentText("");
@@ -219,15 +270,41 @@ export default function ResolutionsPage({
     runReviewAction(
       `/api/resolutions/${id}/vm-approve`,
       { method: "PUT" },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Resolution approved!"
     );
 
-  const handlePublish = (id) =>
+  const handlePublish = (id, resolutionNumber) =>
     runReviewAction(
       `/api/resolutions/${id}/publish`,
-      { method: "PUT" },
-      (d) => ({ status: d.status })
+      { method: "PUT", body: JSON.stringify({ resolution_number: resolutionNumber }) },
+      (d) => ({ status: d.status, resolution_number: d.resolution_number })
     );
+
+  const openPublishModal = () => {
+    setPublishNumberValue(
+      viewTarget.resolution_number ||
+        suggestResolutionNumber(resolutions, viewTarget.year)
+    );
+    setPublishNumberError("");
+    setShowPublishModal(true);
+  };
+
+  const confirmPublish = async () => {
+    const number = publishNumberValue.trim();
+    if (!number) {
+      setPublishNumberError("Resolution number is required.");
+      return;
+    }
+    if (isDuplicateRecordNumber(resolutions, "resolution_number", number, viewTarget.id)) {
+      setPublishNumberError(
+        `"${number}" is already in use by another resolution. Please choose a different number.`
+      );
+      return;
+    }
+    const ok = await handlePublish(viewTarget.id, number);
+    if (ok) setShowPublishModal(false);
+  };
 
   const handleReplaceFile = async (id) => {
     if (!reviewFile) return;
@@ -248,7 +325,7 @@ export default function ResolutionsPage({
     return ok;
   };
 
-  const pendingFiltered = pendingResolutions.filter((r) => {
+  const matchesPendingFilters = (r) => {
     const matchesSearch =
       !search ||
       (r.title || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -265,9 +342,24 @@ export default function ResolutionsPage({
     const matchesYear = yearFilter === "all" || String(r.year) === yearFilter;
     const matchesDate =
       !dateFilter || (r.uploaded_at || "").slice(0, 10) === dateFilter;
-    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate;
-  });
+    const matchesStatus = statusFilter === "all" || r.status === statusFilter;
+    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate && matchesStatus;
+  };
+  const pendingFiltered = pendingResolutions.filter(matchesPendingFilters);
   const pendingCount = pendingResolutions.length;
+  const readyToPublishFiltered = readyToPublishResolutions.filter(matchesPendingFilters);
+  const readyToPublishCount = readyToPublishResolutions.length;
+
+  // Status filter options, scoped to whichever tab is actually open — Pending
+  // (pending, plus the three reading statuses for Secretary) vs Ready to
+  // Publish (ready_to_publish, approved). Published has only one status, so
+  // no filter is offered there.
+  const statusFilterOptions =
+    activeTab === "pending"
+      ? pendingStatusQ.split(",").map((s) => ({ value: s, label: statusLabel(s) }))
+      : activeTab === "ready_to_publish"
+      ? READY_TO_PUBLISH_STATUSES.split(",").map((s) => ({ value: s, label: statusLabel(s) }))
+      : null;
 
   return (
     <>
@@ -289,7 +381,14 @@ export default function ResolutionsPage({
         tabs={[
           { id: "published", label: "Published" },
           ...(canPublish
-            ? [{ id: "pending", label: "Pending", badge: pendingCount }]
+            ? [
+                { id: "pending", label: "Pending", badge: pendingCount },
+                {
+                  id: "ready_to_publish",
+                  label: "Ready to Publish",
+                  badge: readyToPublishCount,
+                },
+              ]
             : []),
         ]}
         activeTab={activeTab}
@@ -319,6 +418,9 @@ export default function ResolutionsPage({
           yearValue={yearFilter}
           onYearChange={setYearFilter}
           years={availableYears}
+          statuses={statusFilterOptions}
+          statusValue={statusFilter}
+          onStatusChange={setStatusFilter}
           onReset={resetFilters}
         />
       </div>
@@ -497,20 +599,91 @@ export default function ResolutionsPage({
                     >
                       <Eye size={13} /> View Draft
                     </button>
-                    {canManagePending && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-                        onClick={() =>
-                          setDeleteTarget({
-                            id: item.id,
-                            type: "resolution",
-                            name: item.title,
-                          })
-                        }
-                      >
-                        <Archive size={13} /> Archive
-                      </button>
+                    {/* Secretary/Clerk may archive any draft; Councilor/
+                        Vice-Mayor may only withdraw one they created. Once a
+                        record enters its first reading, it's read-only for
+                        everyone — including here in Pending, before it ever
+                        reaches the Ready to Publish tab. */}
+                    {!isLockedStatus(item.status) &&
+                      (canManagePending ||
+                        ((isCouncilor || isViceMayor) &&
+                          item.created_by === currentUserId)) && (
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: item.id,
+                              type: "resolution",
+                              name: item.title,
+                            })
+                          }
+                        >
+                          <Archive size={13} /> Archive
+                        </button>
+                      )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          )}
+        </>
+      )}
+
+      {/* ── READY TO PUBLISH TAB ─────────────────────────────────────────────── */}
+      {activeTab === "ready_to_publish" && (
+        <>
+          <div className={lStyles.resultCount}>
+            Showing {readyToPublishFiltered.length} records
+          </div>
+          {fetchingReadyToPublish ? (
+            <RecordListSkeleton count={3} />
+          ) : (
+          <div className={lStyles.recordList}>
+            {readyToPublishFiltered.length === 0 ? (
+              <EmptyState
+                title="Nothing ready to publish"
+                text="Records approved by the Vice-Mayor and awaiting final publish will show up here."
+              />
+            ) : (
+              readyToPublishFiltered.map((item) => (
+                <div key={item.id} className={lStyles.recordCard}>
+                  <div
+                    className={lStyles.recordIcon}
+                    style={{ background: "var(--blue-50)" }}
+                  >
+                    {item.filetype === "application/pdf" ? (
+                      <FileText size={20} strokeWidth={1.2} />
+                    ) : (
+                      <Image size={20} strokeWidth={1.2} />
                     )}
+                  </div>
+                  <div className={lStyles.recordBody}>
+                    <div className={lStyles.recordCode}>
+                      {item.resolution_number || "—"}
+                    </div>
+                    <div className={lStyles.recordTitle}>{item.title}</div>
+                    <div className={lStyles.recordMeta}>
+                      <span>
+                        Submitted:{" "}
+                        {new Date(item.uploaded_at).toLocaleDateString("en-PH")}
+                      </span>
+                      {item.revision_count > 0 && (
+                        <span>Revision #{item.revision_count}</span>
+                      )}
+                      <StatusBadge status={item.status} />
+                    </div>
+                  </div>
+                  <div className={lStyles.recordActions}>
+                    {/* Read-only tab — no edit/comment/archive for anyone
+                        here, just View (which still carries the Approve/
+                        Publish actions once applicable). */}
+                    <button
+                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
+                      onClick={() => handleOpenView(item)}
+                    >
+                      <Eye size={13} /> View
+                    </button>
                   </div>
                 </div>
               ))
@@ -601,11 +774,8 @@ export default function ResolutionsPage({
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Status</div>
-                      <div
-                        className={lStyles.viewModalMetaValue}
-                        style={{ textTransform: "capitalize" }}
-                      >
-                        {viewTarget.status}
+                      <div className={lStyles.viewModalMetaValue}>
+                        {statusLabel(viewTarget.status)}
                       </div>
                     </div>
                   </div>
@@ -758,7 +928,9 @@ export default function ResolutionsPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {(isSecretary || isClerk || isCouncilor) && (
+                  {/* Replace file — Secretary/Clerk only, and read-only
+                      once the record enters its first reading. */}
+                  {(isSecretary || isClerk) && !isLockedStatus(viewTarget.status) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -850,7 +1022,8 @@ export default function ResolutionsPage({
                     )}
                   </div>
 
-                  {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
+                  {(isSecretary || isClerk || isCouncilor || isViceMayor) &&
+                    !isLockedStatus(viewTarget.status) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -899,6 +1072,16 @@ export default function ResolutionsPage({
                       </>
                     )}
 
+                    {isSecretary && READING_STATUSES.includes(viewTarget.status) && (
+                      <button
+                        className={lStyles.pillApprove}
+                        disabled={reviewSubmitting}
+                        onClick={() => handleAdvanceReading(viewTarget.id)}
+                      >
+                        <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
+                      </button>
+                    )}
+
                     {isViceMayor &&
                       viewTarget.status === "ready_to_publish" && (
                         <button
@@ -912,11 +1095,11 @@ export default function ResolutionsPage({
 
                     {isSecretary && viewTarget.status === "approved" && (
                       <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                        className={lStyles.pillApprove}
                         disabled={reviewSubmitting}
-                        onClick={() => handlePublish(viewTarget.id)}
+                        onClick={openPublishModal}
                       >
-                        ✅ Publish
+                        <CheckCircle2 size={16} /> Publish
                       </button>
                     )}
                   </div>
@@ -929,6 +1112,34 @@ export default function ResolutionsPage({
 
       {presentTarget && (
         <PresentOverlay record={presentTarget} onClose={() => setPresentTarget(null)} />
+      )}
+
+      {reviewSuccessMsg && (
+        <ConfirmModal
+          type="success"
+          title="Success"
+          message={reviewSuccessMsg}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={clearReviewSuccessMsg}
+          onCancel={clearReviewSuccessMsg}
+        />
+      )}
+
+      {showPublishModal && (
+        <PublishNumberModal
+          label="Resolution Number"
+          placeholder="e.g. Resolution No. 2026-014"
+          value={publishNumberValue}
+          onChange={(v) => {
+            setPublishNumberValue(v);
+            setPublishNumberError("");
+          }}
+          onConfirm={confirmPublish}
+          onCancel={() => setShowPublishModal(false)}
+          submitting={reviewSubmitting}
+          error={publishNumberError}
+        />
       )}
     </>
   );

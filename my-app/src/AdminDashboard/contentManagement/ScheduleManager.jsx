@@ -43,7 +43,7 @@ function formatEventTime(timeStr) {
   return `${hour12}:${m} ${period}`;
 }
 
-export function ScheduleManager({ isAdmin = false, showMsg }) {
+export function ScheduleManager({ isAdmin = false, showMsg, showSuccessModal }) {
   const { schedules, loading, fetchError, saveSchedule, deleteSchedule, togglePublish } =
     useSchedules();
 
@@ -85,7 +85,7 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
     clearModalError();
     try {
       await saveSchedule(editTarget, form);
-      showMsg?.(editTarget ? "Schedule updated!" : "Schedule added!");
+      showSuccessModal?.(editTarget ? "Schedule updated!" : "Schedule added!");
       setShowModal(false);
     } catch (err) {
       showModalError(err.message || "Something went wrong.");
@@ -98,7 +98,7 @@ export function ScheduleManager({ isAdmin = false, showMsg }) {
     setDeleting(true);
     try {
       await deleteSchedule(deleteTarget);
-      showMsg?.("Schedule deleted!");
+      showSuccessModal?.("Schedule deleted!");
       setDeleteTarget(null);
     } catch (err) {
       showMsg?.(err.message || "Failed to delete schedule.", "error");

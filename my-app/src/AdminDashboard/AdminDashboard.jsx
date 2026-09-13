@@ -34,20 +34,20 @@ import {
   Archive,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
+import LoadingModal from "./LoadingModal";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
 import {
   API,
   authFetch,
   extractErrorMsg,
+  missingFieldsMsg,
   toIsoDate,
   toLocalIso,
   formatDate,
   priorityConfig,
   tabTitles,
   getCurrentYear,
-  suggestOrdinanceNumber,
-  suggestResolutionNumber,
   suggestSessionNumber,
   isDuplicateRecordNumber,
   OFFICIALS_QUERY_KEY,
@@ -99,6 +99,11 @@ export default function AdminDashboard() {
   const { toasts, showMsg, dismissToast } = useToasts();
   const [modalMessage, setModalMessage] = useState("");
   const [modalMessageType, setModalMessageType] = useState("success");
+  // Blocking success modal (upload/archive/save/update confirmations) —
+  // unlike the toasts above, these need a deliberate dismissal so the user
+  // has clear confirmation the action actually went through.
+  const [successModalMsg, setSuccessModalMsg] = useState("");
+  const showSuccessModal = (msg) => setSuccessModalMsg(msg);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
@@ -196,15 +201,14 @@ export default function AdminDashboard() {
   const [editUserPhoto, setEditUserPhoto] = useState(null);
 
   // ── Legislative Record Numbering: tracks the last system-suggested
-  // number per record type so we know whether the user has since edited
-  // it manually (in which case we stop overwriting their input).
-  const lastOrdinanceSuggestion = useRef("");
-  const lastResolutionSuggestion = useRef("");
+  // session number so we know whether the user has since edited it manually
+  // (in which case we stop overwriting their input). Ordinances/resolutions
+  // no longer suggest/collect a number at upload time — see PublishNumberModal,
+  // which now collects it when the Secretary actually publishes.
   const lastSessionSuggestion = useRef("");
 
   // ordinances
   const [ordinances, setOrdinances] = useState([]);
-  const [ordinanceNumber, setOrdinanceNumber] = useState("");
   const [ordinanceTitle, setOrdinanceTitle] = useState("");
   const [ordinanceDate, setOrdinanceDate] = useState("");
   const [ordinanceFile, setOrdinanceFile] = useState(null);
@@ -222,7 +226,6 @@ export default function AdminDashboard() {
 
   // resolutions
   const [resolutions, setResolutions] = useState([]);
-  const [resolutionNumber, setResolutionNumber] = useState("");
   const [resolutionTitle, setResolutionTitle] = useState("");
   const [resolutionDate, setResolutionDate] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
@@ -391,7 +394,13 @@ export default function AdminDashboard() {
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
     const token = localStorage.getItem("token");
+    // Every redirect below must clear localStorage first — GuestRoute (App.jsx)
+    // sends a logged-in user straight back to /dashboard, so replacing "/"
+    // while a stale "user" is still stored bounces right back here and loops
+    // forever (ping-ponging the address bar between / and /dashboard).
     if (!storedUser || !token) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
       window.location.replace("/");
       return;
     }
@@ -399,10 +408,14 @@ export default function AdminDashboard() {
     try {
       u = JSON.parse(storedUser);
     } catch {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
       window.location.replace("/");
       return;
     }
     if (u.role !== "admin" && u.role !== "user") {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
       window.location.replace("/");
       return;
     }
@@ -611,13 +624,14 @@ export default function AdminDashboard() {
   };
   // ─── Users / Admins ───────────────────────────────────────────────────────────
   const handleAddAdmin = async () => {
-    if (
-      !newAdmin.name ||
-      !newAdmin.username ||
-      !newAdmin.email ||
-      !newAdmin.password
-    ) {
-      showModalMsg("All fields required!", "error");
+    const missing = missingFieldsMsg([
+      [newAdmin.name, "Name"],
+      [newAdmin.username, "Username"],
+      [newAdmin.email, "Email"],
+      [newAdmin.password, "Password"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     setSubmitting(true);
@@ -635,7 +649,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Admin added!");
+        showSuccessModal("Admin added!");
         setNewAdmin({ name: "", username: "", email: "", password: "", position: "secretary" });
         setNewAdminPhoto(null);
         setShowAddAdminModal(false);
@@ -648,13 +662,14 @@ export default function AdminDashboard() {
     }
   };
   const handleAddUser = async () => {
-    if (
-      !newUser.name ||
-      !newUser.username ||
-      !newUser.email ||
-      !newUser.password
-    ) {
-      showModalMsg("All fields required!", "error");
+    const missing = missingFieldsMsg([
+      [newUser.name, "Name"],
+      [newUser.username, "Username"],
+      [newUser.email, "Email"],
+      [newUser.password, "Password"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     setSubmitting(true);
@@ -676,7 +691,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("User added!");
+        showSuccessModal("User added!");
         setNewUser({ name: "", username: "", email: "", password: "", position: "councilor" });
         setNewUserPhoto(null);
         setShowAddUserModal(false);
@@ -720,7 +735,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg(`${editingUser.role === "admin" ? "Admin" : "User"} updated!`);
+        showSuccessModal(`${editingUser.role === "admin" ? "Admin" : "User"} updated!`);
         setShowEditUserModal(false);
         setEditingUser(null);
         fetchUsers();
@@ -738,7 +753,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("User archived!");
+        showSuccessModal("User archived!");
         fetchUsers();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -753,7 +768,7 @@ export default function AdminDashboard() {
         method: "POST",
       });
       const data = await res.json();
-      if (res.ok && data.success) showMsg(`Temporary password sent to ${user.email}.`);
+      if (res.ok && data.success) showSuccessModal(`Temporary password sent to ${user.email}.`);
       else showMsg(data.error || "Failed to reset password.", "error");
     } catch {
       showMsg("Server error.", "error");
@@ -765,27 +780,19 @@ export default function AdminDashboard() {
 
   // ─── Ordinances ──────────────────────────────────────────────────────────────
   const handleUploadOrdinance = async () => {
-    if (
-      !ordinanceNumber ||
-      !ordinanceTitle ||
-      !ordinanceDate ||
-      !ordinanceFile
-    ) {
-      showModalMsg("Please fill all fields and choose a file!", "error");
-      return;
-    }
-    if (
-      isDuplicateRecordNumber(ordinances, "ordinance_number", ordinanceNumber)
-    ) {
-      showModalMsg(
-        `"${ordinanceNumber}" is already in use by another ordinance. Please choose a different number.`,
-        "error"
-      );
+    const missing = missingFieldsMsg([
+      [ordinanceTitle, "Title"],
+      [ordinanceDate, "Date"],
+      [ordinanceFile, "File"],
+      [ordinanceCategory, "Sector"],
+      [selectedOfficials.length > 0, "Author"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("ordinance_number", ordinanceNumber);
     fd.append("title", ordinanceTitle);
     fd.append("date", ordinanceDate);
     fd.append("year", ordinanceDate.split("-")[0]);
@@ -799,12 +806,11 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Ordinance uploaded!");
+        showSuccessModal("Ordinance uploaded!");
         if (uploadType === "image-to-text" && data.text) {
           setExtractedText(data.text);
           setShowTextModal(true);
         }
-        setOrdinanceNumber("");
         setOrdinanceTitle("");
         setOrdinanceDate("");
         setOrdinanceFile(null);
@@ -836,8 +842,14 @@ export default function AdminDashboard() {
   const toggleEditOfficial = (id) =>
     setEditSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
   const handleUpdateOrdinance = async () => {
-    if (!editOrdinanceNumber || !editOrdinanceTitle || !editOrdinanceDate) {
-      showModalMsg("All fields required!", "error");
+    const missing = missingFieldsMsg([
+      [editOrdinanceTitle, "Title"],
+      [editOrdinanceDate, "Date"],
+      [editOrdinanceCategory, "Sector"],
+      [editSelectedOfficials.length > 0, "Author"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     if (
@@ -870,7 +882,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Ordinance updated!");
+        showSuccessModal("Ordinance updated!");
         setShowEditOrdinanceModal(false);
         setEditingOrdinance(null);
         fetchOrdinances();
@@ -888,7 +900,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Archived!");
+        showSuccessModal("Archived!");
         fetchOrdinances();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -902,31 +914,19 @@ export default function AdminDashboard() {
 
   // ─── Resolutions ─────────────────────────────────────────────────────────────
   const handleUploadResolution = async () => {
-    if (
-      !resolutionNumber ||
-      !resolutionTitle ||
-      !resolutionDate ||
-      !resolutionFile
-    ) {
-      showModalMsg("Please fill all fields and choose a file!", "error");
-      return;
-    }
-    if (
-      isDuplicateRecordNumber(
-        resolutions,
-        "resolution_number",
-        resolutionNumber
-      )
-    ) {
-      showModalMsg(
-        `"${resolutionNumber}" is already in use by another resolution. Please choose a different number.`,
-        "error"
-      );
+    const missing = missingFieldsMsg([
+      [resolutionTitle, "Title"],
+      [resolutionDate, "Date"],
+      [resolutionFile, "File"],
+      [resolutionCategory, "Sector"],
+      [selectedResolutionOfficials.length > 0, "Author"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     setSubmitting(true);
     const fd = new FormData();
-    fd.append("resolution_number", resolutionNumber);
     fd.append("title", resolutionTitle);
     fd.append("date", resolutionDate);
     fd.append("year", resolutionDate.split("-")[0]);
@@ -940,8 +940,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Resolution uploaded!");
-        setResolutionNumber("");
+        showSuccessModal("Resolution uploaded!");
         setResolutionTitle("");
         setResolutionDate("");
         setResolutionFile(null);
@@ -974,8 +973,14 @@ export default function AdminDashboard() {
   const toggleEditResolutionOfficial = (id) =>
     setEditResolutionSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
   const handleUpdateResolution = async () => {
-    if (!editResolutionNumber || !editResolutionTitle || !editResolutionDate) {
-      showModalMsg("All fields required!", "error");
+    const missing = missingFieldsMsg([
+      [editResolutionTitle, "Title"],
+      [editResolutionDate, "Date"],
+      [editResolutionCategory, "Sector"],
+      [editResolutionSelectedOfficials.length > 0, "Author"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     if (
@@ -1008,7 +1013,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Resolution updated!");
+        showSuccessModal("Resolution updated!");
         setShowEditResolutionModal(false);
         setEditingResolution(null);
         fetchResolutions();
@@ -1026,7 +1031,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Resolution archived!");
+        showSuccessModal("Resolution archived!");
         fetchResolutions();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1040,23 +1045,16 @@ export default function AdminDashboard() {
 
   // ─── Officials ────────────────────────────────────────────────────────────────
   const handleAddOfficial = async () => {
-    if (!newOfficial.full_name) {
-      showModalMsg("Full name is required!", "error");
-      return;
-    }
-    // Position is now per-term (see 002_add_council_id_and_position_to_terms
-    // migration) — it only means anything alongside a term, so require all
-    // three together, or none (member added with no term yet; position
-    // gets added later via "+ Add Term" from their profile).
-    const hasTermInfo = newOfficial.term_period || newOfficial.term_start;
-    if (
-      hasTermInfo &&
-      (!newOfficial.term_period || !newOfficial.term_start || !newOfficial.position)
-    ) {
-      showModalMsg(
-        "Term period, start date, and position are required together.",
-        "error"
-      );
+    // Every field is required except Photo, End Date (blank means still
+    // serving), and Notes (free supplementary text).
+    const missing = missingFieldsMsg([
+      [newOfficial.full_name, "Full name"],
+      [newOfficial.position, "Position"],
+      [newOfficial.term_period, "Term period"],
+      [newOfficial.term_start, "Start date"],
+    ]);
+    if (missing) {
+      showModalMsg(missing, "error");
       return;
     }
     setSubmitting(true);
@@ -1077,7 +1075,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Council member added!");
+        showSuccessModal("Council member added!");
         setNewOfficial({
           full_name: "",
           position: "",
@@ -1123,7 +1121,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Council member updated!");
+        showSuccessModal("Council member updated!");
         setShowEditOfficialModal(false);
         setEditingOfficial(null);
         fetchOfficials();
@@ -1142,7 +1140,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Council member archived!");
+        showSuccessModal("Council member archived!");
         fetchOfficials();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1174,7 +1172,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Term added!");
+        showSuccessModal("Term added!");
         setShowAddTermModal(false);
         fetchOfficials();
         if (selectedOfficialProfile?.id === termTarget.memberId) {
@@ -1217,7 +1215,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Term updated!");
+        showSuccessModal("Term updated!");
         setShowEditTermModal(false);
         fetchOfficials();
         if (selectedOfficialProfile?.id === termTarget.memberId) {
@@ -1241,7 +1239,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (data.success) {
-        showMsg("Term deleted!");
+        showSuccessModal("Term deleted!");
         fetchOfficials();
         if (selectedOfficialProfile?.id === memberId) {
           const updated = await (
@@ -1309,7 +1307,7 @@ export default function AdminDashboard() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          showMsg("Session added!");
+          showSuccessModal("Session added!");
           resetSessionForm();
           setShowSessionModal(false);
           fetchSessionMinutes();
@@ -1321,7 +1319,7 @@ export default function AdminDashboard() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          showMsg("Session minutes saved!");
+          showSuccessModal("Session minutes saved!");
           resetSessionForm();
           setShowSessionModal(false);
           fetchSessionMinutes();
@@ -1373,7 +1371,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Session minutes updated!");
+        showSuccessModal("Session minutes updated!");
         setShowEditSessionModal(false);
         setEditingSession(null);
         fetchSessionMinutes();
@@ -1391,7 +1389,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Session archived!");
+        showSuccessModal("Session archived!");
         fetchSessionMinutes();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1433,7 +1431,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Session agenda posted!");
+        showSuccessModal("Session agenda posted!");
         resetAgendaForm();
         setShowAgendaModal(false);
         fetchSessionAgendas();
@@ -1472,7 +1470,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Session agenda updated!");
+        showSuccessModal("Session agenda updated!");
         setShowEditAgendaModal(false);
         setEditingAgenda(null);
         fetchSessionAgendas();
@@ -1490,7 +1488,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Session agenda deleted!");
+        showSuccessModal("Session agenda deleted!");
         fetchSessionAgendas();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1520,7 +1518,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Announcement posted!");
+        showSuccessModal("Announcement posted!");
         resetAnnouncementForm();
         setShowAnnouncementModal(false);
         markAnnouncementsSeen(); // refetches announcements + clears own unread badge
@@ -1556,7 +1554,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Announcement updated!");
+        showSuccessModal("Announcement updated!");
         setShowEditAnnouncementModal(false);
         setEditingAnnouncement(null);
         markAnnouncementsSeen(); // refetches announcements + clears own unread badge
@@ -1574,7 +1572,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Announcement deleted!");
+        showSuccessModal("Announcement deleted!");
         fetchAnnouncements({ silent: true });
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1611,7 +1609,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Event saved!");
+        showSuccessModal("Event saved!");
         setShowLocalEventModal(false);
         setLocalEventForm(emptyEventForm);
         fetchLocalEvents();
@@ -1666,7 +1664,7 @@ export default function AdminDashboard() {
       );
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Event updated!");
+        showSuccessModal("Event updated!");
         setShowEditEventModal(false);
         setEditingEvent(null);
         fetchLocalEvents();
@@ -1684,7 +1682,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showMsg("Event deleted!");
+        showSuccessModal("Event deleted!");
         fetchLocalEvents();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1714,22 +1712,21 @@ export default function AdminDashboard() {
   // Gates whether the Pending tab is visible at all (Secretary reviews it,
   // Vice-Mayor approves from it, Clerk/Councilor draft in it).
   const canPublishLegislative = isSecretary || isClerk || isViceMayor || isCouncilor;
-  // Gates edit/upload/delete on the Published tab specifically — Councilor
-  // stays read-only there even though they can draft on the Pending tab
-  // (see canManagePendingLegislative).
+  // Gates edit/upload/delete content — Secretary/Clerk only, in every
+  // bucket (matches the backend's canEditLegislativeRecord). Councilor and
+  // Vice-Mayor stay read-only for content, published or not.
   const canEditLegislative = isSecretary || isClerk;
-  // Clerk and Councilor both draft: edit/withdraw a not-yet-published
-  // record (matches the backend's canManageLegislativeRecord) — Secretary
-  // does NOT get this one even though they can create (below): they review/
-  // approve a pending record rather than editing or archiving it directly.
-  const canManagePendingLegislative = isClerk || isCouncilor;
+  // Gates the Pending-tab Archive button for Secretary/Clerk, who may
+  // archive any record. Councilor/Vice-Mayor may still archive a pending
+  // record, but only one they created themselves — that's checked
+  // per-record inside each page (ordinance.created_by === currentUserId),
+  // not here (matches the backend's canArchiveLegislativeRecord).
+  const canManagePendingLegislative = isSecretary || isClerk;
   // All four positions can originate a new draft — Secretary and Vice-Mayor
   // sometimes make the ordinance/resolution/session minutes directly rather
   // than only reviewing/approving what Clerk/Councilor submit. Gates the
   // "+Upload" button specifically, not the per-draft edit/archive actions
-  // above (Vice-Mayor still can't touch a draft's content after creating it
-  // — only Secretary/Clerk/Councilor can, via canManagePendingLegislative
-  // and the Published-tab canEditLegislative).
+  // above.
   const canCreateLegislative = isSecretary || isClerk || isCouncilor || isViceMayor;
   // Session Agenda has no draft/review workflow (see routes/sessionAgendas.js).
   // Uploading is open to all four positions — any of them may need to post
@@ -1754,6 +1751,20 @@ export default function AdminDashboard() {
     fetchingAgendas ||
     fetchingResolutions ||
     fetchingAnnouncements;
+  // Only pop the loading modal up if a fetch is still running 5s later —
+  // most refetches (e.g. the ones that follow an upload/save success) finish
+  // almost instantly, and popping this in for that brief window used to sit
+  // on top of and hide the success modal fired by the same action.
+  const LOADING_MODAL_DELAY_MS = 5000;
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  useEffect(() => {
+    if (!pageLoading) {
+      setShowLoadingModal(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoadingModal(true), LOADING_MODAL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [pageLoading]);
   // Narrower than pageLoading — only the fetches DashboardPage's own content
   // actually depends on (fetchingUsers/fetchingOfficials feed Users/Admins/
   // Officials, none of which this page renders), so its skeleton clears as
@@ -1762,22 +1773,14 @@ export default function AdminDashboard() {
     fetchingOrdinances || fetchingResolutions || fetchingMinutes || fetchingAnnouncements;
 
   // ── Quick-action openers ── shared by the sidebar "+ Add" buttons and the
-  // Dashboard's Quick Actions panel, so number-suggestion logic lives in one place.
+  // Dashboard's Quick Actions panel.
   const openOrdinanceModal = () => {
     setModalMessage("");
-    const year = getCurrentYear();
-    const suggested = suggestOrdinanceNumber(ordinances, year);
-    lastOrdinanceSuggestion.current = suggested;
     setOrdinanceDate(toIsoDate(new Date()));
-    setOrdinanceNumber(suggested);
     setShowOrdinanceModal(true);
   };
   const openResolutionModal = () => {
     setModalMessage("");
-    const year = getCurrentYear();
-    const suggested = suggestResolutionNumber(resolutions, year);
-    lastResolutionSuggestion.current = suggested;
-    setResolutionNumber(suggested);
     setResolutionTitle("");
     setResolutionDate(toIsoDate(new Date()));
     setResolutionFile(null);
@@ -1805,6 +1808,17 @@ export default function AdminDashboard() {
     <div className={styles.container}>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <ModalAlert message={modalMessage} type={modalMessageType} />
+      {successModalMsg && (
+        <ConfirmModal
+          type="success"
+          title="Success"
+          message={successModalMsg}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={() => setSuccessModalMsg("")}
+          onCancel={() => setSuccessModalMsg("")}
+        />
+      )}
 
       <div
         className={`${styles.mobileBackdrop} ${
@@ -2165,9 +2179,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {pageLoading && (
-          <div className={styles.loadingBar}>Loading data...</div>
-        )}
+        {showLoadingModal && <LoadingModal message="Loading data..." />}
 
         {/* ── PAGE COMPONENTS ── */}
         {activeTab === "dashboard" && (
@@ -2219,6 +2231,7 @@ export default function AdminDashboard() {
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
             canManagePending={canManagePendingLegislative}
+            currentUserId={admin?.id}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
@@ -2236,6 +2249,7 @@ export default function AdminDashboard() {
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
             canManagePending={canManagePendingLegislative}
+            currentUserId={admin?.id}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
@@ -2252,6 +2266,7 @@ export default function AdminDashboard() {
             ordinances={ordinances}
             councils={councils}
             onAddCouncil={handleAddCouncil}
+            showSuccessModal={showSuccessModal}
             setDeleteTarget={setDeleteTarget}
             onViewProfile={(o) => {
               setSelectedOfficialProfile(o);
@@ -2285,6 +2300,7 @@ export default function AdminDashboard() {
             readOnly={!canEditLegislative}
             canPublish={canPublishLegislative}
             canManagePending={canManagePendingLegislative}
+            currentUserId={admin?.id}
             isViceMayor={isViceMayor}
             isSecretary={isSecretary}
             isClerk={isClerk}
@@ -2594,18 +2610,7 @@ export default function AdminDashboard() {
                     letterSpacing: "0.4px",
                   }}
                 >
-                  <History size={13} /> Term &amp; Position{" "}
-                  <span
-                    style={{
-                      fontWeight: 500,
-                      color: "#94a3b8",
-                      textTransform: "none",
-                      letterSpacing: 0,
-                    }}
-                  >
-                    (optional — fill in once they have a seat; leave blank to
-                    add later)
-                  </span>
+                  <History size={13} /> Term &amp; Position
                 </div>
                 <TermFormFields
                   form={newOfficial}
@@ -3226,13 +3231,11 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowOrdinanceModal(false);
             setOrdinanceFile(null);
-            setOrdinanceNumber("");
             setOrdinanceTitle("");
             setOrdinanceDate("");
             setSelectedOfficials([]);
             setUploadType("");
             setModalMessage("");
-            lastOrdinanceSuggestion.current = "";
           }}
         >
           <div
@@ -3267,13 +3270,11 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowOrdinanceModal(false);
                   setOrdinanceFile(null);
-                  setOrdinanceNumber("");
                   setOrdinanceTitle("");
                   setOrdinanceDate("");
                   setSelectedOfficials([]);
                   setUploadType("");
                   setModalMessage("");
-                  lastOrdinanceSuggestion.current = "";
                 }}
                 aria-label="Close modal"
                 style={{
@@ -3306,19 +3307,6 @@ export default function AdminDashboard() {
             >
               <input
                 className={styles.input}
-                placeholder="Ordinance Number (e.g. Ordinance No. 2024-001)"
-                value={ordinanceNumber}
-                onChange={(e) => setOrdinanceNumber(e.target.value)}
-              />
-              <p
-                className={styles.fileHint}
-                style={{ marginTop: -6, marginBottom: 10 }}
-              >
-                Suggested automatically based on the year and existing
-                ordinances — feel free to edit it.
-              </p>
-              <input
-                className={styles.input}
                 placeholder="Ordinance Title"
                 value={ordinanceTitle}
                 onChange={(e) => setOrdinanceTitle(e.target.value)}
@@ -3328,29 +3316,22 @@ export default function AdminDashboard() {
                 className={styles.input}
                 type="date"
                 value={ordinanceDate}
-                onChange={(e) => {
-                  const newDate = e.target.value;
-                  setOrdinanceDate(newDate);
-                  // Only refresh the suggested number if the user hasn't
-                  // manually customized it away from the last suggestion.
-                  if (ordinanceNumber === lastOrdinanceSuggestion.current) {
-                    const newYear = newDate ? newDate.split("-")[0] : "";
-                    const suggested = suggestOrdinanceNumber(
-                      ordinances,
-                      newYear
-                    );
-                    lastOrdinanceSuggestion.current = suggested;
-                    setOrdinanceNumber(suggested);
-                  }
-                }}
+                onChange={(e) => setOrdinanceDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Category</label>
+              <p
+                className={styles.fileHint}
+                style={{ marginTop: -6, marginBottom: 10 }}
+              >
+                The official ordinance number isn't assigned here — the
+                Secretary will be asked for it when this record is published.
+              </p>
+              <label className={styles.fieldLabel}>Sector</label>
               <select
                 className={styles.input}
                 value={ordinanceCategory}
                 onChange={(e) => setOrdinanceCategory(e.target.value)}
               >
-                <option value="">— Select category —</option>
+                <option value="">— Select sector —</option>
                 {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -3493,7 +3474,7 @@ export default function AdminDashboard() {
             >
               <input
                 className={styles.input}
-                placeholder="Ordinance Number"
+                placeholder="Ordinance Number (optional — assigned at publish time if left blank)"
                 value={editOrdinanceNumber}
                 onChange={(e) => setEditOrdinanceNumber(e.target.value)}
               />
@@ -3510,13 +3491,13 @@ export default function AdminDashboard() {
                 value={editOrdinanceDate}
                 onChange={(e) => setEditOrdinanceDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Category</label>
+              <label className={styles.fieldLabel}>Sector</label>
               <select
                 className={styles.input}
                 value={editOrdinanceCategory}
                 onChange={(e) => setEditOrdinanceCategory(e.target.value)}
               >
-                <option value="">— Select category —</option>
+                <option value="">— Select sector —</option>
                 {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -3599,13 +3580,11 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowResolutionModal(false);
             setResolutionFile(null);
-            setResolutionNumber("");
             setResolutionTitle("");
             setResolutionDate("");
             setResolutionCategory("");
             setSelectedResolutionOfficials([]);
             setModalMessage("");
-            lastResolutionSuggestion.current = "";
           }}
         >
           <div
@@ -3640,13 +3619,11 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowResolutionModal(false);
                   setResolutionFile(null);
-                  setResolutionNumber("");
                   setResolutionTitle("");
                   setResolutionDate("");
                   setResolutionCategory("");
                   setSelectedResolutionOfficials([]);
                   setModalMessage("");
-                  lastResolutionSuggestion.current = "";
                 }}
                 aria-label="Close modal"
                 style={{
@@ -3679,19 +3656,6 @@ export default function AdminDashboard() {
             >
               <input
                 className={styles.input}
-                placeholder="Resolution Number (e.g. Resolution No. 2024-001)"
-                value={resolutionNumber}
-                onChange={(e) => setResolutionNumber(e.target.value)}
-              />
-              <p
-                className={styles.fileHint}
-                style={{ marginTop: -6, marginBottom: 10 }}
-              >
-                Suggested automatically based on the year and existing
-                resolutions — feel free to edit it.
-              </p>
-              <input
-                className={styles.input}
                 placeholder="Resolution Title"
                 value={resolutionTitle}
                 onChange={(e) => setResolutionTitle(e.target.value)}
@@ -3701,27 +3665,22 @@ export default function AdminDashboard() {
                 className={styles.input}
                 type="date"
                 value={resolutionDate}
-                onChange={(e) => {
-                  const newDate = e.target.value;
-                  setResolutionDate(newDate);
-                  if (resolutionNumber === lastResolutionSuggestion.current) {
-                    const newYear = newDate ? newDate.split("-")[0] : "";
-                    const suggested = suggestResolutionNumber(
-                      resolutions,
-                      newYear
-                    );
-                    lastResolutionSuggestion.current = suggested;
-                    setResolutionNumber(suggested);
-                  }
-                }}
+                onChange={(e) => setResolutionDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Category</label>
+              <p
+                className={styles.fileHint}
+                style={{ marginTop: -6, marginBottom: 10 }}
+              >
+                The official resolution number isn't assigned here — the
+                Secretary will be asked for it when this record is published.
+              </p>
+              <label className={styles.fieldLabel}>Sector</label>
               <select
                 className={styles.input}
                 value={resolutionCategory}
                 onChange={(e) => setResolutionCategory(e.target.value)}
               >
-                <option value="">— Select category —</option>
+                <option value="">— Select sector —</option>
                 {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -3864,7 +3823,7 @@ export default function AdminDashboard() {
             >
               <input
                 className={styles.input}
-                placeholder="Resolution Number"
+                placeholder="Resolution Number (optional — assigned at publish time if left blank)"
                 value={editResolutionNumber}
                 onChange={(e) => setEditResolutionNumber(e.target.value)}
               />
@@ -3881,13 +3840,13 @@ export default function AdminDashboard() {
                 value={editResolutionDate}
                 onChange={(e) => setEditResolutionDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Category</label>
+              <label className={styles.fieldLabel}>Sector</label>
               <select
                 className={styles.input}
                 value={editResolutionCategory}
                 onChange={(e) => setEditResolutionCategory(e.target.value)}
               >
-                <option value="">— Select category —</option>
+                <option value="">— Select sector —</option>
                 {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}

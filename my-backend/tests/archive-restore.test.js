@@ -6,8 +6,8 @@
 // or not) in the `finally` block, regardless of where the test failed.
 //
 // Uses two accounts on purpose: Clerk creates and archives the record (it
-// stays in the pending bucket throughout, which only Clerk/Councilor may
-// archive — see helpers/utils.js's canManageLegislativeRecord), while
+// stays in the pending bucket throughout, which Secretary/Clerk may always
+// archive — see helpers/utils.js's canArchiveLegislativeRecord), while
 // Secretary drives the Archives-module endpoints (list/restore/permanent
 // delete), which stay Secretary-only regardless of bucket.
 const { BASE, ok, skip, summary, mintToken, authHeaders, findUser, uploadOrdinance, purgeArchivedByTitle } = require('./_helpers')
@@ -59,7 +59,6 @@ async function main() {
     if (ordinanceId) {
       // Archive it again (idempotent: 404s harmlessly if it's already
       // archived from a failed restore step above) then purge for real.
-      // Still in the pending bucket, so Clerk (not Secretary) archives it.
       await fetch(`${BASE}/api/ordinances/${ordinanceId}`, { method: 'DELETE', headers: clerkHeaders })
       const purged = await purgeArchivedByTitle(secHeaders, 'ordinance', title)
       console.log(purged ? 'Cleanup done: disposable ordinance permanently purged.' : 'Cleanup: nothing left to purge.')

@@ -16,6 +16,7 @@ import {
 import styles from "./AdminDashboard.module.css";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
+import ConfirmModal from "./ConfirmModal";
 import { useModalError } from "./AdminContext";
 import { ModalAlert } from "./AdminComponents";
 import { COPY, CATEGORY_OPTIONS } from "./contentManagement/constants";
@@ -60,6 +61,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
   const [modalError, showModalError, clearModalError] = useModalError();
   const [deleteError, showDeleteError, clearDeleteError] = useModalError();
   const { toasts, showMsg, dismissToast } = useToasts();
+  const [successModalMsg, setSuccessModalMsg] = useState("");
 
   const sorted = useMemo(() => {
     const filtered = filterPosts(posts, { search, filterStatus, filterCategory });
@@ -74,7 +76,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
     clearModalError();
     try {
       await savePost(editTarget, formData);
-      showMsg(editTarget ? "Post updated!" : "Post published!");
+      setSuccessModalMsg(editTarget ? "Post updated!" : "Post published!");
       setShowAddModal(false);
       setEditTarget(null);
     } catch (err) {
@@ -90,7 +92,7 @@ export default function ContentManagementPage({ isAdmin = false }) {
     clearDeleteError();
     try {
       await deletePost(deleteTarget);
-      showMsg("Post deleted!");
+      setSuccessModalMsg("Post deleted!");
       setDeleteTarget(null);
     } catch (err) {
       showDeleteError(err.message || "Failed to delete post.");
@@ -140,9 +142,9 @@ export default function ContentManagementPage({ isAdmin = false }) {
       </div>
 
       {section === "trivia" ? (
-        <TriviaManager isAdmin={isAdmin} showMsg={showMsg} />
+        <TriviaManager isAdmin={isAdmin} showMsg={showMsg} showSuccessModal={setSuccessModalMsg} />
       ) : section === "schedules" ? (
-        <ScheduleManager isAdmin={isAdmin} showMsg={showMsg} />
+        <ScheduleManager isAdmin={isAdmin} showMsg={showMsg} showSuccessModal={setSuccessModalMsg} />
       ) : (
       <>
       <p
@@ -320,6 +322,18 @@ export default function ContentManagementPage({ isAdmin = false }) {
         />
       )}
       </>
+      )}
+
+      {successModalMsg && (
+        <ConfirmModal
+          type="success"
+          title="Success"
+          message={successModalMsg}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={() => setSuccessModalMsg("")}
+          onCancel={() => setSuccessModalMsg("")}
+        />
       )}
     </div>
   );

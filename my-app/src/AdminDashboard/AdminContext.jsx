@@ -71,6 +71,17 @@ export const extractErrorMsg = (data, fallback = "Something went wrong.") => {
   return fallback;
 };
 
+// ─── Required-field validation ──────────────────────────────────────────────
+// Takes [value, label] pairs and names exactly which ones are empty, instead
+// of a blanket "All fields required!" that leaves the user hunting the form
+// for whichever field they missed.
+export const missingFieldsMsg = (fields) => {
+  const missing = fields.filter(([value]) => !value).map(([, label]) => label);
+  if (!missing.length) return "";
+  if (missing.length === 1) return `${missing[0]} is required.`;
+  return `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]} are required.`;
+};
+
 // ─── Auth helper ───────────────────────────────────────────────────────────────
 // A 401 here always means the session itself is invalid — no token, or
 // verifyToken rejected it (expired past its 8h lifetime, malformed, or the
@@ -149,13 +160,14 @@ export const fetchCouncilsList = async () => {
 };
 
 // ─── React Query: pending legislative records ───────────────────────────────────
-// Shared cache key for the role-scoped pending queue on ordinances/resolutions/
-// session-minutes. Both the Dashboard's "Needs your review" widget and each
-// module's own Pending tab ask for the exact same slice (see
-// pendingStatusesForRole in useLegislativeReview.js) — keying on it means they
-// share one cache entry instead of independently re-fetching, and a single
-// invalidateQueries call after an accept/reject/publish action refreshes both
-// places at once.
+// Shared cache key for the role-scoped status queue on ordinances/
+// resolutions/session-minutes — used by each module's own Pending tab
+// (pendingStatusesForRole) and Ready to Publish tab (READY_TO_PUBLISH_STATUSES),
+// and by the Dashboard's "Needs your review" widget (actionableStatusesForRole,
+// see useLegislativeReview.js). Keying on the exact statusQ string means any
+// two of these asking for the identical slice share one cache entry instead
+// of independently re-fetching, and invalidating that key after an accept/
+// reject/approve/publish action refreshes every place showing it at once.
 export const pendingQueryKey = (route, statusQ) => ["pending", route, statusQ];
 
 export const fetchPendingList = async (route, statusQ) => {

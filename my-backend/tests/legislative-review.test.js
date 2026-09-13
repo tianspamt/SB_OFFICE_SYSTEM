@@ -1,13 +1,15 @@
 // Covers the ordinance review state machine (routes/ordinances.js) under the
 // RBAC split: all four positions can create a draft (Secretary and Vice-
 // Mayor sometimes draft directly rather than only reviewing/approving), but
-// only Clerk/Councilor may edit one afterward — Secretary alone
-// approves/rejects and does the final publish, and Vice-Mayor's only other
-// action is approving a ready_to_publish item. Once published, only
-// Secretary/Clerk may still edit — Councilor becomes read-only.
+// editing content (PUT /:id, replace-file/revise) is Secretary/Clerk only in
+// every bucket — Councilor and Vice-Mayor may only withdraw (archive) a
+// not-yet-published draft they themselves created, never someone else's, and
+// never edit its content. Secretary alone approves/rejects and does the
+// final publish; Vice-Mayor's only other action is approving a
+// ready_to_publish item.
 //   pending -> ready_to_publish -> approved -> published        (accept path)
 //   pending -> needs_revision -> pending                        (revision path,
-//     driven by Clerk/Councilor editing in place — replacing the file on a
+//     driven by a Secretary/Clerk edit in place — replacing the file on a
 //     needs_revision record auto-flips it back to pending, no separate
 //     "resubmit" call)
 // Resolutions and session-minutes run the identical code shape — this file
@@ -66,20 +68,52 @@ async function main() {
     idVmDirect = body.id
     ok('Vice-Mayor upload also starts an ordinance in "pending"', res.ok && body.data?.status === 'pending', JSON.stringify(body.data))
 
-    // Creating one doesn't grant edit rights — Vice-Mayor's only other
-    // action stays approving a ready_to_publish item.
+    // Creating one doesn't grant edit rights — Vice-Mayor can never edit
+    // content, even their own draft — but they may still withdraw it while
+    // it's unpublished.
     if (idVmDirect) {
       res = await replaceOrdinanceFile(vmHeaders, idVmDirect)
       ok('Vice-Mayor cannot replace the file on their own draft (403)', res.status === 403, `status=${res.status}`)
+
+      res = await fetch(`${BASE}/api/ordinances/${idVmDirect}`, { method: 'DELETE', headers: councilorHeaders })
+      ok("Councilor cannot archive someone else's pending draft (403)", res.status === 403, `status=${res.status}`)
+
+      res = await fetch(`${BASE}/api/ordinances/${idVmDirect}`, { method: 'DELETE', headers: vmHeaders })
+      body = await res.json()
+      ok('Vice-Mayor can archive their own pending draft', res.ok && body.success, JSON.stringify(body))
     }
 
     if (idAccept) {
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      ok('Secretary advance-reading rejected before Accept — still "pending", not a reading status (400)', res.status === 400, `status=${res.status}`)
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/accept`, clerkHeaders)
+      ok('Clerk cannot accept — wrong position (403)', res.status === 403, `status=${res.status}`)
+
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/accept`, secHeaders)
       body = await res.json()
-      ok('Secretary accept: pending -> ready_to_publish', res.ok && body.data?.status === 'ready_to_publish', JSON.stringify(body))
+      ok('Secretary accept: pending -> first_reading', res.ok && body.data?.status === 'first_reading', JSON.stringify(body))
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/accept`, secHeaders)
       ok('Secretary accept: rejected once no longer pending (400)', res.status === 400, `status=${res.status}`)
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, clerkHeaders)
+      ok('Clerk cannot advance-reading — wrong position (403)', res.status === 403, `status=${res.status}`)
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary advance-reading: first_reading -> second_reading', res.ok && body.data?.status === 'second_reading', JSON.stringify(body))
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary advance-reading: second_reading -> third_reading', res.ok && body.data?.status === 'third_reading', JSON.stringify(body))
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary advance-reading: third_reading -> ready_to_publish', res.ok && body.data?.status === 'ready_to_publish', JSON.stringify(body))
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      ok('Secretary advance-reading rejected once past the reading stages (400)', res.status === 400, `status=${res.status}`)
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/vm-approve`, clerkHeaders)
       ok('Clerk cannot vm-approve — wrong position (403)', res.status === 403, `status=${res.status}`)
@@ -92,8 +126,16 @@ async function main() {
       ok('Clerk cannot publish — wrong position (403)', res.status === 403, `status=${res.status}`)
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/publish`, secHeaders)
+      ok('Secretary publish rejected without an ordinance number (400)', res.status === 400, `status=${res.status}`)
+
+      const publishNumber = `Ordinance No. E2E-${Date.now()}`
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/publish`, secHeaders, { ordinance_number: publishNumber })
       body = await res.json()
-      ok('Secretary publish: approved -> published', res.ok && body.data?.status === 'published', JSON.stringify(body))
+      ok(
+        'Secretary publish: approved -> published, with the ordinance number supplied at publish time',
+        res.ok && body.data?.status === 'published' && body.data?.ordinance_number === publishNumber,
+        JSON.stringify(body)
+      )
 
       res = await fetch(`${BASE}/api/ordinances`, { headers: secHeaders })
       body = await res.json()
@@ -126,10 +168,15 @@ async function main() {
       body = await res.json()
       ok('Secretary request-changes: pending -> needs_revision', res.ok && body.data?.status === 'needs_revision', JSON.stringify(body))
 
-      // Replacing the file doubles as the resubmit — no separate call needed.
+      // Councilor authored this draft but can't fix it themselves — only
+      // Secretary/Clerk may edit content, even on a draft that isn't theirs.
       res = await replaceOrdinanceFile(councilorHeaders, idRevise)
+      ok('Councilor cannot replace the file on their own needs_revision draft (403)', res.status === 403, `status=${res.status}`)
+
+      // Clerk replaces it instead — doubles as the resubmit, no separate call needed.
+      res = await replaceOrdinanceFile(clerkHeaders, idRevise)
       body = await res.json()
-      ok('Councilor replace-file on a rejected draft auto-flips needs_revision -> pending', res.ok && body.data?.status === 'pending', JSON.stringify(body))
+      ok('Clerk replace-file on a rejected draft auto-flips needs_revision -> pending', res.ok && body.data?.status === 'pending', JSON.stringify(body))
 
       res = await fetch(`${BASE}/api/comments?entity_type=ordinance&entity_id=${idRevise}`, { headers: secHeaders })
       body = await res.json()
@@ -141,10 +188,10 @@ async function main() {
     }
   } finally {
     // idAccept ends up published (Secretary/Clerk may archive it); idRevise
-    // is already archived by the test itself (the DELETE below just 404s
-    // harmlessly); idDirect/idVmDirect are still sitting in "pending" when
-    // we get here, which only Clerk/Councilor may archive — see
-    // canManageLegislativeRecord.
+    // and idVmDirect are already archived by the test itself (the DELETEs
+    // below just 404 harmlessly); idDirect is still sitting in "pending"
+    // when we get here, which Secretary/Clerk may always archive — see
+    // canArchiveLegislativeRecord.
     for (const [id, title, headers] of [
       [idAccept, titleAccept, secHeaders],
       [idRevise, titleRevise, secHeaders],

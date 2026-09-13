@@ -23,6 +23,8 @@ import lStyles from "./LegislativeModule.module.css";
 import { API, MONTHS, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
 import {
   pendingStatusesForRole,
+  READY_TO_PUBLISH_STATUSES,
+  isLockedStatus,
   useReviewWorkflow,
   useCommentThread,
   useLegislativePublished,
@@ -37,10 +39,12 @@ import {
   EmptyState,
   StatsRow,
   StatusBadge,
+  statusLabel,
   RecordListSkeleton,
   PresentOverlay,
 } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
+import ConfirmModal from "./ConfirmModal";
 
 // Published records are paginated server-side (see GET /api/session-minutes'
 // opt-in page/limit) instead of fetching every session ever recorded — this
@@ -227,6 +231,7 @@ export default function SessionsPage({
   readOnly = false,
   canPublish = false,
   canManagePending = false,
+  currentUserId = null,
   isViceMayor = false,
   isSecretary = false,
   isClerk = false,
@@ -241,11 +246,19 @@ export default function SessionsPage({
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
   const queryClient = useQueryClient();
-  const pendingStatusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const pendingStatusQ = pendingStatusesForRole({ isSecretary });
   const { data: pendingSessions = [], isLoading: fetchingPending } = useQuery({
     queryKey: pendingQueryKey("session-minutes", pendingStatusQ),
     queryFn: () => fetchPendingList("session-minutes", pendingStatusQ),
     enabled: activeTab === "pending" && canPublish,
+    staleTime: 15000,
+  });
+  // Ready to Publish: its own tab (see READY_TO_PUBLISH_STATUSES) — Vice-Mayor
+  // approves from here, everyone else can still track what's awaiting them.
+  const { data: readyToPublishSessions = [], isLoading: fetchingReadyToPublish } = useQuery({
+    queryKey: pendingQueryKey("session-minutes", READY_TO_PUBLISH_STATUSES),
+    queryFn: () => fetchPendingList("session-minutes", READY_TO_PUBLISH_STATUSES),
+    enabled: activeTab === "ready_to_publish" && canPublish,
     staleTime: 15000,
   });
 
@@ -285,6 +298,7 @@ export default function SessionsPage({
   const {
     viewTarget, setViewTarget,
     submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
+    successMsg: reviewSuccessMsg, clearSuccessMsg: clearReviewSuccessMsg,
     runAction: runReviewAction,
   } = useReviewWorkflow({ onRefresh: () => refreshAll() });
   const {
@@ -308,8 +322,10 @@ export default function SessionsPage({
 
   // Old call sites just call fetchPendingSessions() to refresh — keeping
   // the name means refreshAll() below doesn't need to change.
-  const fetchPendingSessions = () =>
+  const fetchPendingSessions = () => {
     queryClient.invalidateQueries({ queryKey: pendingQueryKey("session-minutes", pendingStatusQ) });
+    queryClient.invalidateQueries({ queryKey: pendingQueryKey("session-minutes", READY_TO_PUBLISH_STATUSES) });
+  };
 
   const refreshAll = () => {
     fetchPendingSessions();
@@ -371,7 +387,8 @@ export default function SessionsPage({
     runReviewAction(
       `/api/session-minutes/${id}/accept`,
       { method: "PUT" },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Session minutes accepted!"
     );
 
   const handleRequestChanges = async () => {
@@ -382,7 +399,8 @@ export default function SessionsPage({
         method: "PUT",
         body: JSON.stringify({ comment: reviewCommentText.trim() }),
       },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Changes requested!"
     );
     if (ok) {
       setReviewCommentText("");
@@ -394,7 +412,8 @@ export default function SessionsPage({
     runReviewAction(
       `/api/session-minutes/${id}/vm-approve`,
       { method: "PUT" },
-      (d) => ({ status: d.status })
+      (d) => ({ status: d.status }),
+      "Session minutes approved!"
     );
 
   const handlePublish = (id) =>
@@ -440,7 +459,7 @@ export default function SessionsPage({
     return ok;
   };
 
-  const pendingFiltered = pendingSessions.filter((s) => {
+  const matchesPendingFilters = (s) => {
     const matchesSearch =
       !search ||
       (s.session_number || "").toLowerCase().includes(search.toLowerCase());
@@ -450,8 +469,11 @@ export default function SessionsPage({
       minutesYearFilter === "all" ||
       (s.session_date || "").slice(0, 4) === minutesYearFilter;
     return matchesSearch && matchesType && matchesYear;
-  });
+  };
+  const pendingFiltered = pendingSessions.filter(matchesPendingFilters);
   const pendingCount = pendingSessions.length;
+  const readyToPublishFiltered = readyToPublishSessions.filter(matchesPendingFilters);
+  const readyToPublishCount = readyToPublishSessions.length;
 
   return (
     <>
@@ -473,7 +495,14 @@ export default function SessionsPage({
         tabs={[
           { id: "published", label: "Published" },
           ...(canPublish
-            ? [{ id: "pending", label: "Pending", badge: pendingCount }]
+            ? [
+                { id: "pending", label: "Pending", badge: pendingCount },
+                {
+                  id: "ready_to_publish",
+                  label: "Ready to Publish",
+                  badge: readyToPublishCount,
+                },
+              ]
             : []),
         ]}
         activeTab={activeTab}
@@ -622,22 +651,85 @@ export default function SessionsPage({
                     >
                       <Eye size={13} /> View Draft
                     </button>
-                    {canManagePending && (
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-                        onClick={() =>
-                          setDeleteTarget({
-                            id: item.id,
-                            type: "session",
-                            name:
-                              item.session_number ||
-                              new Date(item.session_date).toLocaleDateString("en-PH"),
-                          })
-                        }
-                      >
-                        <Archive size={13} /> Archive
-                      </button>
-                    )}
+                    {/* Secretary/Clerk may archive any draft; Councilor/
+                        Vice-Mayor may only withdraw one they created. Once a
+                        record reaches ready_to_publish/approved, it's read-
+                        only for everyone — see the Ready to Publish tab. */}
+                    {!isLockedStatus(item.status) &&
+                      (canManagePending ||
+                        ((isCouncilor || isViceMayor) &&
+                          item.created_by === currentUserId)) && (
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: item.id,
+                              type: "session",
+                              name:
+                                item.session_number ||
+                                new Date(item.session_date).toLocaleDateString("en-PH"),
+                            })
+                          }
+                        >
+                          <Archive size={13} /> Archive
+                        </button>
+                      )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          )}
+        </>
+      )}
+
+      {/* ── READY TO PUBLISH TAB ─────────────────────────────────────────────── */}
+      {activeTab === "ready_to_publish" && (
+        <>
+          <div className={lStyles.resultCount}>
+            Showing {readyToPublishFiltered.length} records
+          </div>
+          {fetchingReadyToPublish ? (
+            <RecordListSkeleton count={3} />
+          ) : (
+          <div className={lStyles.recordList}>
+            {readyToPublishFiltered.length === 0 ? (
+              <EmptyState
+                title="Nothing ready to publish"
+                text="Records approved by the Vice-Mayor and awaiting final publish will show up here."
+              />
+            ) : (
+              readyToPublishFiltered.map((item) => (
+                <div key={item.id} className={lStyles.recordCard}>
+                  <div
+                    className={lStyles.recordIcon}
+                    style={{ background: "var(--gray-50)" }}
+                  >
+                    📝
+                  </div>
+                  <div className={lStyles.recordBody}>
+                    <div className={lStyles.recordTitle}>
+                      {item.session_number ||
+                        new Date(item.session_date).toLocaleDateString("en-PH")}
+                    </div>
+                    <div className={lStyles.recordMeta}>
+                      {item.venue && <span>{item.venue}</span>}
+                      {item.revision_count > 0 && (
+                        <span>Revision #{item.revision_count}</span>
+                      )}
+                      <StatusBadge status={item.status} />
+                    </div>
+                  </div>
+                  <div className={lStyles.recordActions}>
+                    {/* Read-only tab — no edit/comment/archive for anyone
+                        here, just View (which still carries the Approve/
+                        Publish actions once applicable). */}
+                    <button
+                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
+                      onClick={() => handleOpenView(item)}
+                    >
+                      <Eye size={13} /> View
+                    </button>
                   </div>
                 </div>
               ))
@@ -728,11 +820,8 @@ export default function SessionsPage({
                     </div>
                     <div>
                       <div className={lStyles.viewModalMetaLabel}>Status</div>
-                      <div
-                        className={lStyles.viewModalMetaValue}
-                        style={{ textTransform: "capitalize" }}
-                      >
-                        {viewTarget.status}
+                      <div className={lStyles.viewModalMetaValue}>
+                        {statusLabel(viewTarget.status)}
                       </div>
                     </div>
                   </div>
@@ -756,9 +845,10 @@ export default function SessionsPage({
               {/* ── Agenda + minutes (editable while under review, read-only once published) ── */}
               {(() => {
                 const isReviewer =
-                  (isSecretary || isClerk || isCouncilor) &&
+                  (isSecretary || isClerk) &&
                   viewTarget.status &&
-                  viewTarget.status !== "published";
+                  viewTarget.status !== "published" &&
+                  !isLockedStatus(viewTarget.status);
                 return (
                   <>
                     <div
@@ -821,7 +911,9 @@ export default function SessionsPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {(isSecretary || isClerk || isCouncilor) && (
+                  {/* Replace file — Secretary/Clerk only, and read-only
+                      once the record reaches ready_to_publish/approved. */}
+                  {(isSecretary || isClerk) && !isLockedStatus(viewTarget.status) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -911,7 +1003,8 @@ export default function SessionsPage({
                     )}
                   </div>
 
-                  {(isSecretary || isClerk || isCouncilor || isViceMayor) && (
+                  {(isSecretary || isClerk || isCouncilor || isViceMayor) &&
+                    !isLockedStatus(viewTarget.status) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -973,11 +1066,11 @@ export default function SessionsPage({
 
                     {isSecretary && viewTarget.status === "approved" && (
                       <button
-                        className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                        className={lStyles.pillApprove}
                         disabled={reviewSubmitting}
                         onClick={() => handlePublish(viewTarget.id)}
                       >
-                        ✅ Publish
+                        <CheckCircle2 size={16} /> Publish
                       </button>
                     )}
                   </div>
@@ -990,6 +1083,18 @@ export default function SessionsPage({
 
       {presentTarget && (
         <PresentOverlay textContent={presentTarget} onClose={() => setPresentTarget(null)} />
+      )}
+
+      {reviewSuccessMsg && (
+        <ConfirmModal
+          type="success"
+          title="Success"
+          message={reviewSuccessMsg}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={clearReviewSuccessMsg}
+          onCancel={clearReviewSuccessMsg}
+        />
       )}
     </>
   );

@@ -14,7 +14,7 @@ import { ModalAlert } from "../AdminComponents";
 import { useModalError } from "../AdminContext";
 import { useTrivia } from "./useTrivia";
 
-export function TriviaManager({ isAdmin = false, showMsg }) {
+export function TriviaManager({ isAdmin = false, showMsg, showSuccessModal }) {
   const { facts, loading, fetchError, saveFact, deleteFact, toggleActive } = useTrivia();
 
   const [showModal, setShowModal] = useState(false);
@@ -51,7 +51,7 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
         fact_text: factText.trim(),
         is_active: editTarget ? editTarget.is_active : true,
       });
-      showMsg?.(editTarget ? "Trivia fact updated!" : "Trivia fact added!");
+      showSuccessModal?.(editTarget ? "Trivia fact updated!" : "Trivia fact added!");
       setShowModal(false);
     } catch (err) {
       showModalError(err.message || "Something went wrong.");
@@ -64,7 +64,7 @@ export function TriviaManager({ isAdmin = false, showMsg }) {
     setDeleting(true);
     try {
       await deleteFact(deleteTarget);
-      showMsg?.("Trivia fact deleted!");
+      showSuccessModal?.("Trivia fact deleted!");
       setDeleteTarget(null);
     } catch (err) {
       showMsg?.(err.message || "Failed to delete trivia fact.", "error");

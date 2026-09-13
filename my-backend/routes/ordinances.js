@@ -11,7 +11,7 @@ const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/a
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON, escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
@@ -297,10 +297,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
 
 // ─── PUT /api/ordinances/:id ──────────────────────────────────────────────────
 // Who may edit depends on which bucket the record is currently in — see
-// canManageLegislativeRecord: Secretary/Clerk own it once published,
-// Clerk/Councilor own everything before that. Checked against the record's
-// live status below rather than as route middleware, since the answer
-// depends on data this handler has to fetch anyway.
+// canEditLegislativeRecord: Secretary/Clerk only, in any bucket.
 router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   const { ordinance_number, title, year, category, officials } = req.body
@@ -312,7 +309,7 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
-    if (!canManageLegislativeRecord(req.user.position, existing.status))
+    if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to edit this ordinance.' })
 
     const updateData = {
@@ -375,10 +372,9 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
   }
 })
 // ─── PUT /api/ordinances/:id/replace-file ─────────────────────────────────────
-// Clerk/Councilor are the primary drafters; Secretary keeps this as a
-// fallback alongside their approve/reject authority rather than having to
-// reject a draft just to fix something themselves. Overwrites the stored
-// file and bumps revision_count.
+// Secretary/Clerk only (see pendingEditors) — replacing the file is content
+// editing, same as PUT /:id above. Overwrites the stored file and bumps
+// revision_count.
 router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
@@ -386,7 +382,7 @@ router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file
     const { data: existing, error: fetchErr } = await supabase
       .from('ordinances').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Ordinance not found.' })
-    if (!canReplaceLegislativeFile(req.user.position, existing.status))
+    if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to replace this file.' })
 
     const extracted_text = await extractText(req.file)
@@ -428,6 +424,9 @@ router.use('/', createLegislativeReviewRoutes({
   singularLabel: 'Ordinance',
   archiveRpc: 'archive_ordinance',
   labelOf: (r) => r.title,
+  numberField: 'ordinance_number',
+  numberLabel: 'Ordinance number',
+  hasReadings: true,
 }))
 
 module.exports = router

@@ -152,13 +152,18 @@ export default function UserFormModal({
           <AvailabilityHint status={emailStatus} />
 
           {!isEdit && (
-            <input
-              className={styles.input}
-              type="password"
-              placeholder="Password"
-              value={form.password}
-              onChange={(e) => onFieldChange("password", e.target.value)}
-            />
+            <>
+              <input
+                className={styles.input}
+                type="password"
+                placeholder="Password"
+                value={form.password}
+                onChange={(e) => onFieldChange("password", e.target.value)}
+              />
+              <p className={styles.fieldHint}>
+                At least 8 characters, with 1 uppercase letter and 1 number.
+              </p>
+            </>
           )}
 
           <label className={styles.fieldLabel}>Position</label>

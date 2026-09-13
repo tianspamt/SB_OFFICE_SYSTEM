@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import './LogIn.css'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
 export default function Login() {
+  const navigate = useNavigate()
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [identifierError, setIdentifierError] = useState(false)
@@ -62,7 +64,7 @@ export default function Login() {
         } else {
           localStorage.setItem('token', data.token)
           localStorage.setItem('user', JSON.stringify(data.user))
-          window.location.href = '/dashboard'
+          navigate('/dashboard')
         }
       } else {
         setLoginError(data.message || 'Invalid credentials.')
@@ -95,7 +97,7 @@ export default function Login() {
       if (response.ok && data.success) {
         localStorage.setItem('token', forcedChange.token)
         localStorage.setItem('user', JSON.stringify({ ...forcedChange.user, mustChangePassword: false }))
-        window.location.href = '/dashboard'
+        navigate('/dashboard')
       } else {
         setChangeError(data.error || data.errors?.[0]?.msg || 'Failed to change password.')
       }

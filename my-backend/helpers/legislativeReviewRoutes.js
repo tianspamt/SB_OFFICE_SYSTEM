@@ -1,15 +1,17 @@
 const express = require('express')
 const supabase = require('../config/supabase')
 const { verifyToken, secretaryOnly, viceMayorOnly } = require('../middleware/auth')
-const { canManageLegislativeRecord, escapeHtml } = require('./utils')
+const { canArchiveLegislativeRecord, escapeHtml } = require('./utils')
 const { logActivity } = require('./logger')
 const { notify, notifyByPosition, notificationEmailHtml } = require('./notify')
 
 // Builds the shared review-workflow routes — accept / request-changes /
-// vm-approve / publish / archive — for one legislative record type
-// (ordinances, resolutions, or session_minutes). These five endpoints
-// implement the exact same
-//   pending → needs_revision → pending → ready_to_publish → approved → published
+// vm-approve / publish / archive (plus advance-reading for ordinances/
+// resolutions) — for one legislative record type (ordinances, resolutions,
+// or session_minutes). These endpoints implement the same
+//   pending → needs_revision → pending → first_reading → second_reading →
+//     third_reading → ready_to_publish → approved → published
+// (session_minutes skips the three reading statuses — see `hasReadings`)
 // state machine across all three record types; hand-applying a change to
 // each copy separately is exactly how bugs have slipped through before —
 // see useLegislativeReview.js's note on the Pending tab's loading flag, and
@@ -25,6 +27,27 @@ const { notify, notifyByPosition, notificationEmailHtml } = require('./notify')
 // record" / "session" instead of "session minutes") — those looked like
 // incidental copy-paste drift rather than a deliberate distinction, so they
 // were normalized here rather than carried forward as permanent config.
+// `numberField`/`numberLabel` are set only for ordinances/resolutions —
+// session_minutes assigns its number at creation time and publishes with no
+// extra input, same as before. When set, the record's official number is no
+// longer collected at draft-upload time (see routes/ordinances.js and
+// routes/resolutions.js — the field there is now optional and unvalidated):
+// at upload time nobody yet knows which draft the Vice-Mayor will approve
+// first, so requiring a number then produced out-of-order/duplicate numbers
+// that had to be hand-corrected later. Requiring it here instead, at the
+// moment Secretary actually publishes, means the number reflects the real
+// publish order.
+// The three readings an ordinance/resolution draft goes through in session
+// (RA 7160), inserted into the state machine as three extra `status` values
+// between "Secretary accepted" and "ready for Vice-Mayor" — Accept (below)
+// now lands on 'first_reading' instead of jumping straight to
+// 'ready_to_publish', and /advance-reading walks it the rest of the way:
+//   pending → needs_revision → pending → first_reading → second_reading →
+//     third_reading → ready_to_publish → approved → published
+// session_minutes has no reading requirement, so it keeps the original
+// direct pending → ready_to_publish jump on Accept (see `hasReadings` below).
+const READING_STATUSES = ['first_reading', 'second_reading', 'third_reading']
+
 function createLegislativeReviewRoutes({
   table,
   entityType,
@@ -32,6 +55,9 @@ function createLegislativeReviewRoutes({
   singularLabel,
   archiveRpc,
   labelOf,
+  numberField,
+  numberLabel,
+  hasReadings,
 }) {
   const router = express.Router()
   const lower = singularLabel.toLowerCase()
@@ -65,33 +91,69 @@ function createLegislativeReviewRoutes({
   const conflictResponse = (res) =>
     res.status(409).json({ error: `${singularLabel} was just updated by someone else — please refresh.` })
 
-  // PUT /:id/accept — Secretary, pending → ready_to_publish
+  const notifyVmReadyForApproval = (existing, id) => notifyByPosition('vice_mayor', {
+    message: `${singularLabel} ready for your approval: ${labelOf(existing)}`,
+    entityType, entityId: id,
+    emailSubject: `${singularLabel} Ready for Your Approval`,
+    emailHtml: notificationEmailHtml(
+      `${singularLabel} Ready for Your Approval`,
+      `<strong>${escapeHtml(labelOf(existing))}</strong> was accepted by the Secretary and is now waiting on your Vice-Mayor approval.`
+    ),
+  })
+
+  // PUT /:id/accept — Secretary. hasReadings types land on 'first_reading'
+  // (the three readings happen next, see /advance-reading below); others
+  // (session_minutes) jump straight to 'ready_to_publish' as before.
   router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
     const { id } = req.params
     const { notFound, wrongStatus, data: existing } = await loadInStatus(id, 'pending')
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not pending review.` })
+    const targetStatus = hasReadings ? READING_STATUSES[0] : 'ready_to_publish'
     try {
       const { data, conflict, error } = await atomicUpdate(id, 'pending', {
-        status: 'ready_to_publish', reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+        status: targetStatus, reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
       })
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'ACCEPT', activityModule, `Accepted draft: ${labelOf(existing)}`)
-      notifyByPosition('vice_mayor', {
-        message: `${singularLabel} ready for your approval: ${labelOf(existing)}`,
-        entityType, entityId: id,
-        emailSubject: `${singularLabel} Ready for Your Approval`,
-        emailHtml: notificationEmailHtml(
-          `${singularLabel} Ready for Your Approval`,
-          `<strong>${escapeHtml(labelOf(existing))}</strong> was accepted by the Secretary and is now waiting on your Vice-Mayor approval.`
-        ),
-      })
+      // hasReadings types don't notify the Vice-Mayor yet — that happens once
+      // /advance-reading actually reaches 'ready_to_publish'.
+      if (!hasReadings) notifyVmReadyForApproval(existing, id)
       res.json({ success: true, data })
     } catch (err) {
       res.status(500).json({ error: err.message })
     }
   })
+
+  // PUT /:id/advance-reading — Secretary only, hasReadings types only.
+  // Walks first_reading → second_reading → third_reading → ready_to_publish,
+  // one status at a time; the last step is what actually notifies the
+  // Vice-Mayor, since only then is the record really ready for them.
+  if (hasReadings) {
+    router.put('/:id/advance-reading', verifyToken, secretaryOnly, async (req, res) => {
+      const { id } = req.params
+      const { data: existing, error: fetchErr } = await supabase.from(table).select('*').eq('id', id).single()
+      if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+      const currentIndex = READING_STATUSES.indexOf(existing.status)
+      if (currentIndex === -1) return res.status(400).json({ error: `${singularLabel} is not currently in a reading stage.` })
+      const isFinalReading = currentIndex === READING_STATUSES.length - 1
+      const nextStatus = isFinalReading ? 'ready_to_publish' : READING_STATUSES[currentIndex + 1]
+      try {
+        const { data, conflict, error } = await atomicUpdate(id, existing.status, { status: nextStatus })
+        if (conflict) return conflictResponse(res)
+        if (error) return res.status(500).json({ error: error.message })
+        await logActivity(
+          req, 'ADVANCE_READING', activityModule,
+          `${isFinalReading ? 'Completed third reading' : `Marked ${nextStatus.replace('_', ' ')}`}: ${labelOf(existing)}`
+        )
+        if (isFinalReading) notifyVmReadyForApproval(existing, id)
+        res.json({ success: true, data })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+  }
 
   // PUT /:id/request-changes — Secretary, pending → needs_revision (comment required)
   router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
@@ -167,8 +229,28 @@ function createLegislativeReviewRoutes({
     const { notFound, wrongStatus, data: existing } = await loadInStatus(id, 'approved')
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not approved for publishing.` })
+
+    const patch = { status: 'published' }
+    if (numberField) {
+      const number = typeof req.body[numberField] === 'string' ? req.body[numberField].trim() : ''
+      if (!number) return res.status(400).json({ error: `${numberLabel} is required to publish.` })
+
+      // Case-insensitive duplicate check across every other record of this
+      // type, not just the currently loaded page — the frontend's own check
+      // only sees what it already fetched, so this is the authoritative one.
+      const { data: others, error: dupErr } = await supabase.from(table).select(`id, ${numberField}`).neq('id', id)
+      if (dupErr) return res.status(500).json({ error: dupErr.message })
+      const isDuplicate = (others || []).some(
+        (r) => (r[numberField] || '').trim().toLowerCase() === number.toLowerCase()
+      )
+      if (isDuplicate) {
+        return res.status(400).json({ error: `"${number}" is already in use by another ${lower}. Please choose a different number.` })
+      }
+      patch[numberField] = number
+    }
+
     try {
-      const { data, conflict, error } = await atomicUpdate(id, 'approved', { status: 'published' })
+      const { data, conflict, error } = await atomicUpdate(id, 'approved', patch)
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'PUBLISH', activityModule, `Published: ${labelOf(existing)}`)
@@ -189,16 +271,18 @@ function createLegislativeReviewRoutes({
   })
 
   // DELETE /:id — archive. Who may depends on which bucket the record is
-  // currently in (see canManageLegislativeRecord). Archives instead of a
-  // hard delete via the `archiveRpc` Postgres function (see migrations/007),
-  // which snapshots the row + its links into `archives` and removes them
-  // from the live tables as one transaction.
+  // currently in and, for Councilor/Vice-Mayor, whether they created it
+  // (see canArchiveLegislativeRecord). Archives instead of a hard delete via
+  // the `archiveRpc` Postgres function (see migrations/007), which
+  // snapshots the row + its links into `archives` and removes them from the
+  // live tables as one transaction.
   router.delete('/:id', verifyToken, async (req, res) => {
     try {
       const { data: existing, error: fetchErr } = await supabase
-        .from(table).select('status').eq('id', req.params.id).single()
+        .from(table).select('status, created_by').eq('id', req.params.id).single()
       if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
-      if (!canManageLegislativeRecord(req.user.position, existing.status))
+      const isOwner = existing.created_by === req.user.id
+      if (!canArchiveLegislativeRecord(req.user.position, existing.status, isOwner))
         return res.status(403).json({ error: `You are not allowed to archive this ${lower}.` })
 
       const { data: snapshot, error } = await supabase.rpc(archiveRpc, {

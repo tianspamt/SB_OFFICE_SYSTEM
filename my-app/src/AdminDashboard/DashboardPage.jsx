@@ -821,7 +821,7 @@ const DashboardPage = ({
                       <Tag size={16} />
                     </div>
                     <div>
-                      <div className={lStyles.viewModalMetaLabel}>Category</div>
+                      <div className={lStyles.viewModalMetaLabel}>Sector</div>
                       <div className={lStyles.viewModalMetaValue}>{viewTarget.item.category}</div>
                     </div>
                   </div>

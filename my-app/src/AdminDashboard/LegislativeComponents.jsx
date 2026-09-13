@@ -10,19 +10,44 @@ import styles from "./LegislativeModule.module.css";
 // Shares its shimmer classes (.skeleton / .skeletonSolid) with the
 // Users/Admins/Archives tables instead of redefining the animation here.
 import dashStyles from "./AdminDashboard.module.css";
+import { READING_STATUSES } from "./useLegislativeReview";
 
 // ─── STATUS BADGE ────────────────────────────────────────────────────────────
 
+const STATUS_MAP = {
+  pending: { label: "● Pending Review", cls: styles.statusPending },
+  needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
+  first_reading: { label: "First Reading", cls: styles.statusApproved },
+  second_reading: { label: "Second Reading", cls: styles.statusApproved },
+  third_reading: { label: "Third Reading", cls: styles.statusApproved },
+  ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
+  approved: { label: "VM Approved", cls: styles.statusApproved },
+  published: { label: "● Published", cls: styles.statusPublished },
+};
+
 export function StatusBadge({ status }) {
-  const map = {
-    pending: { label: "● Pending Review", cls: styles.statusPending },
-    needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
-    ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
-    approved: { label: "VM Approved", cls: styles.statusApproved },
-    published: { label: "● Published", cls: styles.statusPublished },
-  };
-  const s = map[status] || map.pending;
+  const s = STATUS_MAP[status] || STATUS_MAP.pending;
   return <span className={`${styles.statusBadge} ${s.cls}`}>{s.label}</span>;
+}
+
+// Plain-text version of the same label (no pill/border) — for spots like the
+// View modal's meta cards where Status needs to read like Year/Uploaded's
+// plain bold text, not a colored badge.
+export function statusLabel(status) {
+  const s = STATUS_MAP[status] || STATUS_MAP.pending;
+  return s.label.replace(/^●\s*/, "");
+}
+
+// Label for the Secretary's action button while an ordinance/resolution is
+// mid-reading (see READING_STATUSES) — walks first_reading -> second_reading
+// -> third_reading -> "send to the Vice-Mayor", matching what PUT
+// /:id/advance-reading actually does at each step. Returns null for any
+// other status, so callers can use it directly as a render guard.
+export function nextReadingActionLabel(status) {
+  const idx = READING_STATUSES.indexOf(status);
+  if (idx === -1) return null;
+  if (idx === READING_STATUSES.length - 1) return "Send for VM Approval";
+  return `Mark ${statusLabel(READING_STATUSES[idx + 1])}`;
 }
 
 // ─── TAB NAVIGATION ──────────────────────────────────────────────────────────
@@ -83,6 +108,13 @@ export function FilterPanel({
   yearValue,
   onYearChange,
   years,
+  // `statuses` is [{ value, label }], scoped to whatever's actually in the
+  // currently active tab (e.g. Pending's own status query) rather than every
+  // status that exists overall — an option for a status that can't appear in
+  // the list you're looking at would just always filter to empty.
+  statuses,
+  statusValue,
+  onStatusChange,
   onReset,
 }) {
   return (
@@ -91,7 +123,7 @@ export function FilterPanel({
 
       {categories && (
         <div className={styles.filterField}>
-          <span className={styles.filterLabel}>Category:</span>
+          <span className={styles.filterLabel}>Sector:</span>
           <select
             className={styles.filterSelect}
             value={categoryValue}
@@ -144,6 +176,24 @@ export function FilterPanel({
             value={authorValue}
             onChange={(e) => onAuthorChange(e.target.value)}
           />
+        </div>
+      )}
+
+      {statuses && (
+        <div className={styles.filterField}>
+          <span className={styles.filterLabel}>Status:</span>
+          <select
+            className={styles.filterSelect}
+            value={statusValue || "all"}
+            onChange={(e) => onStatusChange(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            {statuses.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -219,6 +269,122 @@ export function RecordListSkeleton({ count = 4 }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ─── PUBLISH NUMBER MODAL ────────────────────────────────────────────────────
+// The official ordinance/resolution number used to be collected at draft-
+// upload time, but nobody yet knows which draft the Vice-Mayor will approve
+// first at that point, so numbers assigned then didn't line up with actual
+// publish order and needed manual fixing. This collects it instead at the
+// one point the order is actually known — Secretary's final Publish click —
+// prefilled with a suggested next number that's still freely editable.
+export function PublishNumberModal({
+  label,
+  placeholder,
+  value,
+  onChange,
+  onConfirm,
+  onCancel,
+  submitting = false,
+  error,
+}) {
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "Escape" && !submitting) onCancel();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onCancel, submitting]);
+
+  return (
+    <>
+      <style>{`
+        .pnm-overlay {
+          position: fixed; inset: 0;
+          background: rgba(100, 100, 130, 0.25);
+          backdrop-filter: blur(2px);
+          display: flex; align-items: center; justify-content: center;
+          z-index: 9999;
+          animation: pnmFadeIn 0.15s ease;
+        }
+        @keyframes pnmFadeIn { from { opacity: 0 } to { opacity: 1 } }
+        .pnm-card {
+          background: #fff;
+          border-radius: 18px;
+          padding: 28px;
+          width: 100%;
+          max-width: 380px;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+          font-family: 'Segoe UI', system-ui, sans-serif;
+          animation: pnmSlideUp 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes pnmSlideUp {
+          from { opacity: 0; transform: translateY(20px) scale(0.96) }
+          to   { opacity: 1; transform: translateY(0)   scale(1)    }
+        }
+        .pnm-title { font-size: 18px; font-weight: 700; color: #1a1a2e; margin: 0 0 8px; }
+        .pnm-message { font-size: 13.5px; color: #6b7280; margin: 0 0 16px; line-height: 1.5; }
+        .pnm-input {
+          width: 100%; box-sizing: border-box;
+          padding: 11px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+          font-size: 14px; margin-bottom: 6px;
+        }
+        .pnm-input:focus { outline: none; border-color: #22c55e; }
+        .pnm-input:disabled { background: #f9fafb; cursor: not-allowed; }
+        .pnm-error { color: #ef4444; font-size: 12.5px; margin: 0 0 12px; }
+        .pnm-actions { display: flex; gap: 10px; margin-top: 16px; }
+        .pnm-btn {
+          flex: 1; padding: 12px; border: none; border-radius: 10px;
+          font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .pnm-btn-cancel { background: #f3f4f6; color: #374151; }
+        .pnm-btn-cancel:hover { background: #e5e7eb; }
+        .pnm-btn-confirm { background: #22c55e; color: #fff; }
+        .pnm-btn-confirm:hover { background: #16a34a; }
+        .pnm-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+      `}</style>
+      <div
+        className="pnm-overlay"
+        onClick={(e) => {
+          if (e.target === e.currentTarget && !submitting) onCancel();
+        }}
+      >
+        <div className="pnm-card">
+          <p className="pnm-title">Publish {label}</p>
+          <p className="pnm-message">
+            Enter the official {label.toLowerCase()} for this record. Drafts
+            aren't assigned one until they're actually published, so confirm
+            or edit it here.
+          </p>
+          <input
+            className="pnm-input"
+            autoFocus
+            placeholder={placeholder}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={submitting}
+          />
+          {error && <p className="pnm-error">{error}</p>}
+          <div className="pnm-actions">
+            <button
+              className="pnm-btn pnm-btn-cancel"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              className="pnm-btn pnm-btn-confirm"
+              onClick={onConfirm}
+              disabled={submitting}
+            >
+              {submitting ? "Publishing..." : "Publish"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -14,25 +14,25 @@ const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
 
-// Legislative-records RBAC: edit/archive rights depend on which bucket the
-// record is currently in, not just on being an admin — Secretary/Clerk own
-// records once published, Clerk/Councilor own everything before that
-// (drafting, fixing, withdrawing). Shared across ordinances/resolutions/
-// session-minutes since all three run the same review pipeline.
-const canManageLegislativeRecord = (position, status) =>
-  status === 'published'
-    ? ['secretary', 'clerk'].includes(position)
-    : ['clerk', 'councilor'].includes(position)
+// Legislative-records RBAC: editing content (title/number/category, or
+// replacing the file — see middleware/auth.js's pendingEditors) is
+// Secretary/Clerk only, regardless of which bucket the record is in.
+// Councilor and Vice-Mayor may originate a draft (canCreateDraft) and
+// withdraw their own not-yet-published one (canArchiveLegislativeRecord
+// below), but not edit its content — Secretary/Clerk own that on their
+// behalf. Shared across ordinances/resolutions/session-minutes since all
+// three run the same review pipeline.
+const canEditLegislativeRecord = (position) => ['secretary', 'clerk'].includes(position)
 
-// Same bucket split as canManageLegislativeRecord, but Secretary keeps
-// replace-file/revise as a fallback on records that aren't published yet
-// (see middleware/auth.js's pendingEditors) — only Councilor drops out once
-// a record is published, since Councilor's published-bucket access is
-// read-only.
-const canReplaceLegislativeFile = (position, status) =>
-  status === 'published'
-    ? ['secretary', 'clerk'].includes(position)
-    : ['secretary', 'clerk', 'councilor'].includes(position)
+// Archiving/withdrawing: Secretary/Clerk may archive any record, in any
+// bucket. Councilor and Vice-Mayor may only withdraw a record they
+// themselves created, and only while it's still unpublished — once
+// published, archiving is Secretary/Clerk's call alone.
+const canArchiveLegislativeRecord = (position, status, isOwner) => {
+  if (['secretary', 'clerk'].includes(position)) return true
+  if (status === 'published') return false
+  return isOwner && ['councilor', 'vice_mayor'].includes(position)
+}
 
 // Builds one `column.ilike."%value%"` clause for use inside a Supabase/
 // PostgREST `.or()` filter string (e.g. to search title OR a record
@@ -74,6 +74,6 @@ const dayBoundsUTC = (dateStr) => {
 
 module.exports = {
   isValidEmail, getIP, safeParseJSON, escapeHtml,
-  canManageLegislativeRecord, canReplaceLegislativeFile, orIlikeClause, dayBoundsUTC,
+  canEditLegislativeRecord, canArchiveLegislativeRecord, orIlikeClause, dayBoundsUTC,
   parseYearField,
 }

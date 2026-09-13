@@ -231,10 +231,15 @@ function AddCouncilModal({ onClose, onConfirm }) {
           </label>
           <input
             type="text"
+            inputMode="numeric"
             placeholder="e.g. 2022–2025 or 2022"
             value={termPeriod}
             onChange={(e) => {
-              setTermPeriod(e.target.value);
+              // Years and a range dash only — same filter as the Term
+              // Period field in Add/Edit Term (AdminComponents.jsx's
+              // TermFormFields) — strips any letter as it's typed or
+              // pasted instead of catching it at submit time.
+              setTermPeriod(e.target.value.replace(/[^0-9\-–\s]/g, ""));
               clearError();
             }}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
@@ -383,6 +388,7 @@ export default function OfficialsPage({
   ordinances = [],
   councils = [],
   onAddCouncil,
+  showSuccessModal,
   setDeleteTarget,
   onViewProfile,
   onEditMember,
@@ -427,6 +433,7 @@ export default function OfficialsPage({
       const key = result.data?.id != null ? `council-${result.data.id}` : null;
       if (key) setOpenGroups((prev) => ({ ...prev, [key]: true }));
       setShowAddCouncil(false);
+      showSuccessModal?.("Council added!");
     }
     return result;
   };

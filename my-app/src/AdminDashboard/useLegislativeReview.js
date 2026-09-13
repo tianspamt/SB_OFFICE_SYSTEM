@@ -7,14 +7,60 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { API, authFetch, publishedQueryKey, fetchPublishedList, useModalError } from "./AdminContext";
 
-// Role-aware pending queue: Secretary/Vice-Mayor only see the slice they
-// act on; Clerk/Councilor draft across the whole pending bucket, so they
-// get the same full scope as the generic fallback.
-export const pendingStatusesForRole = ({ isSecretary, isViceMayor }) => {
-  if (isSecretary) return "pending,approved";
-  if (isViceMayor) return "ready_to_publish";
-  return "pending,needs_revision,ready_to_publish,approved";
+// The three readings an ordinance/resolution draft goes through in session
+// (RA 7160), inserted into the state machine as three more `status` values
+// between "Secretary accepted" and "ready for Vice-Mayor" — Accept now lands
+// here instead of jumping straight to ready_to_publish, and the Secretary
+// walks it the rest of the way one status at a time (see OrdinancesPage/
+// ResolutionsPage's handleAdvanceReading). session_minutes has no reading
+// requirement and never enters these statuses — its Accept still jumps
+// straight to ready_to_publish, same as before. Deliberately kept in the
+// Pending tab's bucket (below) rather than Ready to Publish's — a record
+// mid-reading hasn't been approved by anyone yet, it's still Secretary's to
+// keep moving, same as a fresh pending draft.
+export const READING_STATUSES = ["first_reading", "second_reading", "third_reading"];
+
+// Role-aware pending queue — strictly "still needs review/fixing/advancing"
+// work: pending (awaiting Secretary's first look) and, for Secretary only,
+// the three reading statuses too (advancing a reading is Secretary's job,
+// same bucket as accepting/rejecting), plus needs_revision (sent back,
+// awaiting a fix) for Clerk/Councilor/Vice-Mayor, who draft/fix records —
+// Secretary doesn't fix drafts themselves so they don't need that slice.
+// ready_to_publish and approved never appear here — once Vice-Mayor accepts
+// a record into the ready_to_publish bucket, it moves to its own tab (see
+// READY_TO_PUBLISH_STATUSES below) and stays there, through approved, until
+// it's published — never back in Pending.
+export const pendingStatusesForRole = ({ isSecretary }) => {
+  if (isSecretary) return ["pending", ...READING_STATUSES].join(",");
+  return "pending,needs_revision";
 };
+
+// Broader than pendingStatusesForRole above — this is "every status the
+// given role can currently act on", used by the dashboard's "Needs your
+// review" widget (a cross-module action list, not a tab), not the Pending
+// tab itself. Secretary needs pending (accept/reject), the three reading
+// statuses (advance-reading), and approved (publish); Vice-Mayor needs
+// ready_to_publish (approve); Clerk/Councilor's only actionable slice is the
+// same one Pending shows them — they can't act on a record mid-reading.
+export const actionableStatusesForRole = ({ isSecretary, isViceMayor }) => {
+  if (isSecretary) return ["pending", ...READING_STATUSES, "approved"].join(",");
+  if (isViceMayor) return "ready_to_publish";
+  return "pending,needs_revision";
+};
+
+// The tail of the pipeline — split into its own tab (next to Pending) on
+// Ordinances/Resolutions/Sessions instead of being buried inside
+// Vice-Mayor's Pending tab, which used to show only ready_to_publish under
+// a confusingly generic "Pending" label. Covers ready_to_publish
+// (Vice-Mayor's approval queue) and approved (Secretary's publish queue,
+// once Vice-Mayor approves) so a record doesn't disappear from this tab the
+// moment it's approved — the Publish button just becomes available where
+// the Approve button was. isLockedStatus below gates the read-only
+// behavior (no edit/comment/archive) that applies to both statuses here,
+// and to the three reading statuses too even though those stay in Pending.
+export const READY_TO_PUBLISH_STATUSES = "ready_to_publish,approved";
+export const isLockedStatus = (status) =>
+  READING_STATUSES.includes(status) || status === "ready_to_publish" || status === "approved";
 
 // Shared Published-tab fetch, used identically by OrdinancesPage/
 // ResolutionsPage/SessionsPage — each page still builds its own `params`
@@ -99,12 +145,21 @@ export function useDeepLinkedTab(defaultTab, initialSubTab) {
 // action runner used by the View Draft modal on Ordinances/Resolutions/
 // Sessions. `onRefresh` is called after every successful action (each page
 // passes its own refreshAll, which re-pulls the pending queue).
+//
+// `successMsg` backs a blocking confirmation (rendered by each page as a
+// <ConfirmModal type="success">, same as the upload/archive/save/update
+// confirmations elsewhere) for actions that otherwise gave zero feedback —
+// Accept, Request Changes, and Vice-Mayor's Approve all just quietly
+// updated the status in place before this. Pass a 4th `successMsg` arg to
+// runAction only for actions that should show one; omitting it (Publish,
+// replace-file/revise, etc.) leaves this alone.
 export function useReviewWorkflow({ onRefresh } = {}) {
   const [viewTarget, setViewTarget] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, showError, clearError] = useModalError();
+  const [successMsg, setSuccessMsg] = useState("");
 
-  const runAction = async (url, options, applyUpdate) => {
+  const runAction = async (url, options, applyUpdate, successMsg) => {
     setSubmitting(true);
     clearError();
     try {
@@ -113,6 +168,7 @@ export function useReviewWorkflow({ onRefresh } = {}) {
       if (res.ok && data.success) {
         setViewTarget((prev) => (prev ? { ...prev, ...applyUpdate(data.data) } : prev));
         onRefresh?.();
+        if (successMsg) setSuccessMsg(successMsg);
         return true;
       }
       showError(data.error || "Action failed.");
@@ -125,7 +181,10 @@ export function useReviewWorkflow({ onRefresh } = {}) {
     }
   };
 
-  return { viewTarget, setViewTarget, submitting, error, setError: showError, runAction };
+  return {
+    viewTarget, setViewTarget, submitting, error, setError: showError,
+    successMsg, clearSuccessMsg: () => setSuccessMsg(""), runAction,
+  };
 }
 
 // Comment thread fetch/post, generic over entity type so PendingRecordsWidget

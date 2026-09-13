@@ -22,9 +22,9 @@ import {
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
 import { API, authFetch, pendingQueryKey, fetchPendingList, useModalError } from "./AdminContext";
-import { StatusBadge } from "./LegislativeComponents";
+import { StatusBadge, PublishNumberModal, nextReadingActionLabel } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
-import { pendingStatusesForRole, useCommentThread } from "./useLegislativeReview";
+import { actionableStatusesForRole, isLockedStatus, READING_STATUSES, useCommentThread } from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
 // Keeps this widget generic across the three legislative record types
@@ -101,7 +101,7 @@ export default function PendingRecordsWidget({
 }) {
   const [reviewTarget, setReviewTarget] = useState(null);
   const queryClient = useQueryClient();
-  const statusQ = pendingStatusesForRole({ isSecretary, isViceMayor });
+  const statusQ = actionableStatusesForRole({ isSecretary, isViceMayor });
 
   // Same query key + fetcher as each module's own Pending tab
   // (OrdinancesPage/ResolutionsPage/SessionsPage) — sharing the cache entry
@@ -305,8 +305,16 @@ export default function PendingRecordsWidget({
           }}
           onOpenFullRecord={() => {
             const cfg = TYPE_CONFIG[reviewTarget.record_type];
+            // Mirrors the two tabs' actual content, not isLockedStatus below
+            // (which also covers the three reading statuses — those stay
+            // listed under Pending, not Ready to Publish, so they're not
+            // "locked-therefore-ready_to_publish" for this deep link).
+            const subTab =
+              reviewTarget.status === "ready_to_publish" || reviewTarget.status === "approved"
+                ? "ready_to_publish"
+                : "pending";
             setReviewTarget(null);
-            onNavigate?.(cfg.tabKey, "pending");
+            onNavigate?.(cfg.tabKey, subTab);
           }}
         />
       )}
@@ -336,6 +344,14 @@ function ReviewModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, showError, clearError] = useModalError();
   const { comments, loadingComments, commentSubmitting, fetchComments, sendComment } = useCommentThread();
+
+  // Ordinances/resolutions need their official number confirmed at publish
+  // time (see PublishNumberModal) — session_minutes assigns its number at
+  // creation, so it still publishes with a single click.
+  const needsPublishNumber = item.record_type !== "session_minutes";
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishNumberValue, setPublishNumberValue] = useState("");
+  const [publishNumberError, setPublishNumberError] = useState("");
 
   useEffect(() => {
     fetchComments(cfg.entityType, item.id);
@@ -369,12 +385,38 @@ function ReviewModal({
     else if (result.error) showError(result.error);
   };
 
+  // hasReadings types (ordinances/resolutions) land on "first_reading"
+  // rather than the old "approved!" wording — session_minutes has no
+  // reading requirement and still jumps straight to ready_to_publish.
   const handleAccept = () =>
     runAction(
       `/api/${cfg.route}/${item.id}/accept`,
       { method: "PUT" },
-      `${cfg.label} approved!`
+      item.record_type === "session_minutes"
+        ? `${cfg.label} approved!`
+        : `${cfg.label} accepted — now in First Reading!`
     );
+
+  // Secretary-only, shown while item.status is one of READING_STATUSES —
+  // walks first_reading -> second_reading -> third_reading -> ready_to_publish
+  // one step at a time (see helpers/legislativeReviewRoutes.js). Like every
+  // other action here, a successful call closes this modal and refreshes the
+  // queue — the Secretary reopens it from the widget list for the next step,
+  // same as they would for Accept/VM-Approve/Publish.
+  const handleAdvanceReading = () => {
+    const label = nextReadingActionLabel(item.status);
+    const successMsg =
+      label === "Send for VM Approval"
+        ? `${cfg.label} — third reading complete, sent to the Vice-Mayor!`
+        : label
+        ? `${cfg.label} ${label.replace("Mark ", "")}!`
+        : undefined;
+    return runAction(
+      `/api/${cfg.route}/${item.id}/advance-reading`,
+      { method: "PUT" },
+      successMsg
+    );
+  };
 
   const handleRequestChanges = () => {
     if (!commentText.trim()) {
@@ -395,12 +437,36 @@ function ReviewModal({
       `${cfg.label} approved!`
     );
 
-  const handlePublish = () =>
-    runAction(
+  const handlePublish = () => {
+    if (!needsPublishNumber) {
+      runAction(
+        `/api/${cfg.route}/${item.id}/publish`,
+        { method: "PUT" },
+        `${cfg.label} published!`
+      );
+      return;
+    }
+    setPublishNumberValue(item[cfg.numberField] || "");
+    setPublishNumberError("");
+    setShowPublishModal(true);
+  };
+
+  const confirmPublish = async () => {
+    const number = publishNumberValue.trim();
+    if (!number) {
+      setPublishNumberError(`${cfg.label} number is required.`);
+      return;
+    }
+    // On failure, runAction's own showError already surfaces the message via
+    // the ModalAlert toast above (z-index above this modal), so there's
+    // nothing further to show here — just leave the modal open to retry.
+    const ok = await runAction(
       `/api/${cfg.route}/${item.id}/publish`,
-      { method: "PUT" },
+      { method: "PUT", body: JSON.stringify({ [cfg.numberField]: number }) },
       `${cfg.label} published!`
     );
+    if (ok) setShowPublishModal(false);
+  };
 
   // Replacing the file is the whole action now — the backend auto-flips a
   // needs_revision record back to pending as part of the same request, so
@@ -421,6 +487,7 @@ function ReviewModal({
   };
 
   return (
+    <>
     <div className={lStyles.viewModalOverlay} onClick={onClose}>
       <ModalAlert message={error} type="error" />
       <div className={lStyles.viewModal} onClick={(e) => e.stopPropagation()}>
@@ -613,7 +680,17 @@ function ReviewModal({
               </div>
             )}
 
-            {(isSecretary || isClerk || isCouncilor) && (
+            {isSecretary && READING_STATUSES.includes(item.status) && (
+              <button
+                className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                disabled={submitting}
+                onClick={handleAdvanceReading}
+              >
+                <Check size={13} /> {nextReadingActionLabel(item.status)}
+              </button>
+            )}
+
+            {(isSecretary || isClerk || isCouncilor) && !isLockedStatus(item.status) && (
               <button
                 className={`${lStyles.btn} ${lStyles.btnSuccess}`}
                 disabled={submitting || !replacementFile}
@@ -630,7 +707,7 @@ function ReviewModal({
                 disabled={submitting}
                 onClick={handleVMApprove}
               >
-                ✅ Approve
+                <Check size={13} /> Approve
               </button>
             )}
 
@@ -640,7 +717,7 @@ function ReviewModal({
                 disabled={submitting}
                 onClick={handlePublish}
               >
-                ✅ Publish
+                <Check size={13} /> Publish
               </button>
             )}
           </div>
@@ -656,5 +733,22 @@ function ReviewModal({
         </div>
       </div>
     </div>
+
+    {showPublishModal && (
+      <PublishNumberModal
+        label={`${cfg.label} Number`}
+        placeholder={`e.g. ${cfg.label} No. 2026-014`}
+        value={publishNumberValue}
+        onChange={(v) => {
+          setPublishNumberValue(v);
+          setPublishNumberError("");
+        }}
+        onConfirm={confirmPublish}
+        onCancel={() => setShowPublishModal(false)}
+        submitting={submitting}
+        error={publishNumberError}
+      />
+    )}
+    </>
   );
 }

@@ -1969,19 +1969,6 @@
 }
 
 /* ============================================================
-   LOADING BAR
-   ============================================================ */
-.loadingBar {
-  padding: 10px 16px;
-  background: #ebf8ff;
-  color: #2b6cb0;
-  border-radius: 8px;
-  font-size: 15px;
-  margin-bottom: 16px;
-  border: 1px solid #bee3f8;
-}
-
-/* ============================================================
    TABLE CARD
    ============================================================ */
 .tableCard {
@@ -3641,26 +3628,38 @@
 
 /* .main switches to its mobile padding (72px top, 16px sides) at 768px,
    independently of .dashboardContainer's own 640px breakpoint — so 641-768
-   and 481-640 need distinct combined totals. */
+   and 481-640 need distinct combined totals.
+   The margin here still fully cancels .main's + .dashboardContainer's
+   combined padding (same as the desktop rule above) so the purple
+   background stays flush against .mobileTopbar with no gap of page
+   background showing between them — .mobileTopbar is `position: fixed`,
+   56px tall, shown at this same ≤768px range (see .mobileTopbar above).
+   But the PADDING-TOP is bumped to 56px (that fixed bar's height) + the
+   14px this bar normally uses, instead of just 14px — otherwise the actual
+   "Welcome back" text/stat-chip content, not just the background, would
+   render underneath that fixed bar and be unreadable, with no way to
+   scroll it into view (content past a scroll container's own top edge via
+   negative margin just clips, it doesn't reveal on scroll). */
 @media (max-width: 768px) and (min-width: 641px) {
   .dashTopBar {
-    padding: 14px 40px;
+    padding: 70px 40px 14px;
     margin: -96px -40px 20px -40px;
   }
 }
 
 @media (max-width: 640px) and (min-width: 481px) {
   .dashTopBar {
-    padding: 14px 32px;
+    padding: 70px 32px 14px;
     margin: -88px -32px 20px -32px;
   }
 }
 
 /* .main's smallest padding step (64px top, 12px sides) plus
-   .dashboardContainer's 16px. */
+   .dashboardContainer's 16px — see the note above the 641-768 rule for why
+   the margin still fully cancels both while padding-top is bumped instead. */
 @media (max-width: 480px) {
   .dashTopBar {
-    padding: 14px 28px;
+    padding: 70px 28px 14px;
     margin: -80px -28px 20px -28px;
   }
 }

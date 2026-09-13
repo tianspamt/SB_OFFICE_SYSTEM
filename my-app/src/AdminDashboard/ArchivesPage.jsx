@@ -78,6 +78,7 @@ export default function ArchivesPage() {
   const [openMenuKey, setOpenMenuKey] = useState(null);
   const [processing, setProcessing] = useState(false);
   const { toasts, showMsg, dismissToast } = useToasts();
+  const [successModalMsg, setSuccessModalMsg] = useState("");
   const selectAllRef = useRef(null);
 
   // Debounce the search box so typing doesn't fire a request per keystroke.
@@ -162,7 +163,7 @@ export default function ArchivesPage() {
       const res = await authFetch(restoreEndpoint(row), { method: "PUT" });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg(`"${row.title || ENTITY_LABELS[row.entity_type]}" restored.`);
+        setSuccessModalMsg(`"${row.title || ENTITY_LABELS[row.entity_type]}" restored.`);
         fetchArchives();
       } else showMsg(data.error || "Restore failed.", "error");
     } catch {
@@ -179,7 +180,7 @@ export default function ArchivesPage() {
       const res = await authFetch(`${API}/api/archives/${row.id}`, { method: "DELETE" });
       const data = await res.json();
       if (res.ok && data.success) {
-        showMsg("Permanently deleted.");
+        setSuccessModalMsg("Permanently deleted.");
         fetchArchives();
       } else showMsg(data.error || "Delete failed.", "error");
     } catch {
@@ -202,10 +203,11 @@ export default function ArchivesPage() {
       );
       const succeeded = results.filter((r) => r.status === "fulfilled" && r.value?.success).length;
       const failed = results.length - succeeded;
-      showMsg(
-        failed === 0 ? `${succeeded} record${succeeded !== 1 ? "s" : ""} restored.` : `${succeeded} restored, ${failed} failed.`,
-        failed === 0 ? "success" : "error"
-      );
+      if (failed === 0) {
+        setSuccessModalMsg(`${succeeded} record${succeeded !== 1 ? "s" : ""} restored.`);
+      } else {
+        showMsg(`${succeeded} restored, ${failed} failed.`, "error");
+      }
       setSelected(new Set());
       fetchArchives();
     } finally {
@@ -222,10 +224,11 @@ export default function ArchivesPage() {
       );
       const succeeded = results.filter((r) => r.status === "fulfilled" && r.value?.success).length;
       const failed = results.length - succeeded;
-      showMsg(
-        failed === 0 ? `${succeeded} record${succeeded !== 1 ? "s" : ""} permanently deleted.` : `${succeeded} deleted, ${failed} failed.`,
-        failed === 0 ? "success" : "error"
-      );
+      if (failed === 0) {
+        setSuccessModalMsg(`${succeeded} record${succeeded !== 1 ? "s" : ""} permanently deleted.`);
+      } else {
+        showMsg(`${succeeded} deleted, ${failed} failed.`, "error");
+      }
       setSelected(new Set());
       fetchArchives();
     } finally {
@@ -587,6 +590,18 @@ export default function ArchivesPage() {
           loading={processing}
           onConfirm={handleBulkDelete}
           onCancel={() => setBulkAction(null)}
+        />
+      )}
+
+      {successModalMsg && (
+        <ConfirmModal
+          type="success"
+          title="Success"
+          message={successModalMsg}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={() => setSuccessModalMsg("")}
+          onCancel={() => setSuccessModalMsg("")}
         />
       )}
     </>

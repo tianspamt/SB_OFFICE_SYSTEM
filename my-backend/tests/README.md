@@ -25,13 +25,15 @@ Each file is also runnable on its own, e.g. `node tests/auth.test.js`.
   live and `archives` tables.
 - `legislative-review.test.js` — the ordinance review state machine (accept
   path to `published`, and the `needs_revision` → pending revision path,
-  where a Clerk/Councilor edit does the resubmit implicitly — there's no
+  where a Secretary/Clerk edit does the resubmit implicitly — there's no
   separate resubmit call anymore), wrong-status and wrong-reviewer-position
   rejections, that Secretary can create a draft directly (not just review
-  one), and the bucket-aware edit rule (`canManageLegislativeRecord`):
-  Clerk/Councilor own a record until it's published, Secretary/Clerk own it
-  after. Resolutions and session-minutes share the identical code shape, so
-  this isn't repeated three ways.
+  one), the edit rule (`canEditLegislativeRecord`: Secretary/Clerk only, in
+  any bucket), and the archive rule (`canArchiveLegislativeRecord`):
+  Secretary/Clerk may archive any record; Councilor/Vice-Mayor may only
+  withdraw a not-yet-published record they themselves created. Resolutions
+  and session-minutes share the identical code shape, so this isn't
+  repeated three ways.
 
 This is a first pass, not full coverage — CRUD validation, the announcements/
 content-posts modules, and file-upload edge cases (bad mimetypes, the new

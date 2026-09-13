@@ -543,6 +543,8 @@
   border-radius: 20px;
   border: 1px solid transparent;
   letter-spacing: 0.2px;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .statusPending {
@@ -1079,7 +1081,12 @@
 /* ── Metadata grid ── */
 .viewModalMeta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  /* 215px (not the old 140px) — enough for the longest Status value
+     ("Ready to Publish") to sit on one line without wrapping/overflowing;
+     .viewModalMetaValue's ellipsis is still there as a fallback below that.
+     auto-fit just drops to fewer columns per row on narrower screens
+     instead of cramming everything in, so this is a safe increase. */
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
   gap: 10px;
 }
 .viewModalMetaItem {
@@ -1091,6 +1098,16 @@
   border-radius: 12px;
   border: 1px solid #edf2f7;
   transition: border-color 0.2s, box-shadow 0.2s;
+  min-width: 0;
+}
+/* The label+value pair (second flex child, after the icon) — needs its own
+   min-width: 0 so a long value (e.g. the Status pill) shrinks/truncates
+   inside the card instead of forcing the row wider than its grid column,
+   which used to wrap the pill onto two lines and break its rounded shape
+   outside the card's own border. */
+.viewModalMetaItem > div:last-child {
+  min-width: 0;
+  flex: 1;
 }
 .viewModalMetaItem:hover {
   border-color: #e2e8f0;
@@ -1134,6 +1151,9 @@
   font-weight: 700;
   color: #1a365d;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* ── Divider ── */
 .viewModalDivider {

@@ -71,13 +71,12 @@ const canCreateDraft = (req, res, next) => {
 }
 
 // Legislative-records RBAC: who may replace/revise a not-yet-published
-// record's file. Clerk and Councilor are the primary drafters; Secretary
-// also fixes records directly often enough that they're included rather
-// than treated as a review-only fallback. Vice-Mayor is not — their role
-// stays limited to approving, not editing draft content.
+// record's file — Secretary/Clerk only. Councilor and Vice-Mayor may
+// originate a draft (canCreateDraft) and withdraw their own via DELETE, but
+// not edit its content — see helpers/utils.js's canEditLegislativeRecord.
 const pendingEditors = (req, res, next) => {
-  if (!['secretary', 'clerk', 'councilor'].includes(req.user?.position))
-    return res.status(403).json({ error: 'Secretary, Clerk, or Councilor only.' })
+  if (!['secretary', 'clerk'].includes(req.user?.position))
+    return res.status(403).json({ error: 'Secretary or Clerk only.' })
   next()
 }
 

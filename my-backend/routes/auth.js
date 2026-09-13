@@ -144,7 +144,7 @@ router.post('/login', loginLimiter, [
         description: `Failed login attempt: ${identifier}`,
         ip_address: getIP(req), status: 'failed'
       })
-      return res.json({ success: false, message: 'Invalid username/email or password.' })
+      return res.json({ success: false, message: 'Invalid username/email.' })
     }
     const user = users[0]
     const isMatch = await bcrypt.compare(password, user.password)
@@ -155,7 +155,7 @@ router.post('/login', loginLimiter, [
         description: `Wrong password for: ${identifier}`,
         ip_address: getIP(req), status: 'failed'
       })
-      return res.json({ success: false, message: 'Invalid username/email or password.' })
+      return res.json({ success: false, message: 'Invalid password.' })
     }
     const token = jwt.sign(
   { id: user.id, username: user.username, email: user.email, role: user.role, name: user.name, position: user.position },

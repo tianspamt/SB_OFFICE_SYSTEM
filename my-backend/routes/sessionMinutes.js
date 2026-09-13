@@ -9,7 +9,7 @@ const supabase = require('../config/supabase')
 const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
-const { escapeHtml, canManageLegislativeRecord, canReplaceLegislativeFile } = require('../helpers/utils')
+const { escapeHtml, canEditLegislativeRecord } = require('../helpers/utils')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
@@ -190,16 +190,14 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
 })
 
 // PUT /api/session-minutes/:id
-// Who may edit depends on which bucket the record is currently in — see
-// canManageLegislativeRecord: Secretary/Clerk own it once published,
-// Clerk/Councilor own everything before that.
+// canEditLegislativeRecord: Secretary/Clerk only, in any bucket.
 router.put('/:id', verifyToken, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing } = await supabase
       .from('session_minutes').select('id, status').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'Session minutes not found.' })
-    if (!canManageLegislativeRecord(req.user.position, existing.status))
+    if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to edit this session record.' })
     const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
     if (!session_date) return res.status(400).json({ error: 'Session date is required.' })
@@ -309,18 +307,16 @@ router.get('/:id/print', verifyToken, async (req, res) => {
 })
 
 // ─── PUT /api/session-minutes/:id/revise ──────────────────────────────────────
-// Clerk/Councilor are the primary drafters; Secretary keeps this as a
-// fallback alongside their approve/reject authority rather than having to
-// reject a draft just to fix something themselves. Corrects the draft
-// (either a replacement file, re-run through OCR/PDF extraction, or a
-// direct edit of the text fields), bumps revision_count.
+// Secretary/Clerk only (see pendingEditors) — same as PUT /:id above.
+// Corrects the draft (either a replacement file, re-run through OCR/PDF
+// extraction, or a direct edit of the text fields), bumps revision_count.
 router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
   try {
     const { data: existing, error: fetchErr } = await supabase
       .from('session_minutes').select('*').eq('id', id).single()
     if (fetchErr || !existing) return res.status(404).json({ error: 'Session minutes not found.' })
-    if (!canReplaceLegislativeFile(req.user.position, existing.status))
+    if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to revise this session record.' })
 
     const updateData = { revision_count: (existing.revision_count || 0) + 1 }
