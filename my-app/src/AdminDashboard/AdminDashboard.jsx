@@ -1921,7 +1921,7 @@ export default function AdminDashboard() {
                 {
                   key: "session_agendas",
                   icon: <ClipboardList size={17} strokeWidth={1.5} />,
-                  label: "Session Agenda",
+                  label: "Order of Business",
                 },
               ].map((t) => (
                 <button
@@ -2161,7 +2161,7 @@ export default function AdminDashboard() {
             )}
             {activeTab === "session_agendas" && canUploadSessionAgenda && (
               <button className={styles.addBtn} onClick={openAgendaModal}>
-                + Upload Agenda
+                + Upload Order of Business
               </button>
             )}
             {activeTab === "logs" && isAdmin && (
@@ -4538,8 +4538,8 @@ export default function AdminDashboard() {
                 className={styles.modalTitle}
                 style={{ margin: 0, fontSize: 18 }}
               >
-                <ClipboardList size={18} strokeWidth={1.5} /> Upload Session
-                Agenda
+                <ClipboardList size={18} strokeWidth={1.5} /> Upload Order of
+                Business
               </h2>
               <button
                 onClick={() => {
@@ -4680,7 +4680,7 @@ export default function AdminDashboard() {
                 onClick={handleAddAgenda}
                 disabled={submitting}
               >
-                {submitting ? "Uploading..." : "Upload Agenda"}
+                {submitting ? "Uploading..." : "Upload Order of Business"}
               </button>
             </div>
           </div>
@@ -4723,7 +4723,7 @@ export default function AdminDashboard() {
                 className={styles.modalTitle}
                 style={{ margin: 0, fontSize: 18 }}
               >
-                <Pencil size={16} strokeWidth={1.5} /> Edit Session Agenda
+                <Pencil size={16} strokeWidth={1.5} /> Edit Order of Business
               </h2>
               <button
                 onClick={() => {

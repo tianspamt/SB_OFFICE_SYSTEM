@@ -443,7 +443,7 @@ export const tabTitles = {
   calendar: "Calendar & Schedule",
   announcements: "Announcements",
   sessions: "Session Minutes & Agenda",
-  session_agendas: "Session Agenda",
+  session_agendas: "Order of Business",
   ordinances: "Ordinances",
   resolutions: "Resolutions",
   officials: "Sangguniang Bayan Council Members",

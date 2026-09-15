@@ -92,7 +92,7 @@ export default function SessionAgendaPage({
     <>
       <StatsRow
         loading={loading || (fetching && total === 0)}
-        stats={[{ value: total, label: "Total Agendas" }]}
+        stats={[{ value: total, label: "Total Orders of Business" }]}
       />
 
       <div className={lStyles.searchFilterBar}>
@@ -118,7 +118,7 @@ export default function SessionAgendaPage({
 
       <div className={lStyles.resultCount}>
         Showing {list.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
-        {list.length > 0 ? `-${(page - 1) * PAGE_SIZE + list.length}` : ""} of {total} agendas
+        {list.length > 0 ? `-${(page - 1) * PAGE_SIZE + list.length}` : ""} of {total} orders of business
       </div>
 
       {loading || fetching ? (
@@ -127,10 +127,10 @@ export default function SessionAgendaPage({
         <div className={lStyles.recordList}>
           {list.length === 0 ? (
             <EmptyState
-              title="No session agendas match your search"
+              title="No orders of business match your search"
               text={
                 !search && typeFilter === "all" && yearFilter === "all"
-                  ? "No agendas have been posted yet."
+                  ? "No orders of business have been posted yet."
                   : "Try adjusting your filters."
               }
             />
@@ -231,7 +231,7 @@ export default function SessionAgendaPage({
                             setDeleteTarget({
                               id: a.id,
                               type: "session_agenda",
-                              name: a.session_number || "this agenda",
+                              name: a.session_number || "this order of business",
                             })
                           }
                         >
