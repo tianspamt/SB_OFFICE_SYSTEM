@@ -32,6 +32,7 @@ import {
   Trash2,
   CalendarDays,
   Archive,
+  XCircle,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import LoadingModal from "./LoadingModal";
@@ -79,6 +80,7 @@ import LogsPage from "./LogsPage";
 import DashboardPage from "./DashboardPage";
 import ContentManagementPage from "./ContentManagementPage";
 import ArchivesPage from "./ArchivesPage";
+import { TabNavigation, PresentOverlay } from "./LegislativeComponents";
 
 const ARCHIVABLE_TYPES = [
   "user",
@@ -158,6 +160,14 @@ export default function AdminDashboard() {
   const [showOfficialModal, setShowOfficialModal] = useState(false);
   const [showEditOfficialModal, setShowEditOfficialModal] = useState(false);
   const [showOfficialProfile, setShowOfficialProfile] = useState(false);
+  // Which section of the official-profile modal is open — reset to "terms"
+  // each time a different official's profile is opened (see onViewProfile).
+  const [officialProfileTab, setOfficialProfileTab] = useState("terms");
+  // The ordinance/resolution currently shown in-app via PresentOverlay from
+  // that modal's "View" button — was a plain `<a href={o.filepath}>`, but
+  // filepath is just the storage object's path, not a real URL, so it just
+  // opened a broken/blank tab instead of the actual document.
+  const [officialRecordPreview, setOfficialRecordPreview] = useState(null);
   const [showTextModal, setShowTextModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [showEditSessionModal, setShowEditSessionModal] = useState(false);
@@ -277,6 +287,43 @@ export default function AdminDashboard() {
       return { success: false, error: data.error || "Failed to add council." };
     } catch {
       return { success: false, error: "Server error." };
+    }
+  };
+  const handleEditCouncil = async (id, termLabel) => {
+    try {
+      const res = await authFetch(`${API}/api/councils/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ term_label: termLabel }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        queryClient.invalidateQueries({ queryKey: COUNCILS_QUERY_KEY });
+        return { success: true, data: data.data };
+      }
+      return {
+        success: false,
+        error: data.error || "Failed to update council.",
+      };
+    } catch {
+      return { success: false, error: "Server error." };
+    }
+  };
+  // Council deletion is blocked server-side (400, with an explanatory
+  // message) while any member term still references it — surfaced as a
+  // toast rather than silently failing, since the blocking ConfirmModal
+  // below has already closed by the time this runs.
+  const handleDeleteCouncil = async (id) => {
+    try {
+      const res = await authFetch(`${API}/api/councils/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        showSuccessModal("Council deleted!");
+        queryClient.invalidateQueries({ queryKey: COUNCILS_QUERY_KEY });
+      } else showMsg(data.error || "Error!", "error");
+    } catch {
+      showMsg("Error!", "error");
     }
   };
   const [newOfficial, setNewOfficial] = useState({
@@ -1150,6 +1197,30 @@ export default function AdminDashboard() {
   const getOfficialOrdinances = (id) =>
     ordinances.filter(
       (o) => o.officials && o.officials.some((x) => x.id === id)
+    );
+  const getOfficialResolutions = (id) =>
+    resolutions.filter(
+      (r) => r.officials && r.officials.some((x) => x.id === id)
+    );
+  // Rejected records, scoped to the tagged author (an actual council
+  // member, via ordinance_officials/resolution_officials) rather than
+  // created_by (whichever staff account did the data entry) — Secretary-
+  // only in the UI below, since a rejected record's existence shouldn't be
+  // visible to every Councilor Management viewer, only whoever also has
+  // full rejected-records visibility elsewhere in the app.
+  const getOfficialRejectedOrdinances = (id) =>
+    ordinances.filter(
+      (o) =>
+        o.status === "rejected" &&
+        o.officials &&
+        o.officials.some((x) => x.id === id)
+    );
+  const getOfficialRejectedResolutions = (id) =>
+    resolutions.filter(
+      (r) =>
+        r.status === "rejected" &&
+        r.officials &&
+        r.officials.some((x) => x.id === id)
     );
 
   // ─── Terms ────────────────────────────────────────────────────────────────────
@@ -2266,10 +2337,12 @@ export default function AdminDashboard() {
             ordinances={ordinances}
             councils={councils}
             onAddCouncil={handleAddCouncil}
+            onEditCouncil={handleEditCouncil}
             showSuccessModal={showSuccessModal}
             setDeleteTarget={setDeleteTarget}
             onViewProfile={(o) => {
               setSelectedOfficialProfile(o);
+              setOfficialProfileTab("terms");
               setShowOfficialProfile(true);
             }}
             onEditMember={handleOpenEditOfficial}
@@ -2788,246 +2861,389 @@ export default function AdminDashboard() {
           onClick={() => setShowOfficialProfile(false)}
         >
           <div
-            className={styles.profileModal}
+            className={styles.officialModal}
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              className={styles.profileModalCloseBtn}
-              onClick={() => setShowOfficialProfile(false)}
-              aria-label="Close modal"
-            >
-              <X size={16} />
-            </button>
-            <div className={styles.profileHeader}>
-              {selectedOfficialProfile.photo ? (
-                <img
-                  src={selectedOfficialProfile.photo}
-                  alt={selectedOfficialProfile.full_name}
-                  className={styles.profilePhoto}
-                />
-              ) : (
-                <div className={styles.profileAvatar}>
-                  {selectedOfficialProfile.full_name.charAt(0)}
-                </div>
-              )}
-              <div>
-                <div className={styles.profileName}>
-                  {selectedOfficialProfile.full_name}
-                </div>
-                <div className={styles.profilePosition}>
-                  {selectedOfficialProfile.position}
-                </div>
-                {selectedOfficialProfile.active_term && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <TermStatusBadge
-                      status={selectedOfficialProfile.active_term.status}
+            {/* ── Hero header ── */}
+            <div className={styles.officialHero}>
+              <button
+                className={styles.officialModalCloseBtn}
+                onClick={() => setShowOfficialProfile(false)}
+                aria-label="Close modal"
+              >
+                <X size={16} />
+              </button>
+              <div className={styles.officialHeroTop}>
+                <div className={styles.officialAvatarWrap}>
+                  {selectedOfficialProfile.photo ? (
+                    <img
+                      src={selectedOfficialProfile.photo}
+                      alt={selectedOfficialProfile.full_name}
+                      className={styles.officialAvatarPhoto}
                     />
-                    <span style={{ fontSize: 12, color: "#4a5568" }}>
-                      {selectedOfficialProfile.active_term.term_period}
-                    </span>
+                  ) : (
+                    <div className={styles.officialAvatarFallback}>
+                      {selectedOfficialProfile.full_name.charAt(0)}
+                    </div>
+                  )}
+                  {selectedOfficialProfile.active_term && (
+                    <span
+                      className={`${styles.officialStatusDot} ${
+                        selectedOfficialProfile.active_term.status === "active"
+                          ? styles.officialStatusDotActive
+                          : styles.officialStatusDotEnded
+                      }`}
+                    />
+                  )}
+                </div>
+                <div>
+                  <div className={styles.officialHeroName}>
+                    {selectedOfficialProfile.full_name}
+                  </div>
+                  {selectedOfficialProfile.position && (
+                    <div>
+                      <span className={styles.officialHeroPosition}>
+                        {selectedOfficialProfile.position}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOfficialProfile.active_term && (
+                    <div className={styles.officialHeroMeta}>
+                      <TermStatusBadge
+                        status={selectedOfficialProfile.active_term.status}
+                      />
+                      <span className={styles.officialHeroTermLabel}>
+                        {selectedOfficialProfile.active_term.term_period}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div
+                className={`${styles.officialStatsRow} ${
+                  isSecretary ? styles.officialStatsRowWide : ""
+                }`}
+              >
+                <div className={styles.officialStatChip}>
+                  <div className={styles.officialStatValue}>
+                    {(selectedOfficialProfile.terms || []).length}
+                  </div>
+                  <div className={styles.officialStatLabel}>Terms</div>
+                </div>
+                <div className={styles.officialStatChip}>
+                  <div className={styles.officialStatValue}>
+                    {getOfficialOrdinances(selectedOfficialProfile.id).length}
+                  </div>
+                  <div className={styles.officialStatLabel}>Ordinances</div>
+                </div>
+                <div className={styles.officialStatChip}>
+                  <div className={styles.officialStatValue}>
+                    {getOfficialResolutions(selectedOfficialProfile.id).length}
+                  </div>
+                  <div className={styles.officialStatLabel}>Resolutions</div>
+                </div>
+                {isSecretary && (
+                  <div className={styles.officialStatChip}>
+                    <div className={styles.officialStatValue}>
+                      {getOfficialRejectedOrdinances(selectedOfficialProfile.id)
+                        .length +
+                        getOfficialRejectedResolutions(
+                          selectedOfficialProfile.id
+                        ).length}
+                    </div>
+                    <div className={styles.officialStatLabel}>Rejected</div>
                   </div>
                 )}
               </div>
             </div>
-            <div style={{ margin: "16px 0" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 10,
-                }}
-              >
-                <h3
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#1a365d",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <History size={14} strokeWidth={1.5} /> Term History (
-                  {(selectedOfficialProfile.terms || []).length})
-                </h3>
-                {canManageOfficials && (
-                  <button
-                    className={styles.addBtn}
-                    style={{ fontSize: 11, padding: "4px 10px" }}
-                    onClick={() => handleOpenAddTerm(selectedOfficialProfile.id)}
-                  >
-                    + Add Term
-                  </button>
-                )}
-              </div>
-              {(selectedOfficialProfile.terms || []).length === 0 ? (
-                <p
-                  style={{
-                    fontSize: 13,
-                    color: "#a0aec0",
-                    textAlign: "center",
-                    padding: "12px 0",
-                  }}
-                >
-                  No term records yet.
-                </p>
-              ) : (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                >
-                  {(selectedOfficialProfile.terms || []).map((term) => (
-                    <div
-                      key={term.id}
-                      style={{
-                        padding: "10px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        background:
-                          term.status === "active" ? "#eef2ff" : "#f8fafc",
-                        display: "flex",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        gap: 8,
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            flexWrap: "wrap",
-                            marginBottom: 3,
-                          }}
-                        >
-                          <span style={{ fontWeight: 700, fontSize: 13 }}>
-                            {term.term_period}
-                          </span>
-                          <TermStatusBadge status={term.status} />
-                          {term.is_reelected && (
-                            <span
-                              style={{
-                                fontSize: 10,
-                                padding: "1px 6px",
-                                borderRadius: 10,
-                                background: "#dbeafe",
-                                color: "#1e40af",
-                                fontWeight: 600,
-                              }}
-                            >
-                              Re-elected
+
+            {/* ── Tabs ── */}
+            <div className={styles.officialTabsWrap}>
+              <TabNavigation
+                tabs={[
+                  {
+                    id: "terms",
+                    label: "Term History",
+                    badge: (selectedOfficialProfile.terms || []).length,
+                  },
+                  {
+                    id: "ordinances",
+                    label: "Ordinances",
+                    badge: getOfficialOrdinances(selectedOfficialProfile.id)
+                      .length,
+                  },
+                  {
+                    id: "resolutions",
+                    label: "Resolutions",
+                    badge: getOfficialResolutions(selectedOfficialProfile.id)
+                      .length,
+                  },
+                  // Rejected records are scoped to this official as the
+                  // tagged author (ordinance_officials/resolution_officials),
+                  // not to whichever staff account entered the data.
+                  // Secretary-only: a rejection shouldn't be visible to
+                  // every Councilor Management viewer, only whoever already
+                  // has full rejected-records visibility elsewhere in the app.
+                  ...(isSecretary
+                    ? [
+                        {
+                          id: "rejected",
+                          label: "Rejected",
+                          badge:
+                            getOfficialRejectedOrdinances(
+                              selectedOfficialProfile.id
+                            ).length +
+                            getOfficialRejectedResolutions(
+                              selectedOfficialProfile.id
+                            ).length,
+                        },
+                      ]
+                    : []),
+                ]}
+                activeTab={officialProfileTab}
+                onTabChange={setOfficialProfileTab}
+              />
+            </div>
+
+            {/* ── Tab content ── */}
+            <div className={styles.officialModalBody}>
+              {officialProfileTab === "terms" && (
+                <>
+                  {canManageOfficials && (
+                    <div style={{ textAlign: "right", marginBottom: 12 }}>
+                      <button
+                        className={styles.addBtn}
+                        style={{ fontSize: 11, padding: "4px 10px" }}
+                        onClick={() =>
+                          handleOpenAddTerm(selectedOfficialProfile.id)
+                        }
+                      >
+                        + Add Term
+                      </button>
+                    </div>
+                  )}
+                  {(selectedOfficialProfile.terms || []).length === 0 ? (
+                    <p className={styles.officialEmptyState}>
+                      No term records yet.
+                    </p>
+                  ) : (
+                    (selectedOfficialProfile.terms || []).map((term) => (
+                      <div
+                        key={term.id}
+                        className={`${styles.officialTermCard} ${
+                          term.status === "active"
+                            ? styles.officialTermCardActive
+                            : ""
+                        }`}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className={styles.officialTermTop}>
+                            <span className={styles.officialTermPeriod}>
+                              {term.term_period}
                             </span>
+                            <TermStatusBadge status={term.status} />
+                            {term.is_reelected && (
+                              <span className={styles.officialReelectedTag}>
+                                Re-elected
+                              </span>
+                            )}
+                          </div>
+                          <div className={styles.officialTermRange}>
+                            {formatDate(term.term_start)} →{" "}
+                            {term.term_end ? (
+                              formatDate(term.term_end)
+                            ) : (
+                              <em>Present</em>
+                            )}
+                          </div>
+                          {term.notes && (
+                            <div className={styles.officialTermNote}>
+                              {term.notes}
+                            </div>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: "#718096" }}>
-                          {formatDate(term.term_start)} →{" "}
-                          {term.term_end ? (
-                            formatDate(term.term_end)
-                          ) : (
-                            <em>Present</em>
-                          )}
-                        </div>
-                        {term.notes && (
-                          <div
-                            style={{
-                              fontSize: 11,
-                              color: "#a0aec0",
-                              marginTop: 3,
-                            }}
-                          >
-                            {term.notes}
+                        {canManageOfficials && (
+                          <div className={styles.officialTermActions}>
+                            <button
+                              className={styles.officialIconBtn}
+                              title="Edit term"
+                              onClick={() =>
+                                handleOpenEditTerm(
+                                  selectedOfficialProfile.id,
+                                  term
+                                )
+                              }
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              className={`${styles.officialIconBtn} ${styles.officialIconBtnDanger}`}
+                              title="Delete term"
+                              onClick={() =>
+                                setDeleteTarget({
+                                  id: term.id,
+                                  type: "term",
+                                  name: term.term_period,
+                                  memberId: selectedOfficialProfile.id,
+                                })
+                              }
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         )}
                       </div>
-                      {canManageOfficials && (
-                        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                          <button
-                            className={styles.editBtn}
-                            style={{ fontSize: 11, padding: "3px 8px" }}
-                            onClick={() =>
-                              handleOpenEditTerm(selectedOfficialProfile.id, term)
-                            }
-                          >
-                            <Pencil size={11} /> Edit
-                          </button>
-                          <button
-                            className={styles.deleteBtn}
-                            style={{ fontSize: 11, padding: "3px 8px" }}
-                            onClick={() =>
-                              setDeleteTarget({
-                                id: term.id,
-                                type: "term",
-                                name: term.term_period,
-                                memberId: selectedOfficialProfile.id,
-                              })
-                            }
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                    ))
+                  )}
+                </>
               )}
-            </div>
-            <div className={styles.profileOrdinances}>
-              <h3 className={styles.profileOrdinancesTitle}>
-                <ClipboardList size={15} strokeWidth={1.5} /> Ordinances Passed
-                ({getOfficialOrdinances(selectedOfficialProfile.id).length})
-              </h3>
-              {getOfficialOrdinances(selectedOfficialProfile.id).length ===
-              0 ? (
-                <p className={styles.empty}>No ordinances passed yet.</p>
-              ) : (
-                getOfficialOrdinances(selectedOfficialProfile.id).map((o) => (
-                  <div key={o.id} className={styles.profileOrdinanceItem}>
-                    <div className={styles.profileOrdinanceLeft}>
-                      <span
-                        className={`${styles.badge} ${
-                          o.filetype === "application/pdf"
-                            ? styles.badgeAdmin
-                            : styles.badgeGray
-                        }`}
-                      >
-                        {o.filetype === "application/pdf" ? "PDF" : "OCR"}
-                      </span>
-                      <div>
-                        <div className={styles.profileOrdinanceName}>
-                          {o.title}
+
+              {officialProfileTab === "ordinances" &&
+                (getOfficialOrdinances(selectedOfficialProfile.id).length ===
+                0 ? (
+                  <p className={styles.officialEmptyState}>
+                    No ordinances passed yet.
+                  </p>
+                ) : (
+                  getOfficialOrdinances(selectedOfficialProfile.id).map(
+                    (o) => (
+                      <div key={o.id} className={styles.officialRecordItem}>
+                        <div className={styles.officialRecordIcon}>
+                          <ClipboardList size={16} strokeWidth={1.5} />
                         </div>
-                        <div className={styles.profileOrdinanceDate}>
-                          {new Date(o.uploaded_at).toLocaleDateString("en-PH", {
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          })}
+                        <div className={styles.officialRecordBody}>
+                          <div className={styles.officialRecordTitle}>
+                            {o.title}
+                          </div>
+                          <div className={styles.officialRecordMeta}>
+                            {o.filetype === "application/pdf" ? "PDF" : "OCR"}
+                            {" · "}
+                            {new Date(o.uploaded_at).toLocaleDateString(
+                              "en-PH",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            )}
+                          </div>
                         </div>
+                        <button
+                          onClick={() => setOfficialRecordPreview(o)}
+                          className={styles.officialViewLink}
+                          title="View"
+                        >
+                          <Eye size={14} />
+                        </button>
                       </div>
-                    </div>
-                    <a
-                      href={o.filepath}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={styles.viewBtn}
-                    >
-                      <Eye size={13} /> View
-                    </a>
-                  </div>
-                ))
+                    )
+                  )
+                ))}
+
+              {officialProfileTab === "resolutions" &&
+                (getOfficialResolutions(selectedOfficialProfile.id).length ===
+                0 ? (
+                  <p className={styles.officialEmptyState}>
+                    No resolutions passed yet.
+                  </p>
+                ) : (
+                  getOfficialResolutions(selectedOfficialProfile.id).map(
+                    (r) => (
+                      <div key={r.id} className={styles.officialRecordItem}>
+                        <div className={styles.officialRecordIcon}>
+                          <FileText size={16} strokeWidth={1.5} />
+                        </div>
+                        <div className={styles.officialRecordBody}>
+                          <div className={styles.officialRecordTitle}>
+                            {r.title}
+                          </div>
+                          <div className={styles.officialRecordMeta}>
+                            {r.filetype === "application/pdf" ? "PDF" : "OCR"}
+                            {" · "}
+                            {new Date(r.uploaded_at).toLocaleDateString(
+                              "en-PH",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setOfficialRecordPreview(r)}
+                          className={styles.officialViewLink}
+                          title="View"
+                        >
+                          <Eye size={14} />
+                        </button>
+                      </div>
+                    )
+                  )
+                ))}
+
+              {officialProfileTab === "rejected" && isSecretary && (
+                getOfficialRejectedOrdinances(selectedOfficialProfile.id)
+                  .length === 0 &&
+                getOfficialRejectedResolutions(selectedOfficialProfile.id)
+                  .length === 0 ? (
+                  <p className={styles.officialEmptyState}>
+                    No rejected records.
+                  </p>
+                ) : (
+                  <>
+                    {getOfficialRejectedOrdinances(
+                      selectedOfficialProfile.id
+                    ).map((o) => (
+                      <div key={`rej-ord-${o.id}`} className={styles.officialRecordItem}>
+                        <div
+                          className={`${styles.officialRecordIcon} ${styles.officialRecordIconRejected}`}
+                        >
+                          <XCircle size={16} strokeWidth={1.5} />
+                        </div>
+                        <div className={styles.officialRecordBody}>
+                          <div className={styles.officialRecordTitle}>
+                            {o.title}
+                          </div>
+                          <div className={styles.officialRecordMeta}>
+                            {new Date(o.uploaded_at).toLocaleDateString(
+                              "en-PH",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            )}
+                          </div>
+                        </div>
+                        <span className={styles.officialTypeTag}>Ordinance</span>
+                      </div>
+                    ))}
+                    {getOfficialRejectedResolutions(
+                      selectedOfficialProfile.id
+                    ).map((r) => (
+                      <div key={`rej-res-${r.id}`} className={styles.officialRecordItem}>
+                        <div
+                          className={`${styles.officialRecordIcon} ${styles.officialRecordIconRejected}`}
+                        >
+                          <XCircle size={16} strokeWidth={1.5} />
+                        </div>
+                        <div className={styles.officialRecordBody}>
+                          <div className={styles.officialRecordTitle}>
+                            {r.title}
+                          </div>
+                          <div className={styles.officialRecordMeta}>
+                            {new Date(r.uploaded_at).toLocaleDateString(
+                              "en-PH",
+                              { year: "numeric", month: "long", day: "numeric" }
+                            )}
+                          </div>
+                        </div>
+                        <span className={styles.officialTypeTag}>Resolution</span>
+                      </div>
+                    ))}
+                  </>
+                )
               )}
             </div>
           </div>
         </div>
+      )}
+
+      {officialRecordPreview && (
+        <PresentOverlay
+          record={officialRecordPreview}
+          onClose={() => setOfficialRecordPreview(null)}
+        />
       )}
 
       {/* Add Term */}
@@ -3309,7 +3525,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Ordinance Title"
                 value={ordinanceTitle}
-                onChange={(e) => setOrdinanceTitle(e.target.value)}
+                onChange={(e) => setOrdinanceTitle(e.target.value.toUpperCase())}
               />
               <label className={styles.fieldLabel}>Date</label>
               <input
@@ -3482,7 +3698,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Ordinance Title"
                 value={editOrdinanceTitle}
-                onChange={(e) => setEditOrdinanceTitle(e.target.value)}
+                onChange={(e) => setEditOrdinanceTitle(e.target.value.toUpperCase())}
               />
               <label className={styles.fieldLabel}>Date</label>
               <input
@@ -3658,7 +3874,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Resolution Title"
                 value={resolutionTitle}
-                onChange={(e) => setResolutionTitle(e.target.value)}
+                onChange={(e) => setResolutionTitle(e.target.value.toUpperCase())}
               />
               <label className={styles.fieldLabel}>Date</label>
               <input
@@ -3831,7 +4047,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Resolution Title"
                 value={editResolutionTitle}
-                onChange={(e) => setEditResolutionTitle(e.target.value)}
+                onChange={(e) => setEditResolutionTitle(e.target.value.toUpperCase())}
               />
               <label className={styles.fieldLabel}>Date</label>
               <input
@@ -5517,6 +5733,8 @@ export default function AdminDashboard() {
               handleDeleteAnnouncement(deleteTarget.id);
             else if (deleteTarget.type === "term")
               handleDeleteTerm(deleteTarget.memberId, deleteTarget.id);
+            else if (deleteTarget.type === "council")
+              handleDeleteCouncil(deleteTarget.id);
             setDeleteTarget(null);
           }}
           onCancel={() => setDeleteTarget(null)}

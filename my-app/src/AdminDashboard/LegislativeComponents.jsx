@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { Search, Filter, X, Download } from "lucide-react";
+import { Search, Filter, X, Download, UserPlus } from "lucide-react";
 import styles from "./LegislativeModule.module.css";
 // Shares its shimmer classes (.skeleton / .skeletonSolid) with the
 // Users/Admins/Archives tables instead of redefining the animation here.
@@ -22,6 +22,7 @@ const STATUS_MAP = {
   third_reading: { label: "Third Reading", cls: styles.statusApproved },
   ready_to_publish: { label: "Ready to Publish", cls: styles.statusApproved },
   approved: { label: "VM Approved", cls: styles.statusApproved },
+  rejected: { label: "Rejected", cls: styles.statusRejected },
   published: { label: "● Published", cls: styles.statusPublished },
 };
 
@@ -385,6 +386,139 @@ export function PublishNumberModal({
         </div>
       </div>
     </>
+  );
+}
+
+// ─── COUNCILOR ROLE SECTION ──────────────────────────────────────────────────
+// Co-Author / Sponsor are new roles a council member can hold on an ordinance
+// or resolution, alongside the existing (single) Author. Unlike Author, which
+// is set at draft/upload time, these are only addable once the record has
+// reached a reading stage — see helpers/officialRoleRoutes.js. Reuses the
+// same viewModalCouncil* classes the Author section already renders with.
+export function CouncilorRoleSection({
+  title,
+  members,
+  canEdit,
+  availableOfficials,
+  selectedId,
+  onSelectedIdChange,
+  onAdd,
+  onRemove,
+  submitting,
+  onAddAll,
+  addingAll,
+}) {
+  return (
+    <div className={styles.viewModalCouncilSection}>
+      <div className={styles.viewModalCouncilHeader}>
+        <div className={styles.viewModalCouncilTitle}>{title}</div>
+        <div className={styles.viewModalCouncilCount}>
+          {members.length} member{members.length !== 1 ? "s" : ""}
+        </div>
+      </div>
+      {members.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#a0aec0", margin: "4px 0 8px" }}>
+          None yet.
+        </p>
+      ) : (
+        <div className={styles.viewModalCouncilGrid}>
+          {members.map((m) => (
+            <div key={m.id} className={styles.viewModalCouncilCard}>
+              {m.photo ? (
+                <img
+                  src={m.photo}
+                  alt={m.full_name}
+                  className={styles.viewModalCouncilPhoto}
+                />
+              ) : (
+                <div className={styles.viewModalCouncilAvatar}>
+                  {m.full_name?.charAt(0)}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className={styles.viewModalCouncilName}>
+                  {m.full_name}
+                </div>
+                <div className={styles.viewModalCouncilPosition}>
+                  {m.position}
+                </div>
+              </div>
+              {canEdit && (
+                <button
+                  onClick={() => onRemove(m.id)}
+                  disabled={submitting}
+                  title={`Remove ${m.full_name}`}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#dc2626",
+                    flexShrink: 0,
+                    padding: 4,
+                    display: "flex",
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {canEdit && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <select
+            value={selectedId}
+            onChange={(e) => onSelectedIdChange(e.target.value)}
+            style={{
+              flex: 1,
+              padding: "6px 8px",
+              borderRadius: 8,
+              border: "1px solid #e2e8f0",
+              fontSize: 12,
+            }}
+          >
+            <option value="">Select a councilor…</option>
+            {availableOfficials.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.full_name}
+              </option>
+            ))}
+          </select>
+          <button
+            className={`${styles.btn} ${styles.btnSm} ${styles.btnSuccess}`}
+            style={{ whiteSpace: "nowrap" }}
+            disabled={!selectedId || submitting}
+            onClick={onAdd}
+          >
+            <UserPlus size={13} /> Add Councilor
+          </button>
+        </div>
+      )}
+      {canEdit && onAddAll && availableOfficials.length > 0 && (
+        <button
+          onClick={onAddAll}
+          disabled={submitting || addingAll}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "#4338ca",
+            fontSize: 11.5,
+            fontWeight: 600,
+            padding: "6px 0 0",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <UserPlus size={12} />
+          {addingAll
+            ? "Adding all…"
+            : `Select all (${availableOfficials.length})`}
+        </button>
+      )}
+    </div>
   );
 }
 

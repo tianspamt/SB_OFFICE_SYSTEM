@@ -5,6 +5,7 @@ import {
   Search,
   Pencil,
   Archive,
+  Trash2,
   X,
   Eye,
   ChevronDown,
@@ -182,12 +183,16 @@ function MemberCard({
   );
 }
 
-// ── AddCouncilModal ───────────────────────────────────────────────────────────
+// ── CouncilFormModal ─────────────────────────────────────────────────────────
+// Shared by "Add Council" and "Edit Council" — identical shape (a single
+// term-label field), just a different starting value, title, and submit
+// label depending on `mode`.
 
-function AddCouncilModal({ onClose, onConfirm }) {
-  const [termPeriod, setTermPeriod] = useState("");
+function CouncilFormModal({ mode = "add", initialLabel = "", onClose, onConfirm }) {
+  const [termPeriod, setTermPeriod] = useState(initialLabel);
   const [error, showError, clearError] = useModalError();
   const [submitting, setSubmitting] = useState(false);
+  const isEdit = mode === "edit";
 
   const handleSubmit = async () => {
     const val = termPeriod.trim();
@@ -197,14 +202,15 @@ function AddCouncilModal({ onClose, onConfirm }) {
     }
     setSubmitting(true);
     clearError();
-    // onConfirm actually creates the council server-side now (POST
-    // /api/councils) instead of just tracking a client-only placeholder —
-    // it resolves to { success, error? } so a duplicate-label conflict (or
-    // any other server error) surfaces here instead of silently vanishing.
+    // onConfirm actually creates/updates the council server-side now
+    // (POST/PUT /api/councils) instead of just tracking a client-only
+    // placeholder — it resolves to { success, error? } so a duplicate-label
+    // conflict (or any other server error) surfaces here instead of
+    // silently vanishing.
     const result = await onConfirm(val);
     setSubmitting(false);
     if (result && result.success === false) {
-      showError(result.error || "Failed to add council.");
+      showError(result.error || `Failed to ${isEdit ? "update" : "add"} council.`);
     }
   };
 
@@ -218,7 +224,7 @@ function AddCouncilModal({ onClose, onConfirm }) {
               size={16}
               style={{ verticalAlign: "middle", marginRight: 6 }}
             />
-            Add Council
+            {isEdit ? "Edit Council" : "Add Council"}
           </h3>
           <button className={styles.closeBtn} onClick={onClose}>
             <X size={16} />
@@ -253,7 +259,14 @@ function AddCouncilModal({ onClose, onConfirm }) {
 
         <div className={styles.modalActions}>
           <button className={styles.primaryBtn} onClick={handleSubmit} disabled={submitting}>
-            <Plus size={14} /> {submitting ? "Creating..." : "Create Council"}
+            <Plus size={14} />{" "}
+            {submitting
+              ? isEdit
+                ? "Saving..."
+                : "Creating..."
+              : isEdit
+              ? "Save Changes"
+              : "Create Council"}
           </button>
         </div>
       </div>
@@ -265,6 +278,7 @@ function AddCouncilModal({ onClose, onConfirm }) {
 
 function CouncilGroup({
   termPeriod,
+  councilId,
   entries,
   isOpen,
   onToggle,
@@ -274,6 +288,8 @@ function CouncilGroup({
   onEdit,
   onDelete,
   onViewProfile,
+  onEditCouncil,
+  onDeleteCouncil,
   readOnly = false,
 }) {
   const activeCount = entries.filter((e) => e.term?.status === "active").length;
@@ -313,16 +329,39 @@ function CouncilGroup({
           </div>
         </button>
 
-        {/* right side: add member — separate from the toggle button */}
-        {!readOnly && (
-          <button
-            className={styles.addMemberInlineBtn}
-            onClick={() => onAddMember(termPeriod)}
-            title={`Add a member to the ${termPeriod} council`}
-          >
-            <UserPlus size={13} /> Add member
-          </button>
-        )}
+        {/* right side: council actions — separate from the toggle button.
+            Edit/Delete only make sense for a real council row (councilId
+            != null) — the "Unknown" bucket (members with no term at all)
+            has none to act on. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {!readOnly && councilId != null && (
+            <>
+              <button
+                className={styles.councilActionBtn}
+                onClick={() => onEditCouncil(councilId, termPeriod)}
+                title={`Rename the ${termPeriod} council`}
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                className={`${styles.councilActionBtn} ${styles.councilActionBtnDanger}`}
+                onClick={() => onDeleteCouncil(councilId, termPeriod)}
+                title={`Delete the ${termPeriod} council`}
+              >
+                <Trash2 size={13} />
+              </button>
+            </>
+          )}
+          {!readOnly && (
+            <button
+              className={styles.addMemberInlineBtn}
+              onClick={() => onAddMember(termPeriod)}
+              title={`Add a member to the ${termPeriod} council`}
+            >
+              <UserPlus size={13} /> Add member
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── expanded body ── */}
@@ -385,9 +424,9 @@ function CouncilGroup({
 
 export default function OfficialsPage({
   officials = [],
-  ordinances = [],
   councils = [],
   onAddCouncil,
+  onEditCouncil,
   showSuccessModal,
   setDeleteTarget,
   onViewProfile,
@@ -398,6 +437,8 @@ export default function OfficialsPage({
   const [openGroups, setOpenGroups] = useState({});
   const [groupSearch, setGroupSearch] = useState({});
   const [showAddCouncil, setShowAddCouncil] = useState(false);
+  // { id, label } of the council currently being renamed, or null.
+  const [editCouncilTarget, setEditCouncilTarget] = useState(null);
 
   const grouped = useMemo(() => buildCouncilGroups(officials), [officials]);
 
@@ -437,6 +478,20 @@ export default function OfficialsPage({
     }
     return result;
   };
+
+  const handleEditCouncilConfirm = async (tp) => {
+    if (!onEditCouncil || !editCouncilTarget)
+      return { success: false, error: "Not available." };
+    const result = await onEditCouncil(editCouncilTarget.id, tp);
+    if (result.success) {
+      setEditCouncilTarget(null);
+      showSuccessModal?.("Council updated!");
+    }
+    return result;
+  };
+
+  const handleDeleteCouncilClick = (id, label) =>
+    setDeleteTarget({ id, type: "council", name: label });
 
   const handleDelete = (member) =>
     setDeleteTarget({
@@ -510,10 +565,11 @@ export default function OfficialsPage({
         </div>
       ) : (
         <div className={styles.groupList}>
-          {allGroups.map(({ key, termPeriod, entries }) => (
+          {allGroups.map(({ key, councilId, termPeriod, entries }) => (
             <CouncilGroup
               key={key}
               termPeriod={termPeriod}
+              councilId={councilId}
               entries={entries}
               isOpen={!!openGroups[key]}
               onToggle={() => toggleGroup(key)}
@@ -525,6 +581,8 @@ export default function OfficialsPage({
               onEdit={onEditMember}
               onDelete={handleDelete}
               onViewProfile={onViewProfile}
+              onEditCouncil={(id, label) => setEditCouncilTarget({ id, label })}
+              onDeleteCouncil={handleDeleteCouncilClick}
               readOnly={readOnly}
             />
           ))}
@@ -533,9 +591,20 @@ export default function OfficialsPage({
 
       {/* ── Add Council modal ── */}
       {showAddCouncil && (
-        <AddCouncilModal
+        <CouncilFormModal
+          mode="add"
           onClose={() => setShowAddCouncil(false)}
           onConfirm={handleAddCouncilConfirm}
+        />
+      )}
+
+      {/* ── Edit Council modal ── */}
+      {editCouncilTarget && (
+        <CouncilFormModal
+          mode="edit"
+          initialLabel={editCouncilTarget.label}
+          onClose={() => setEditCouncilTarget(null)}
+          onConfirm={handleEditCouncilConfirm}
         />
       )}
     </div>

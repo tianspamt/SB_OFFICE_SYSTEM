@@ -425,8 +425,25 @@ function ReviewModal({
     }
     runAction(
       `/api/${cfg.route}/${item.id}/request-changes`,
-      { method: "PUT" },
+      { method: "PUT", body: JSON.stringify({ comment: commentText.trim() }) },
       "Changes requested."
+    );
+  };
+
+  // Terminal, unlike Request Changes — there's no resubmission path back to
+  // pending. Secretary-only, shown while item.status is one of
+  // READING_STATUSES (see helpers/legislativeReviewRoutes.js's /:id/reject).
+  // A reason is only required past first_reading — that endpoint enforces
+  // the same rule authoritatively, this is just matching the message.
+  const handleReject = () => {
+    if (item.status !== "first_reading" && !commentText.trim()) {
+      showError("Add a comment above explaining the rejection.");
+      return;
+    }
+    runAction(
+      `/api/${cfg.route}/${item.id}/reject`,
+      { method: "PUT", body: JSON.stringify({ comment: commentText.trim() }) },
+      `${cfg.label} rejected.`
     );
   };
 
@@ -681,13 +698,30 @@ function ReviewModal({
             )}
 
             {isSecretary && READING_STATUSES.includes(item.status) && (
-              <button
-                className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                disabled={submitting}
-                onClick={handleAdvanceReading}
-              >
-                <Check size={13} /> {nextReadingActionLabel(item.status)}
-              </button>
+              <>
+                <button
+                  className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                  disabled={submitting}
+                  onClick={handleAdvanceReading}
+                >
+                  <Check size={13} /> {nextReadingActionLabel(item.status)}
+                </button>
+                <button
+                  className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                  disabled={
+                    submitting ||
+                    (item.status !== "first_reading" && !commentText.trim())
+                  }
+                  title={
+                    item.status !== "first_reading" && !commentText.trim()
+                      ? "Enter a comment above explaining the rejection"
+                      : ""
+                  }
+                  onClick={handleReject}
+                >
+                  <X size={13} /> Reject
+                </button>
+              </>
             )}
 
             {(isSecretary || isClerk || isCouncilor) && !isLockedStatus(item.status) && (

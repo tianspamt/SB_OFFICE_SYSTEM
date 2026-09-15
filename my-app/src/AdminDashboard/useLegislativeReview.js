@@ -60,7 +60,20 @@ export const actionableStatusesForRole = ({ isSecretary, isViceMayor }) => {
 // and to the three reading statuses too even though those stay in Pending.
 export const READY_TO_PUBLISH_STATUSES = "ready_to_publish,approved";
 export const isLockedStatus = (status) =>
-  READING_STATUSES.includes(status) || status === "ready_to_publish" || status === "approved";
+  READING_STATUSES.includes(status) ||
+  status === "ready_to_publish" ||
+  status === "approved" ||
+  status === "rejected";
+
+// Terminal — a Secretary rejected the record while it was mid-reading (see
+// PUT /:id/reject). Unlike needs_revision (pending → needs_revision →
+// pending), there's no path back into the pipeline; the record just stays
+// visible as a record of the rejection. The backend scopes who can browse
+// it via GET ?status=rejected: the Secretary sees every rejected record,
+// everyone else only their own (see routes/ordinances.js and
+// resolutions.js), so this same query works as both "my rejected records"
+// and "all rejected records" depending on who's asking.
+export const REJECTED_STATUS = "rejected";
 
 // Shared Published-tab fetch, used identically by OrdinancesPage/
 // ResolutionsPage/SessionsPage — each page still builds its own `params`

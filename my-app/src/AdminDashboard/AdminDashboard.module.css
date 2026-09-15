@@ -2829,109 +2829,290 @@
 
 .textArea:focus { border-color: #090446; }
 
-/* ── Profile Modal ── */
-.profileModal {
+/* ============================================================
+   OFFICIAL PROFILE MODAL (Councilor Management → View)
+   Hero header (brand gradient) + stat chips + tabs, replacing the old
+   flat white card whose Term History/Ordinances/Rejected sections were
+   just stacked in one long scroll.
+   ============================================================ */
+.officialModal {
   position: relative;
   background: #fff;
-  border-radius: 14px;
-  padding: 28px;
-  width: 560px;
+  border-radius: 20px;
+  width: 620px;
   max-width: 100%;
   max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.32);
 }
 
-.profileModalCloseBtn {
+.officialModalCloseBtn {
   position: absolute;
-  top: 18px;
-  right: 18px;
-  background: #f1f5f9;
-  border: none;
+  top: 16px;
+  right: 16px;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.3);
   cursor: pointer;
-  color: #64748b;
+  color: #fff;
   width: 32px;
   height: 32px;
   min-width: 32px;
-  border-radius: 8px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s;
+  z-index: 2;
 }
-.profileModalCloseBtn:hover {
-  background: #fee2e2;
-  color: #dc2626;
+.officialModalCloseBtn:hover { background: rgba(255,255,255,0.32); }
+
+.officialHero {
+  background: linear-gradient(135deg, #090446 0%, #380075 100%);
+  padding: 30px 26px 22px;
+  color: #fff;
+  flex-shrink: 0;
 }
 
-.profileHeader {
+.officialHeroTop {
   display: flex;
-  gap: 18px;
   align-items: center;
-  margin-bottom: 22px;
-  padding-bottom: 18px;
-  border-bottom: 2px solid #edf2f7;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
-.profilePhoto {
+.officialAvatarWrap { position: relative; flex-shrink: 0; }
+
+.officialAvatarPhoto {
   width: 84px;
   height: 84px;
   border-radius: 50%;
   object-fit: cover;
-  border: 4px solid #090446;
-  flex-shrink: 0;
+  border: 3px solid rgba(255,255,255,0.55);
+  display: block;
 }
 
-.profileAvatar {
+.officialAvatarFallback {
   width: 84px;
   height: 84px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #090446, #380075);
+  background: rgba(255,255,255,0.16);
+  border: 3px solid rgba(255,255,255,0.55);
   color: #fff;
-  font-size: 32px;
-  font-weight: bold;
+  font-size: 30px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.officialStatusDot {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 3px solid #380075;
+}
+.officialStatusDotActive { background: #22c55e; }
+.officialStatusDotEnded  { background: #94a3b8; }
+
+.officialHeroName { font-size: 21px; font-weight: 800; margin-bottom: 5px; }
+
+.officialHeroPosition {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.25);
+  padding: 3px 11px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+
+.officialHeroMeta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.officialHeroTermLabel { font-size: 12px; color: rgba(255,255,255,0.8); }
+
+.officialStatsRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+}
+/* Secretary sees a 4th "Rejected" chip alongside Terms/Ordinances/Resolutions. */
+.officialStatsRowWide { grid-template-columns: repeat(4, 1fr); }
+.officialStatChip {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.officialStatValue { font-size: 18px; font-weight: 800; color: #fff; }
+.officialStatLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+  margin-top: 2px;
+}
+
+.officialTabsWrap {
+  padding: 0 22px;
+  background: #fff;
   flex-shrink: 0;
 }
 
-.profileName     { font-size: 20px; font-weight: bold; color: #1a365d; margin-bottom: 3px; }
-.profilePosition { font-size: 15px; color: #718096; margin-bottom: 3px; }
-.profileTerm     { font-size: 14px; color: #a0aec0; display: flex; align-items: center; gap: 4px; }
+.officialModalBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 24px 24px;
+}
 
-.profileOrdinancesTitle {
-  font-size: 16px;
-  font-weight: bold;
-  color: #1a365d;
-  margin-bottom: 10px;
+.officialTermCard {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #eef1f5;
+  margin-bottom: 8px;
+  transition: box-shadow 0.15s;
+}
+.officialTermCard:hover { box-shadow: 0 4px 14px rgba(9,4,70,0.08); }
+.officialTermCardActive { background: #eef2ff; border-color: #c7d2fe; }
+
+.officialTermTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+.officialTermPeriod { font-weight: 700; font-size: 13.5px; color: #1e293b; }
+.officialTermRange { font-size: 11.5px; color: #718096; }
+.officialTermNote { font-size: 11px; color: #a0aec0; margin-top: 3px; }
+.officialReelectedTag {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 700;
+}
+
+.officialTermActions { display: flex; gap: 5px; flex-shrink: 0; }
+.officialIconBtn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: #eef2ff;
+  color: #4338ca;
+  transition: background 0.15s;
+}
+.officialIconBtn:hover { background: #e0e7ff; }
+.officialIconBtnDanger { background: #fff1f2; color: #dc2626; }
+.officialIconBtnDanger:hover { background: #ffe4e6; }
+
+.officialRecordItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #eef1f5;
+  margin-bottom: 8px;
+  transition: box-shadow 0.15s;
+}
+.officialRecordItem:hover { box-shadow: 0 4px 14px rgba(9,4,70,0.08); }
+
+.officialRecordIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e0e7ff;
+  color: #4338ca;
+  flex-shrink: 0;
+}
+.officialRecordIconRejected { background: #fee2e2; color: #dc2626; }
+
+.officialRecordBody { flex: 1; min-width: 0; }
+.officialRecordTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.officialRecordMeta {
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin-top: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.profileOrdinanceItem {
+.officialTypeTag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #c53030;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.officialViewLink {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  justify-content: center;
   border-radius: 8px;
-  background: #f7fafc;
-  margin-bottom: 7px;
-  gap: 10px;
-  flex-wrap: wrap;
+  border: none;
+  background: #eef2ff;
+  color: #4338ca;
+  text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.officialViewLink:hover { background: #e0e7ff; }
+
+.officialEmptyState {
+  text-align: center;
+  padding: 28px 12px;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
-.profileOrdinanceLeft {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
+@media (max-width: 640px) {
+  .officialHero { padding: 24px 18px 18px; }
+  .officialAvatarPhoto, .officialAvatarFallback { width: 68px; height: 68px; font-size: 24px; }
+  .officialHeroName { font-size: 18px; }
+  .officialStatsRow { gap: 7px; }
+  .officialStatChip { padding: 8px 4px; }
+  .officialStatValue { font-size: 16px; }
+  .officialTabsWrap { padding: 0 14px; }
+  .officialModalBody { padding: 4px 14px 18px; }
 }
-
-.profileOrdinanceName { font-size: 15px; font-weight: 600; color: #2d3748; }
-.profileOrdinanceDate { font-size: 13px; color: #a0aec0; margin-top: 2px; }
 
 /* ============================================================
    SESSION MINUTES

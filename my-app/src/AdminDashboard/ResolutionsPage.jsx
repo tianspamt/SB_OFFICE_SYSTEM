@@ -13,6 +13,7 @@ import {
   FileText,
   Image,
   CalendarDays,
+  Filter,
   Download,
   Upload,
   Send,
@@ -28,6 +29,10 @@ import {
   RESOLUTION_CATEGORIES,
   isDuplicateRecordNumber,
   suggestResolutionNumber,
+  OFFICIALS_QUERY_KEY,
+  fetchOfficialsList,
+  authFetch,
+  API,
 } from "./AdminContext";
 import {
   pendingStatusesForRole,
@@ -53,6 +58,7 @@ import {
   RecordListSkeleton,
   PresentOverlay,
   PublishNumberModal,
+  CouncilorRoleSection,
 } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
 import ConfirmModal from "./ConfirmModal";
@@ -94,6 +100,17 @@ export default function ResolutionsPage({
   const [statusFilter, setStatusFilter] = useState("all");
   const [presentTarget, setPresentTarget] = useState(null);
   const queryClient = useQueryClient();
+  // Co-Author / Sponsor tagging (see helpers/officialRoleRoutes.js) draws its
+  // picker from the same full council-member list Councilor Management uses,
+  // not from `resolutions`/the officials this one record already has.
+  const [selectedCoAuthorId, setSelectedCoAuthorId] = useState("");
+  const [selectedSponsorId, setSelectedSponsorId] = useState("");
+  const [addingAllCoAuthors, setAddingAllCoAuthors] = useState(false);
+  const { data: allOfficials = [] } = useQuery({
+    queryKey: OFFICIALS_QUERY_KEY,
+    queryFn: fetchOfficialsList,
+    staleTime: 60000,
+  });
   const pendingStatusQ = pendingStatusesForRole({ isSecretary });
   const { data: pendingResolutions = [], isLoading: fetchingPending } = useQuery({
     queryKey: pendingQueryKey("resolutions", pendingStatusQ),
@@ -109,6 +126,12 @@ export default function ResolutionsPage({
     enabled: activeTab === "ready_to_publish" && canPublish,
     staleTime: 15000,
   });
+  // Rejected records don't get a tab in this module — they surface instead
+  // under the tagged author's own entry in Councilor Management (see
+  // AdminDashboard.jsx's official-profile modal, "Rejected Records"
+  // section). This page still fires the /reject action (below) and
+  // invalidates that query's cache key on success, it just doesn't render
+  // a list of them itself.
 
   // ── Published tab: server-paginated ─────────────────────────────────────────
   const [publishedPage, setPublishedPage] = useState(1);
@@ -179,10 +202,14 @@ export default function ResolutionsPage({
   // ── Derive available years from the full resolutions list (the dashboard
   // already fetches this in full for its own stats, so reusing it here is
   // free — the Published tab's own list below is the one that's paginated).
+  // Deliberately NOT scoped to status === "published": this Year dropdown
+  // is shared by all three tabs (Published/Pending/Ready to Publish) via
+  // the one FilterPanel above, so scoping it to published-only years
+  // silently dropped any year that only exists on a pending/ready_to_publish
+  // draft — that year just had no option to select it by on those tabs.
   const availableYears = [
     ...new Set(
       resolutions
-        .filter((r) => r.status === "published")
         .map((r) => r.year?.toString())
         .filter(Boolean)
     ),
@@ -214,6 +241,9 @@ export default function ResolutionsPage({
     setReviewError("");
     setReviewCommentText("");
     setReviewFile(null);
+    setSelectedCoAuthorId("");
+    setSelectedSponsorId("");
+    setAddingAllCoAuthors(false);
     setViewTarget(item);
     if (item.status !== "published") fetchComments(item.id);
   };
@@ -265,6 +295,125 @@ export default function ResolutionsPage({
       fetchComments(viewTarget.id);
     }
   };
+
+  // Terminal, unlike Request Changes — there's no resubmission path back to
+  // pending. The record stays visible on its creator's own Profile page
+  // (and the Secretary's, across every creator) as a record of the
+  // rejection. A reason is only required past first_reading — see the
+  // matching check in helpers/legislativeReviewRoutes.js.
+  const handleReject = async () => {
+    if (!viewTarget) return;
+    if (viewTarget.status !== "first_reading" && !reviewCommentText.trim()) return;
+    const ok = await runReviewAction(
+      `/api/resolutions/${viewTarget.id}/reject`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ comment: reviewCommentText.trim() }),
+      },
+      (d) => ({ status: d.status }),
+      "Resolution rejected."
+    );
+    if (ok) {
+      setReviewCommentText("");
+      fetchComments(viewTarget.id);
+    }
+  };
+
+  // Co-Author / Sponsor: addable once the draft has reached a reading stage
+  // (see READING_STATUSES gate in helpers/officialRoleRoutes.js), alongside
+  // the existing Author tagged at upload time — not a replacement for it.
+  const handleAddCoAuthor = async () => {
+    if (!viewTarget || !selectedCoAuthorId) return;
+    const ok = await runReviewAction(
+      `/api/resolutions/${viewTarget.id}/officials`,
+      {
+        method: "POST",
+        body: JSON.stringify({ official_id: selectedCoAuthorId, role: "co_author" }),
+      },
+      (d) => ({ co_authors: [...(viewTarget.co_authors || []), d] }),
+      "Co-author added!"
+    );
+    if (ok) setSelectedCoAuthorId("");
+  };
+
+  const handleRemoveCoAuthor = (officialId) =>
+    runReviewAction(
+      `/api/resolutions/${viewTarget.id}/officials/${officialId}?role=co_author`,
+      { method: "DELETE" },
+      () => ({
+        co_authors: (viewTarget.co_authors || []).filter((m) => m.id !== officialId),
+      }),
+      "Co-author removed."
+    );
+
+  // Bypasses runReviewAction (fired one at a time here, in parallel) because
+  // that hook's applyUpdate closes over the `viewTarget` from the render
+  // that triggered it — firing it N times in a row would have each call
+  // overwrite the others' additions instead of accumulating them. Collecting
+  // every result first and merging into state once avoids that.
+  const handleAddAllCoAuthors = async () => {
+    if (!viewTarget) return;
+    const candidates = allOfficials.filter(
+      (o) => !(viewTarget.co_authors || []).some((m) => m.id === o.id)
+    );
+    if (candidates.length === 0) return;
+    setAddingAllCoAuthors(true);
+    setReviewError("");
+    try {
+      const results = await Promise.all(
+        candidates.map(async (o) => {
+          try {
+            const res = await authFetch(`${API}/api/resolutions/${viewTarget.id}/officials`, {
+              method: "POST",
+              body: JSON.stringify({ official_id: o.id, role: "co_author" }),
+            });
+            const data = await res.json();
+            return res.ok && data.success ? data.data : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const added = results.filter(Boolean);
+      if (added.length > 0) {
+        setViewTarget((prev) =>
+          prev
+            ? { ...prev, co_authors: [...(prev.co_authors || []), ...added] }
+            : prev
+        );
+        refreshAll();
+      }
+      if (added.length < candidates.length) {
+        setReviewError("Some councilors couldn't be added as co-author.");
+      }
+    } finally {
+      setAddingAllCoAuthors(false);
+    }
+  };
+
+  const handleAddSponsor = async () => {
+    if (!viewTarget || !selectedSponsorId) return;
+    const ok = await runReviewAction(
+      `/api/resolutions/${viewTarget.id}/officials`,
+      {
+        method: "POST",
+        body: JSON.stringify({ official_id: selectedSponsorId, role: "sponsor" }),
+      },
+      (d) => ({ sponsors: [...(viewTarget.sponsors || []), d] }),
+      "Sponsor added!"
+    );
+    if (ok) setSelectedSponsorId("");
+  };
+
+  const handleRemoveSponsor = (officialId) =>
+    runReviewAction(
+      `/api/resolutions/${viewTarget.id}/officials/${officialId}?role=sponsor`,
+      { method: "DELETE" },
+      () => ({
+        sponsors: (viewTarget.sponsors || []).filter((m) => m.id !== officialId),
+      }),
+      "Sponsor removed."
+    );
 
   const handleVMApprove = (id) =>
     runReviewAction(
@@ -326,10 +475,18 @@ export default function ResolutionsPage({
   };
 
   const matchesPendingFilters = (r) => {
+    // Mirrors GET /api/resolutions' widened search (title/number/category/
+    // author all OR'd together) — this box's own placeholder already
+    // promised all four, it just wasn't actually checking category/author.
+    const q = search.toLowerCase();
     const matchesSearch =
       !search ||
-      (r.title || "").toLowerCase().includes(search.toLowerCase()) ||
-      (r.resolution_number || "").toLowerCase().includes(search.toLowerCase());
+      (r.title || "").toLowerCase().includes(q) ||
+      (r.resolution_number || "").toLowerCase().includes(q) ||
+      (r.category || "").toLowerCase().includes(q) ||
+      (r.officials || []).some((off) =>
+        (off.full_name || "").toLowerCase().includes(q)
+      );
     const matchesCategory = catFilter === "All" || r.category === catFilter;
     // Searches the real officials relation (Tag Council Members), not a
     // free-text author field — see the same change on the backend's
@@ -404,7 +561,7 @@ export default function ResolutionsPage({
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder="Search by title, category, author..."
+            placeholder="Search by title, number, category, or author..."
           />
         </div>
         <FilterPanel
@@ -464,6 +621,17 @@ export default function ResolutionsPage({
                     </div>
                     <div className={lStyles.recordTitle}>{r.title}</div>
                     <div className={lStyles.recordMeta}>
+                      {r.category && (
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          <Filter size={12} /> {r.category}
+                        </span>
+                      )}
                       {r.year && (
                         <span
                           style={{
@@ -923,6 +1091,57 @@ export default function ResolutionsPage({
                 </>
               )}
 
+              {/* ── Co-Author / Sponsor ── */}
+              {(() => {
+                const canEditRoles =
+                  isSecretary && READING_STATUSES.includes(viewTarget.status);
+                if (
+                  !canEditRoles &&
+                  !viewTarget.co_authors?.length &&
+                  !viewTarget.sponsors?.length
+                )
+                  return null;
+                return (
+                  <>
+                    <div className={lStyles.viewModalDivider} />
+                    <CouncilorRoleSection
+                      title="Co-Author"
+                      members={viewTarget.co_authors || []}
+                      canEdit={canEditRoles}
+                      availableOfficials={allOfficials.filter(
+                        (o) =>
+                          !(viewTarget.co_authors || []).some(
+                            (m) => m.id === o.id
+                          )
+                      )}
+                      selectedId={selectedCoAuthorId}
+                      onSelectedIdChange={setSelectedCoAuthorId}
+                      onAdd={handleAddCoAuthor}
+                      onRemove={handleRemoveCoAuthor}
+                      submitting={reviewSubmitting}
+                      onAddAll={handleAddAllCoAuthors}
+                      addingAll={addingAllCoAuthors}
+                    />
+                    <CouncilorRoleSection
+                      title="Sponsor"
+                      members={viewTarget.sponsors || []}
+                      canEdit={canEditRoles}
+                      availableOfficials={allOfficials.filter(
+                        (o) =>
+                          !(viewTarget.sponsors || []).some(
+                            (m) => m.id === o.id
+                          )
+                      )}
+                      selectedId={selectedSponsorId}
+                      onSelectedIdChange={setSelectedSponsorId}
+                      onAdd={handleAddSponsor}
+                      onRemove={handleRemoveSponsor}
+                      submitting={reviewSubmitting}
+                    />
+                  </>
+                );
+              })()}
+
               {/* ── Review workflow (hidden once published) ── */}
               {viewTarget.status !== "published" && (
                 <>
@@ -1023,7 +1242,11 @@ export default function ResolutionsPage({
                   </div>
 
                   {(isSecretary || isClerk || isCouncilor || isViceMayor) &&
-                    !isLockedStatus(viewTarget.status) && (
+                    // Otherwise-locked statuses stay closed to new comments
+                    // — except mid-reading, where the Secretary needs this
+                    // same box to type a required reason before Reject.
+                    (!isLockedStatus(viewTarget.status) ||
+                      READING_STATUSES.includes(viewTarget.status)) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -1073,13 +1296,32 @@ export default function ResolutionsPage({
                     )}
 
                     {isSecretary && READING_STATUSES.includes(viewTarget.status) && (
-                      <button
-                        className={lStyles.pillApprove}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleAdvanceReading(viewTarget.id)}
-                      >
-                        <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
-                      </button>
+                      <>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleAdvanceReading(viewTarget.id)}
+                        >
+                          <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
+                        </button>
+                        <button
+                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                          disabled={
+                            reviewSubmitting ||
+                            (viewTarget.status !== "first_reading" &&
+                              !reviewCommentText.trim())
+                          }
+                          title={
+                            viewTarget.status !== "first_reading" &&
+                            !reviewCommentText.trim()
+                              ? "Enter a comment above explaining the rejection"
+                              : ""
+                          }
+                          onClick={handleReject}
+                        >
+                          Reject
+                        </button>
+                      </>
                     )}
 
                     {isViceMayor &&

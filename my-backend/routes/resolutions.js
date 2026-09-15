@@ -13,6 +13,7 @@ const { logActivity } = require('../helpers/logger')
 const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { createOfficialRoleRoutes } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
 // Historical-accuracy note: `term.position` is the specific membership
@@ -21,8 +22,14 @@ const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 // person had zero terms at link time, so there was nothing to snapshot) —
 // sb_council_members.position was dropped (migrations/006), so there's no
 // further fallback for that edge case; it just shows no position.
-const mapOfficials = (resolutionOfficials) =>
+// `role` scopes which tagged officials come back — 'author' (the default,
+// single-select, set at draft/upload time), 'co_author', or 'sponsor' (both
+// only addable once the draft reaches a reading stage — see
+// helpers/officialRoleRoutes.js). Omitting it returns everyone regardless
+// of role, which no current caller needs but keeps this general-purpose.
+const mapOfficials = (resolutionOfficials, role) =>
   (resolutionOfficials || [])
+    .filter((ro) => !role || ro.role === role)
     .map((ro) => {
       const person = ro.sb_council_members
       if (!person) return null
@@ -90,16 +97,35 @@ router.get('/', verifyToken, async (req, res) => {
       }
     }
 
+    // The main search box is advertised (see its placeholder in
+    // ResolutionsPage.jsx) as covering title, number, category, AND author —
+    // it used to only actually match title/number, silently going empty for
+    // a category or author name typed into it. Resolves `search` against
+    // officials names too, same as the dedicated `author` param above, so
+    // it's included as one more OR branch rather than a separate AND filter.
+    let searchAuthorIds = []
+    if (search) {
+      searchAuthorIds = await findRecordIdsByAuthorName('resolution_officials', 'resolution_id', search)
+    }
+
     let query = supabase
       .from('resolutions')
       .select(`*, resolution_officials (
-        official_id, term_id,
+        official_id, term_id, role,
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
       )`, { count: 'exact' })
       .order('uploaded_at', { ascending: false })
     if (year) query = query.eq('year', year)
-    if (search) query = query.or(`${orIlikeClause('title', search)},${orIlikeClause('resolution_number', search)}`)
+    if (search) {
+      const orParts = [
+        orIlikeClause('title', search),
+        orIlikeClause('resolution_number', search),
+        orIlikeClause('category', search),
+      ]
+      if (searchAuthorIds.length > 0) orParts.push(`id.in.(${searchAuthorIds.join(',')})`)
+      query = query.or(orParts.join(','))
+    }
     if (category && category !== 'All') query = query.eq('category', category)
     if (authorResolutionIds) query = query.in('id', authorResolutionIds)
     if (date) {
@@ -109,6 +135,12 @@ router.get('/', verifyToken, async (req, res) => {
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
+      // Rejected drafts are visible system-wide only to the Secretary —
+      // every other role only ever sees their own, so a rejected record
+      // isn't browsable by anyone but its creator and the Secretary.
+      if (statuses.includes('rejected') && req.user.position !== 'secretary') {
+        query = query.eq('created_by', req.user.id)
+      }
     }
     const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
     const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
@@ -117,7 +149,9 @@ router.get('/', verifyToken, async (req, res) => {
     if (error) return res.status(500).json({ error: error.message })
     const parsed = data.map(r => ({
       ...r,
-      officials: mapOfficials(r.resolution_officials),
+      officials: mapOfficials(r.resolution_officials, 'author'),
+      co_authors: mapOfficials(r.resolution_officials, 'co_author'),
+      sponsors: mapOfficials(r.resolution_officials, 'sponsor'),
       resolution_officials: undefined
     }))
     if (page && limit) {
@@ -135,7 +169,7 @@ router.get('/:id', verifyToken, async (req, res) => {
     const { data, error } = await supabase
       .from('resolutions')
       .select(`*, resolution_officials (
-        official_id, term_id,
+        official_id, term_id, role,
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
       )`)
@@ -144,7 +178,9 @@ router.get('/:id', verifyToken, async (req, res) => {
     if (!data) return res.status(404).json({ error: 'Resolution not found.' })
     const parsed = {
       ...data,
-      officials: mapOfficials(data.resolution_officials),
+      officials: mapOfficials(data.resolution_officials, 'author'),
+      co_authors: mapOfficials(data.resolution_officials, 'co_author'),
+      sponsors: mapOfficials(data.resolution_officials, 'sponsor'),
       resolution_officials: undefined
     }
     res.json(parsed)
@@ -197,6 +233,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         resolution_id: resolution.id,
         official_id: oid,
         term_id: await resolveCurrentTermId(oid),
+        role: 'author',
       })))
       const { error: relErr } = await supabase.from('resolution_officials').insert(rows)
       if (relErr) console.error('resolution_officials insert error:', relErr.message)
@@ -259,21 +296,25 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     // every edit — see the same comment in ordinances.js's PUT /:id. An
     // official who stays selected keeps their row (and its historical
     // term_id snapshot) untouched; only actual removals/additions hit the DB.
+    // Scoped to role='author' throughout — this form only ever edits the
+    // Author, so it must never touch (let alone diff away) any Co-Author/
+    // Sponsor rows added later via helpers/officialRoleRoutes.js.
     const { data: existingLinks } = await supabase
-      .from('resolution_officials').select('official_id, term_id').eq('resolution_id', id)
+      .from('resolution_officials').select('official_id, term_id').eq('resolution_id', id).eq('role', 'author')
     const existingIds = new Set((existingLinks || []).map(l => l.official_id))
     const newIds = new Set(officialIds)
     const toRemove = [...existingIds].filter(oid => !newIds.has(oid))
     const toAdd = [...newIds].filter(oid => !existingIds.has(oid))
 
     if (toRemove.length > 0) {
-      await supabase.from('resolution_officials').delete().eq('resolution_id', id).in('official_id', toRemove)
+      await supabase.from('resolution_officials').delete().eq('resolution_id', id).eq('role', 'author').in('official_id', toRemove)
     }
     if (toAdd.length > 0) {
       const rows = await Promise.all(toAdd.map(async (oid) => ({
         resolution_id: id,
         official_id: oid,
         term_id: await resolveCurrentTermId(oid),
+        role: 'author',
       })))
       await supabase.from('resolution_officials').insert(rows)
     }
@@ -391,6 +432,15 @@ router.use('/', createLegislativeReviewRoutes({
   numberField: 'resolution_number',
   numberLabel: 'Resolution number',
   hasReadings: true,
+}))
+
+// Co-Author/Sponsor tagging — see helpers/officialRoleRoutes.js.
+router.use('/', createOfficialRoleRoutes({
+  table: 'resolution_officials',
+  parentTable: 'resolutions',
+  idColumn: 'resolution_id',
+  activityModule: 'Resolutions',
+  singularLabel: 'Resolution',
 }))
 
 module.exports = router

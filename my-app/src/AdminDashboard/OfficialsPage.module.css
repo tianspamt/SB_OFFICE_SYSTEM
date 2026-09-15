@@ -290,6 +290,33 @@
   border-color: #090446;
 }
 
+/* ── Council-level actions (rename/delete the whole term-period group) ── */
+.councilActionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.councilActionBtn:hover {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  color: #090446;
+}
+.councilActionBtnDanger:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
 /* ── Council expanded body ───────────────────────────────────── */
 .councilBody {
   padding: 16px;

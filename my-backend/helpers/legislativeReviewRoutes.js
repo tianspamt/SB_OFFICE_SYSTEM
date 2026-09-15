@@ -155,6 +155,68 @@ function createLegislativeReviewRoutes({
     })
   }
 
+  // PUT /:id/reject — Secretary, hasReadings types only, any reading status
+  // → rejected. Distinct from request-changes: that one sends a draft back
+  // to the creator to fix and resubmit (pending → needs_revision → pending);
+  // this is terminal — the record stays visible (never archived
+  // automatically) as a record of what was turned down, but there's no path
+  // back into the pipeline for it.
+  //
+  // A comment explaining the rejection is required once the record is past
+  // its first reading — by second/third reading there's been real
+  // discussion and scrutiny already, so a reason matters for the record.
+  // Rejecting straight out of first_reading (fresh off Accept, before any
+  // of that) doesn't require one, though one can still be left voluntarily.
+  if (hasReadings) {
+    router.put('/:id/reject', verifyToken, secretaryOnly, async (req, res) => {
+      const { id } = req.params
+      const { comment } = req.body
+      const { data: existing, error: fetchErr } = await supabase.from(table).select('*').eq('id', id).single()
+      if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+      if (!READING_STATUSES.includes(existing.status)) {
+        return res.status(400).json({ error: `${singularLabel} is not currently in a reading stage.` })
+      }
+      const commentRequired = existing.status !== 'first_reading'
+      if (commentRequired && !comment?.trim()) {
+        return res.status(400).json({ error: 'A comment is required when rejecting past the first reading.' })
+      }
+      try {
+        if (comment?.trim()) {
+          const { error: commentErr } = await supabase.from('comments').insert({
+            entity_type: entityType,
+            entity_id: id,
+            author_id: req.user.id,
+            author_role: req.user.position || req.user.role,
+            text: comment.trim(),
+          })
+          if (commentErr) return res.status(500).json({ error: commentErr.message })
+        }
+
+        const { data, conflict, error } = await atomicUpdate(id, existing.status, {
+          status: 'rejected', reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+        })
+        if (conflict) return conflictResponse(res)
+        if (error) return res.status(500).json({ error: error.message })
+        await logActivity(req, 'REJECT', activityModule, `Rejected: ${labelOf(existing)}`)
+        notify({
+          recipientId: existing.created_by,
+          message: `Your ${lower} was rejected: ${labelOf(existing)}`,
+          entityType, entityId: id,
+          emailSubject: `Rejected: ${labelOf(existing)}`,
+          emailHtml: notificationEmailHtml(
+            'Rejected',
+            comment?.trim()
+              ? `The Secretary rejected <strong>${escapeHtml(labelOf(existing))}</strong>:<br/><em>"${escapeHtml(comment.trim())}"</em>`
+              : `The Secretary rejected <strong>${escapeHtml(labelOf(existing))}</strong>.`
+          ),
+        })
+        res.json({ success: true, data })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+  }
+
   // PUT /:id/request-changes — Secretary, pending → needs_revision (comment required)
   router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
     const { id } = req.params
