@@ -1,10 +1,9 @@
 // PendingRecordsWidget.jsx
 // "Needs your review" dashboard widget — shows the oldest-waiting pending
-// legislative records (ordinances, resolutions, session minutes) scoped to
-// the logged-in admin's role, and lets them act on a record without leaving
-// the dashboard. The full backlog is one click away on each record's own
-// module (Ordinances / Resolutions / Sessions), landing directly on that
-// module's Pending tab.
+// legislative records (ordinances, resolutions) scoped to the logged-in
+// admin's role, and lets them act on a record without leaving the
+// dashboard. The full backlog is one click away on each record's own module
+// (Ordinances / Resolutions), landing directly on that module's Pending tab.
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,10 +11,10 @@ import {
   AlertCircle,
   ScrollText,
   FileText,
-  BookOpen,
   ArrowUpRight,
   X,
   Check,
+  CheckCircle2,
   Send,
   Upload,
 } from "lucide-react";
@@ -24,11 +23,15 @@ import lStyles from "./LegislativeModule.module.css";
 import { API, authFetch, pendingQueryKey, fetchPendingList, useModalError } from "./AdminContext";
 import { StatusBadge, PublishNumberModal, nextReadingActionLabel } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
+import LoadingModal from "./LoadingModal";
 import { actionableStatusesForRole, isLockedStatus, READING_STATUSES, useCommentThread } from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
-// Keeps this widget generic across the three legislative record types
-// instead of duplicating three near-identical components.
+// Keeps this widget generic across the legislative record types that still
+// have a pending/review workflow. Session minutes used to be a third entry
+// here, but recording one is now immediate (no pending/VM-approval step —
+// see routes/sessionMinutes.js and SessionsPage.jsx), so it never has
+// anything to surface in this widget and was dropped.
 const TYPE_CONFIG = {
   ordinance: {
     label: "Ordinance",
@@ -49,16 +52,6 @@ const TYPE_CONFIG = {
     icon: FileText,
     iconBg: "#e8f5e9",
     iconColor: "#388e3c",
-  },
-  session_minutes: {
-    label: "Session",
-    route: "session-minutes",
-    tabKey: "sessions",
-    entityType: "session_minutes",
-    numberField: "session_number",
-    icon: BookOpen,
-    iconBg: "#fff3e0",
-    iconColor: "#f57c00",
   },
 };
 
@@ -117,13 +110,7 @@ export default function PendingRecordsWidget({
     queryFn: () => fetchPendingList("resolutions", statusQ),
     staleTime: 15000,
   });
-  const sessionsQuery = useQuery({
-    queryKey: pendingQueryKey("session-minutes", statusQ),
-    queryFn: () => fetchPendingList("session-minutes", statusQ),
-    staleTime: 15000,
-  });
-  const loading =
-    ordinancesQuery.isLoading || resolutionsQuery.isLoading || sessionsQuery.isLoading;
+  const loading = ordinancesQuery.isLoading || resolutionsQuery.isLoading;
 
   // Title reflects what this specific role is being asked to do, not just
   // a generic "pending" label — a Secretary is reviewing new drafts, a Vice
@@ -144,11 +131,10 @@ export default function PendingRecordsWidget({
     const merged = [
       ...tag(ordinancesQuery.data, "ordinance"),
       ...tag(resolutionsQuery.data, "resolution"),
-      ...tag(sessionsQuery.data, "session_minutes"),
     ];
     merged.sort((a, b) => new Date(getItemDate(a)) - new Date(getItemDate(b)));
     return merged;
-  }, [ordinancesQuery.data, resolutionsQuery.data, sessionsQuery.data]);
+  }, [ordinancesQuery.data, resolutionsQuery.data]);
 
   const visibleItems = items.slice(0, MAX_ITEMS_SHOWN);
 
@@ -305,10 +291,9 @@ export default function PendingRecordsWidget({
           }}
           onOpenFullRecord={() => {
             const cfg = TYPE_CONFIG[reviewTarget.record_type];
-            // Mirrors the two tabs' actual content, not isLockedStatus below
-            // (which also covers the three reading statuses — those stay
-            // listed under Pending, not Ready to Publish, so they're not
-            // "locked-therefore-ready_to_publish" for this deep link).
+            // Mirrors the two tabs' actual content — the three reading
+            // statuses stay listed under Pending, not Ready to Publish, so
+            // they're not grouped with ready_to_publish/approved here.
             const subTab =
               reviewTarget.status === "ready_to_publish" || reviewTarget.status === "approved"
                 ? "ready_to_publish"
@@ -495,12 +480,11 @@ function ReviewModal({
     }
     const fd = new FormData();
     fd.append("file", replacementFile);
-    const action = item.record_type === "session_minutes" ? "revise" : "replace-file";
     const successMsg =
       item.status === "needs_revision"
         ? `${cfg.label} resubmitted!`
         : `${cfg.label} file updated!`;
-    runAction(`/api/${cfg.route}/${item.id}/${action}`, { method: "PUT", body: fd }, successMsg);
+    runAction(`/api/${cfg.route}/${item.id}/replace-file`, { method: "PUT", body: fd }, successMsg);
   };
 
   return (
@@ -698,16 +682,9 @@ function ReviewModal({
             )}
 
             {isSecretary && READING_STATUSES.includes(item.status) && (
-              <>
+              <div className={lStyles.pendingActionsRow}>
                 <button
-                  className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                  disabled={submitting}
-                  onClick={handleAdvanceReading}
-                >
-                  <Check size={13} /> {nextReadingActionLabel(item.status)}
-                </button>
-                <button
-                  className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                  className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
                   disabled={
                     submitting ||
                     (item.status !== "first_reading" && !commentText.trim())
@@ -719,39 +696,47 @@ function ReviewModal({
                   }
                   onClick={handleReject}
                 >
-                  <X size={13} /> Reject
+                  <X size={16} /> Reject
                 </button>
-              </>
+                <button
+                  className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                  disabled={submitting}
+                  onClick={handleAdvanceReading}
+                >
+                  <Check size={16} /> {nextReadingActionLabel(item.status)}
+                </button>
+              </div>
             )}
 
-            {(isSecretary || isClerk || isCouncilor) && !isLockedStatus(item.status) && (
-              <button
-                className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                disabled={submitting || !replacementFile}
-                onClick={handleReplaceFile}
-              >
-                <Upload size={13} />{" "}
-                {item.status === "needs_revision" ? "Replace File & Resubmit" : "Replace File"}
-              </button>
-            )}
+            {(isSecretary || isClerk || isCouncilor) &&
+              !isLockedStatus(item.status) && (
+                <button
+                  className={`${lStyles.btn} ${lStyles.btnSm}`}
+                  disabled={submitting || !replacementFile}
+                  onClick={handleReplaceFile}
+                >
+                  <Upload size={13} />{" "}
+                  {item.status === "needs_revision" ? "Replace File & Resubmit" : "Replace File"}
+                </button>
+              )}
 
             {isViceMayor && item.status === "ready_to_publish" && (
               <button
-                className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                className={lStyles.pillApprove}
                 disabled={submitting}
                 onClick={handleVMApprove}
               >
-                <Check size={13} /> Approve
+                <CheckCircle2 size={16} /> Approve
               </button>
             )}
 
             {isSecretary && item.status === "approved" && (
               <button
-                className={`${lStyles.btn} ${lStyles.btnSuccess}`}
+                className={lStyles.pillApprove}
                 disabled={submitting}
                 onClick={handlePublish}
               >
-                <Check size={13} /> Publish
+                <CheckCircle2 size={16} /> Publish
               </button>
             )}
           </div>
@@ -783,6 +768,8 @@ function ReviewModal({
         error={publishNumberError}
       />
     )}
+
+    {(submitting || commentSubmitting) && <LoadingModal message="Processing..." />}
     </>
   );
 }

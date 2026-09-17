@@ -11,7 +11,7 @@ const { upload, handleMulterError } = require('../middleware/multer')
 const { logActivity } = require('../helpers/logger')
 const { escapeHtml, canEditLegislativeRecord } = require('../helpers/utils')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
-const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
+const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify')
 
 
 // GET /api/session-minutes
@@ -72,9 +72,11 @@ router.get('/:id', verifyToken, async (req, res) => {
 })
 
 // POST /api/session-minutes
-// Any of the four legislative positions can originate a draft — Secretary
-// and Vice-Mayor sometimes draft directly rather than only reviewing/
-// approving what Clerk/Councilor submit.
+// Any of the four legislative positions can originate one — Secretary,
+// Clerk, Councilor, or Vice-Mayor. Unlike ordinances/resolutions, there is
+// no pending/VM-approval workflow here (same as session_agendas): a session
+// minutes record is immediately live the moment it's recorded, so `status`
+// is set straight to 'published' instead of 'pending'.
 router.post('/', verifyToken, canCreateDraft, async (req, res) => {
   try {
     const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
@@ -88,19 +90,19 @@ router.post('/', verifyToken, canCreateDraft, async (req, res) => {
         venue: venue || null,
         agenda: agenda || null,
         minutes_text: minutes_text || null,
-        status: 'pending',
+        status: 'published',
         created_by: req.user.id,
       })
       .select().single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'CREATE', 'Sessions', `Added session: ${session_number || session_date}`)
-    notifyByPosition('secretary', {
-      message: `New session minutes draft submitted: ${session_number || session_date}`,
+    notifyAllStaff({
+      message: `New session minutes recorded: ${session_number || session_date}`,
       entityType: 'session_minutes', entityId: data.id,
-      emailSubject: `New Session Minutes Draft: ${session_number || session_date}`,
+      emailSubject: `New Session Minutes: ${session_number || session_date}`,
       emailHtml: notificationEmailHtml(
-        'New Session Minutes Draft Submitted',
-        `A new session minutes draft, <strong>${escapeHtml(session_number || session_date)}</strong>, was submitted and is waiting on your review.`
+        'New Session Minutes Recorded',
+        `Minutes were recorded for the session${session_number ? ` <strong>${escapeHtml(session_number)}</strong>` : ''} on ${new Date(session_date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}.`
       ),
     })
     res.json({ success: true, id: data.id, data })
@@ -166,20 +168,20 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         minutes_text: extractedText || minutes_text || null,
         filename: req.file.originalname,
         filetype: mime,
-        status: 'pending',
+        status: 'published',
         created_by: req.user.id,
       })
       .select().single()
 
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session: ${session_number || session_date}`)
-    notifyByPosition('secretary', {
-      message: `New session minutes draft submitted: ${session_number || session_date}`,
+    notifyAllStaff({
+      message: `New session minutes recorded: ${session_number || session_date}`,
       entityType: 'session_minutes', entityId: data.id,
-      emailSubject: `New Session Minutes Draft: ${session_number || session_date}`,
+      emailSubject: `New Session Minutes: ${session_number || session_date}`,
       emailHtml: notificationEmailHtml(
-        'New Session Minutes Draft Submitted',
-        `A new session minutes draft, <strong>${escapeHtml(session_number || session_date)}</strong>, was submitted and is waiting on your review.`
+        'New Session Minutes Recorded',
+        `Minutes were recorded for the session${session_number ? ` <strong>${escapeHtml(session_number)}</strong>` : ''} on ${new Date(session_date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}.`
       ),
     })
     res.json({ success: true, id: data.id, data })
@@ -209,10 +211,6 @@ router.put('/:id', verifyToken, async (req, res) => {
       agenda: agenda || null,
       minutes_text: minutes_text || null
     }
-    // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
-    // it goes straight back into the Secretary's queue instead of requiring
-    // a separate "resubmit" click.
-    if (existing.status === 'needs_revision') updateData.status = 'pending'
     const { data, error } = await supabase
       .from('session_minutes')
       .update(updateData)
@@ -358,11 +356,6 @@ router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), ha
       if (agenda !== undefined) updateData.agenda = agenda || null
       if (minutes_text !== undefined) updateData.minutes_text = minutes_text || null
     }
-    // A Clerk/Councilor revision on a rejected draft doubles as the
-    // resubmit — it goes straight back into the Secretary's queue instead
-    // of requiring a separate "resubmit" click.
-    if (existing.status === 'needs_revision') updateData.status = 'pending'
-
     const { data, error } = await supabase
       .from('session_minutes').update(updateData).eq('id', id).select().single()
     if (error) return res.status(500).json({ error: error.message })
@@ -374,9 +367,15 @@ router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), ha
   }
 })
 
-// ─── Review workflow + archive: accept/request-changes/vm-approve/publish/
-// DELETE — shared across ordinances/resolutions/session_minutes, see
-// helpers/legislativeReviewRoutes.js.
+// ─── Archive (DELETE /:id) — shared with ordinances/resolutions, see
+// helpers/legislativeReviewRoutes.js. New session minutes are created
+// directly as 'published' now (see POST / and POST /upload above), so the
+// accept/request-changes/vm-approve/publish routes this factory also
+// mounts are unreachable for session_minutes going forward — a status of
+// 'pending'/'ready_to_publish'/'approved' can no longer occur, so those
+// endpoints just always 404/400. Left mounted rather than forked out of the
+// shared factory, since DELETE (archive) is still needed and the dead
+// routes are harmless.
 router.use('/', createLegislativeReviewRoutes({
   table: 'session_minutes',
   entityType: 'session_minutes',

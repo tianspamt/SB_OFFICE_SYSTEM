@@ -3,7 +3,7 @@ const supabase = require('../config/supabase')
 const { verifyToken, secretaryOnly, viceMayorOnly } = require('../middleware/auth')
 const { canArchiveLegislativeRecord, escapeHtml } = require('./utils')
 const { logActivity } = require('./logger')
-const { notify, notifyByPosition, notificationEmailHtml } = require('./notify')
+const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = require('./notify')
 
 // Builds the shared review-workflow routes — accept / request-changes /
 // vm-approve / publish / archive (plus advance-reading for ordinances/
@@ -316,9 +316,16 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'PUBLISH', activityModule, `Published: ${labelOf(existing)}`)
-      notify({
-        recipientId: existing.created_by,
-        message: `Your ${lower} was published: ${labelOf(existing)}`,
+      // Broadcast to every active staff account (Secretary/Clerk/Councilor/
+      // Vice-Mayor), same as "new session minutes recorded"/"new session
+      // agenda posted" — publishing is the record going officially live, a
+      // office-wide event, not a personal heads-up to whoever happened to
+      // draft it. The old version only notified `created_by`, which (a)
+      // silently notified no one at all for the many existing records with
+      // no recorded drafter, and (b) never told anyone else that a new law
+      // just went into effect.
+      notifyAllStaff({
+        message: `New ${lower} published: ${labelOf(existing)}`,
         entityType, entityId: id,
         emailSubject: `Published: ${labelOf(existing)}`,
         emailHtml: notificationEmailHtml(

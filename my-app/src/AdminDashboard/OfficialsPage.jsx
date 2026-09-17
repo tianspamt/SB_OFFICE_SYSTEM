@@ -16,6 +16,7 @@ import {
 import styles from "./OfficialsPage.module.css";
 import { ModalAlert } from "./AdminComponents";
 import { useModalError } from "./AdminContext";
+import LoadingModal from "./LoadingModal";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,7 @@ function CouncilFormModal({ mode = "add", initialLabel = "", onClose, onConfirm 
           </button>
         </div>
       </div>
+      {submitting && <LoadingModal message={isEdit ? "Saving..." : "Creating..."} />}
     </div>
   );
 }

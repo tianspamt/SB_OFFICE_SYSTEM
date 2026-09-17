@@ -32,6 +32,8 @@ const POSITION_OPTIONS = {
   user: [
     { value: "councilor", label: "Councilor" },
     { value: "vice_mayor", label: "Vice Mayor" },
+    { value: "liga_ng_mga_barangay", label: "Liga ng mga Barangay" },
+    { value: "sk_federated", label: "SK Federated" },
   ],
 };
 
@@ -129,7 +131,9 @@ export default function UserFormModal({
             className={styles.input}
             placeholder="Full Name"
             value={form.name}
-            onChange={(e) => onFieldChange("name", e.target.value)}
+            onChange={(e) =>
+              onFieldChange("name", e.target.value.replace(/[^A-Za-z\s]/g, ""))
+            }
           />
 
           {isEdit && <label className={styles.fieldLabel}>Username <span style={{ color: "#e53e3e" }}>*</span></label>}

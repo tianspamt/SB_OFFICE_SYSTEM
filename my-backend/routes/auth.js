@@ -222,4 +222,70 @@ try {
   }
 })
 
+// ─── Password reset (link-based) ────────────────────────────────────────────
+// Unauthenticated by design — the token itself, emailed only to the account
+// owner by POST /api/users/:id/reset-password, is the credential. Shared
+// lookup so both routes below (checking a link, then submitting it) treat
+// "not found" and "expired" identically.
+const findValidResetToken = async (token) => {
+  const { data: user } = await supabase
+    .from('users').select('id, password, reset_token_expires').eq('reset_token', token).single()
+  if (!user || !user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
+    return null
+  }
+  return user
+}
+
+// GET /api/reset-password/:token — lets the reset page confirm the link is
+// still good before showing the "set a new password" form, rather than the
+// account filling it out only to be told at submit time that it expired.
+router.get('/reset-password/:token', async (req, res) => {
+  try {
+    const user = await findValidResetToken(req.params.token)
+    if (!user) return res.status(400).json({ error: 'This reset link is invalid or has expired.' })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/reset-password/:token
+// Also requires the account's current password, on top of the emailed
+// token — an extra check for the case where the link itself leaks (a
+// shared inbox, an accidentally forwarded email) without the current
+// password leaking alongside it. This does mean someone who has genuinely
+// forgotten their password can't use this link to recover the account on
+// their own; that's the deliberate tradeoff the office asked for.
+router.post('/reset-password/:token', loginLimiter, [
+  body('currentPassword').notEmpty().withMessage('Current password is required.'),
+  body('newPassword')
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
+    .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
+    .matches(/\d/).withMessage('Password must contain at least 1 number.'),
+], validate, async (req, res) => {
+  try {
+    const user = await findValidResetToken(req.params.token)
+    if (!user) return res.status(400).json({ error: 'This reset link is invalid or has expired.' })
+
+    const isMatch = await bcrypt.compare(req.body.currentPassword, user.password)
+    if (!isMatch) return res.status(400).json({ error: 'Current password is incorrect.' })
+
+    const hashedPassword = await bcrypt.hash(req.body.newPassword, SALT_ROUNDS)
+    const { error } = await supabase
+      .from('users')
+      // Single-use: the token is cleared the moment it's redeemed, so the
+      // same email link can't be replayed to set the password again later.
+      .update({ password: hashedPassword, reset_token: null, reset_token_expires: null, must_change_password: false })
+      .eq('id', user.id)
+    if (error) return res.status(500).json({ error: error.message })
+
+    await logActivity(req, 'RESET_PASSWORD', 'Users', 'Password reset via emailed link', 'success', {
+      userId: user.id,
+    })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router

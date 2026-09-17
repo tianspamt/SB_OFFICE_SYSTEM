@@ -1,10 +1,13 @@
 /**
- * SessionsPage.jsx — Review, Approval, and Manual Publishing Workflow
- * Preserves existing props: sessionMinutes, setDeleteTarget, onEdit
+ * SessionsPage.jsx — Secretary/Clerk/Councilor/Vice-Mayor record a session's
+ * minutes. Like SessionAgendaPage, there is no pending/review workflow here
+ * anymore: recording a session is immediately visible, so this page has no
+ * tabs, no comment thread, and no accept/vm-approve/publish actions — just a
+ * searchable, paginated list plus Edit/Archive for whoever's allowed to
+ * manage it.
  */
 
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Printer,
   Eye,
@@ -12,51 +15,29 @@ import {
   Archive,
   CalendarDays,
   X,
-  Upload,
-  Send,
-  CheckCircle2,
+  Presentation,
   ChevronLeft,
   ChevronRight,
-  Presentation,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { API, MONTHS, authFetch, pendingQueryKey, fetchPendingList } from "./AdminContext";
+import { API, MONTHS, authFetch } from "./AdminContext";
+import { useLegislativePublished, useResetOnChange } from "./useLegislativeReview";
 import {
-  pendingStatusesForRole,
-  READY_TO_PUBLISH_STATUSES,
-  isLockedStatus,
-  useReviewWorkflow,
-  useCommentThread,
-  useLegislativePublished,
-  useResetOnChange,
-  useDeepLinkedTab,
-} from "./useLegislativeReview";
-
-import {
-  TabNavigation,
   SearchBar,
   FilterPanel,
   EmptyState,
   StatsRow,
-  StatusBadge,
-  statusLabel,
   RecordListSkeleton,
   PresentOverlay,
 } from "./LegislativeComponents";
-import { ModalAlert } from "./AdminComponents";
-import ConfirmModal from "./ConfirmModal";
 
-// Published records are paginated server-side (see GET /api/session-minutes'
-// opt-in page/limit) instead of fetching every session ever recorded — this
-// stays independent of the `sessionMinutes` prop, which the dashboard still
-// fetches in full for its own stats.
 const PAGE_SIZE = 20;
 
-// The print view now requires auth (see backend lockdown of GET .../print),
-// so a plain <a href> can no longer carry it — the browser's own navigation
-// has no way to attach an Authorization header. Open the tab synchronously
-// (before the await) so browsers don't treat it as an unrequested popup,
-// then fill it in once the authenticated fetch resolves.
+// The print view requires auth (see backend lockdown of GET .../print), so a
+// plain <a href> can't carry it — the browser's own navigation has no way to
+// attach an Authorization header. Open the tab synchronously (before the
+// await) so browsers don't treat it as an unrequested popup, then fill it in
+// once the authenticated fetch resolves.
 const handlePrintSession = async (id) => {
   const win = window.open("", "_blank");
   try {
@@ -71,16 +52,9 @@ const handlePrintSession = async (id) => {
   }
 };
 
-// ─── SESSION CARD (Published) ─────────────────────────────────────────────────
+// ─── SESSION CARD ──────────────────────────────────────────────────────────────
 
-function SessionPublishedCard({
-  session,
-  onEdit,
-  onDelete,
-  onView,
-  MONTHS,
-  readOnly,
-}) {
+function SessionCard({ session, onEdit, onDelete, onView, MONTHS, readOnly }) {
   const date = session.session_date
     ? new Date(session.session_date + "T00:00:00")
     : null;
@@ -157,7 +131,6 @@ function SessionPublishedCard({
               {session.session_number}
             </span>
           )}
-          <StatusBadge status="published" />
         </div>
         {session.venue && (
           <div
@@ -229,86 +202,36 @@ export default function SessionsPage({
   setDeleteTarget,
   onEdit,
   readOnly = false,
-  canPublish = false,
-  canManagePending = false,
-  currentUserId = null,
-  isViceMayor = false,
-  isSecretary = false,
-  isClerk = false,
-  isCouncilor = false,
-  onRefresh,
-  initialSubTab = null,
 }) {
-  // Lets the dashboard's "Needs your review" widget deep-link straight into
-  // the Pending tab instead of landing on the default Published tab.
-  const [activeTab, setActiveTab] = useDeepLinkedTab("published", initialSubTab);
   const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
-  const queryClient = useQueryClient();
-  const pendingStatusQ = pendingStatusesForRole({ isSecretary });
-  const { data: pendingSessions = [], isLoading: fetchingPending } = useQuery({
-    queryKey: pendingQueryKey("session-minutes", pendingStatusQ),
-    queryFn: () => fetchPendingList("session-minutes", pendingStatusQ),
-    enabled: activeTab === "pending" && canPublish,
-    staleTime: 15000,
-  });
-  // Ready to Publish: its own tab (see READY_TO_PUBLISH_STATUSES) — Vice-Mayor
-  // approves from here, everyone else can still track what's awaiting them.
-  const { data: readyToPublishSessions = [], isLoading: fetchingReadyToPublish } = useQuery({
-    queryKey: pendingQueryKey("session-minutes", READY_TO_PUBLISH_STATUSES),
-    queryFn: () => fetchPendingList("session-minutes", READY_TO_PUBLISH_STATUSES),
-    enabled: activeTab === "ready_to_publish" && canPublish,
-    staleTime: 15000,
-  });
+  const [presentTarget, setPresentTarget] = useState(null);
+  const [viewTarget, setViewTarget] = useState(null);
 
-  // ── Published tab: server-paginated ─────────────────────────────────────────
-  const [publishedPage, setPublishedPage] = useState(1);
+  const [page, setPage] = useState(1);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  useResetOnChange([debouncedSearch, minutesTypeFilter, minutesYearFilter], setPublishedPage, 1);
+  useResetOnChange([debouncedSearch, minutesTypeFilter, minutesYearFilter], setPage, 1);
 
-  const publishedParams = {
-    page: String(publishedPage),
+  const params = {
+    page: String(page),
     limit: String(PAGE_SIZE),
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(minutesYearFilter !== "all" ? { year: minutesYearFilter } : {}),
     ...(minutesTypeFilter !== "all" ? { type: minutesTypeFilter } : {}),
   };
   const {
-    publishedList,
-    publishedTotal,
-    publishedTotalPages,
-    fetchingPublished,
-    refreshPublished: fetchPublishedSessions,
-  } = useLegislativePublished("session-minutes", publishedParams, sessionMinutes);
-
-  // ── Review workflow ──────────────────────────────────────────────────────────
-  // reviewCommentText/revise* stay local — page-specific glue (the textarea
-  // doubles as comment box + reject-reason input; revise* feed
-  // handleReviseSession below).
-  const [reviewCommentText, setReviewCommentText] = useState("");
-  const [presentTarget, setPresentTarget] = useState(null);
-  const [reviseAgenda, setReviseAgenda] = useState("");
-  const [reviseMinutes, setReviseMinutes] = useState("");
-  const [reviseFile, setReviseFile] = useState(null);
-  const {
-    viewTarget, setViewTarget,
-    submitting: reviewSubmitting, error: reviewError, setError: setReviewError,
-    successMsg: reviewSuccessMsg, clearSuccessMsg: clearReviewSuccessMsg,
-    runAction: runReviewAction,
-  } = useReviewWorkflow({ onRefresh: () => refreshAll() });
-  const {
-    comments: reviewComments, loadingComments, commentSubmitting,
-    fetchComments: fetchCommentsForId, sendComment,
-  } = useCommentThread();
-  const fetchComments = (id) => fetchCommentsForId("session_minutes", id);
+    publishedList: list,
+    publishedTotal: total,
+    publishedTotalPages: totalPages,
+    fetchingPublished: fetching,
+  } = useLegislativePublished("session-minutes", params, sessionMinutes);
 
   const minutesYears = [
-    "all",
     ...new Set(
       sessionMinutes
         .map((s) =>
@@ -319,29 +242,6 @@ export default function SessionsPage({
         .filter(Boolean)
     ),
   ].sort((a, b) => b - a);
-
-  // Old call sites just call fetchPendingSessions() to refresh — keeping
-  // the name means refreshAll() below doesn't need to change.
-  const fetchPendingSessions = () => {
-    queryClient.invalidateQueries({ queryKey: pendingQueryKey("session-minutes", pendingStatusQ) });
-    queryClient.invalidateQueries({ queryKey: pendingQueryKey("session-minutes", READY_TO_PUBLISH_STATUSES) });
-  };
-
-  const refreshAll = () => {
-    fetchPendingSessions();
-    fetchPublishedSessions();
-    onRefresh?.();
-  };
-
-  const handleOpenView = (item) => {
-    setReviewError("");
-    setReviewCommentText("");
-    setReviseAgenda(item.agenda || "");
-    setReviseMinutes(item.minutes_text || "");
-    setReviseFile(null);
-    setViewTarget(item);
-    if (item.status && item.status !== "published") fetchComments(item.id);
-  };
 
   // Session minutes never keep the originally uploaded file (see
   // routes/sessionMinutes.js — an upload only ever extracts text, it's
@@ -376,367 +276,94 @@ export default function SessionsPage({
     });
   };
 
-  const handleSendComment = async () => {
-    if (!viewTarget) return;
-    const result = await sendComment("session_minutes", viewTarget.id, reviewCommentText);
-    if (result.ok) setReviewCommentText("");
-    else if (result.error) setReviewError(result.error);
+  const resetFilters = () => {
+    setSearch("");
+    setMinutesTypeFilter("all");
+    setMinutesYearFilter("all");
   };
-
-  const handleAccept = (id) =>
-    runReviewAction(
-      `/api/session-minutes/${id}/accept`,
-      { method: "PUT" },
-      (d) => ({ status: d.status }),
-      "Session minutes accepted!"
-    );
-
-  const handleRequestChanges = async () => {
-    if (!reviewCommentText.trim() || !viewTarget) return;
-    const ok = await runReviewAction(
-      `/api/session-minutes/${viewTarget.id}/request-changes`,
-      {
-        method: "PUT",
-        body: JSON.stringify({ comment: reviewCommentText.trim() }),
-      },
-      (d) => ({ status: d.status }),
-      "Changes requested!"
-    );
-    if (ok) {
-      setReviewCommentText("");
-      fetchComments(viewTarget.id);
-    }
-  };
-
-  const handleVMApprove = (id) =>
-    runReviewAction(
-      `/api/session-minutes/${id}/vm-approve`,
-      { method: "PUT" },
-      (d) => ({ status: d.status }),
-      "Session minutes approved!"
-    );
-
-  const handlePublish = (id) =>
-    runReviewAction(
-      `/api/session-minutes/${id}/publish`,
-      { method: "PUT" },
-      (d) => ({ status: d.status })
-    );
-
-  const handleReviseSession = async (id) => {
-    let ok;
-    if (reviseFile) {
-      const fd = new FormData();
-      fd.append("file", reviseFile);
-      ok = await runReviewAction(
-        `/api/session-minutes/${id}/revise`,
-        { method: "PUT", body: fd },
-        (d) => ({
-          filename: d.filename,
-          filetype: d.filetype,
-          minutes_text: d.minutes_text,
-          revision_count: d.revision_count,
-        })
-      );
-      if (ok) setReviseFile(null);
-    } else {
-      ok = await runReviewAction(
-        `/api/session-minutes/${id}/revise`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            agenda: reviseAgenda,
-            minutes_text: reviseMinutes,
-          }),
-        },
-        (d) => ({
-          agenda: d.agenda,
-          minutes_text: d.minutes_text,
-          revision_count: d.revision_count,
-        })
-      );
-    }
-    return ok;
-  };
-
-  const matchesPendingFilters = (s) => {
-    const matchesSearch =
-      !search ||
-      (s.session_number || "").toLowerCase().includes(search.toLowerCase());
-    const matchesType =
-      minutesTypeFilter === "all" || s.session_type === minutesTypeFilter;
-    const matchesYear =
-      minutesYearFilter === "all" ||
-      (s.session_date || "").slice(0, 4) === minutesYearFilter;
-    return matchesSearch && matchesType && matchesYear;
-  };
-  const pendingFiltered = pendingSessions.filter(matchesPendingFilters);
-  const pendingCount = pendingSessions.length;
-  const readyToPublishFiltered = readyToPublishSessions.filter(matchesPendingFilters);
-  const readyToPublishCount = readyToPublishSessions.length;
 
   return (
     <>
-      {/* STATS */}
       <StatsRow
-        loading={loading || (fetchingPublished && publishedTotal === 0)}
-        stats={[
-          { value: publishedTotal, label: "Total Sessions" },
-          {
-            value: pendingCount,
-            label: "Pending Review",
-            colorClass: lStyles.statCardAmber,
-          },
-        ]}
+        loading={loading || (fetching && total === 0)}
+        stats={[{ value: total, label: "Total Sessions" }]}
       />
 
-      {/* TABS */}
-      <TabNavigation
-        tabs={[
-          { id: "published", label: "Published" },
-          ...(canPublish
-            ? [
-                { id: "pending", label: "Pending", badge: pendingCount },
-                {
-                  id: "ready_to_publish",
-                  label: "Ready to Publish",
-                  badge: readyToPublishCount,
-                },
-              ]
-            : []),
-        ]}
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setSearch("");
-        }}
-      />
-
-      {/* SEARCH & FILTER */}
       <div className={lStyles.searchFilterBar}>
         <div className={lStyles.searchRow}>
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder={
-              activeTab === "published"
-                ? "Search by session number, venue, or agenda..."
-                : "Search by session number..."
-            }
+            placeholder="Search by session number, venue, or agenda..."
           />
         </div>
         <FilterPanel
-          categoryValue={
-            minutesTypeFilter === "all" ? "All" : minutesTypeFilter
-          }
-          onCategoryChange={(v) =>
-            setMinutesTypeFilter(v === "All" ? "all" : v)
-          }
+          categoryValue={minutesTypeFilter === "all" ? "All" : minutesTypeFilter}
+          onCategoryChange={(v) => setMinutesTypeFilter(v === "All" ? "all" : v)}
           categories={["All", "regular", "special"]}
           dateValue=""
           onDateChange={() => {}}
           yearValue={minutesYearFilter}
           onYearChange={setMinutesYearFilter}
-          years={minutesYears.filter((y) => y !== "all")}
-          onReset={() => {
-            setSearch("");
-            setMinutesTypeFilter("all");
-            setMinutesYearFilter("all");
-          }}
+          years={minutesYears}
+          onReset={resetFilters}
         />
       </div>
 
-      {/* ── PUBLISHED TAB ────────────────────────────────────────────────────── */}
-      {activeTab === "published" && (
-        <>
-          <div className={lStyles.resultCount}>
-            Showing {publishedList.length === 0 ? 0 : (publishedPage - 1) * PAGE_SIZE + 1}
-            {publishedList.length > 0 ? `-${(publishedPage - 1) * PAGE_SIZE + publishedList.length}` : ""} of {publishedTotal} sessions
-          </div>
-          {loading || fetchingPublished ? (
-            <RecordListSkeleton count={4} />
+      <div className={lStyles.resultCount}>
+        Showing {list.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}
+        {list.length > 0 ? `-${(page - 1) * PAGE_SIZE + list.length}` : ""} of {total} sessions
+      </div>
+
+      {loading || fetching ? (
+        <RecordListSkeleton count={4} />
+      ) : (
+        <div className={lStyles.recordList}>
+          {list.length === 0 ? (
+            <EmptyState
+              title="No session records match your search"
+              text={
+                !search && minutesTypeFilter === "all" && minutesYearFilter === "all"
+                  ? "No session minutes recorded yet."
+                  : "Try adjusting your filters."
+              }
+            />
           ) : (
-          <div className={lStyles.recordList}>
-            {publishedList.length === 0 ? (
-              <EmptyState
-                title="No session records match your search"
-                text={
-                  !search &&
-                  minutesTypeFilter === "all" &&
-                  minutesYearFilter === "all"
-                    ? "No session minutes recorded yet."
-                    : "Try adjusting your filters."
-                }
+            list.map((s) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                onEdit={onEdit}
+                onDelete={setDeleteTarget}
+                onView={setViewTarget}
+                MONTHS={MONTHS}
+                readOnly={readOnly}
               />
-            ) : (
-              publishedList.map((s) => (
-                <SessionPublishedCard
-                  key={s.id}
-                  session={s}
-                  onEdit={onEdit}
-                  onDelete={setDeleteTarget}
-                  onView={handleOpenView}
-                  MONTHS={MONTHS}
-                  readOnly={readOnly}
-                />
-              ))
-            )}
-          </div>
+            ))
           )}
-          {!fetchingPublished && publishedTotalPages > 1 && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
-              <button
-                className={`${lStyles.btn} ${lStyles.btnSm}`}
-                disabled={publishedPage <= 1}
-                onClick={() => setPublishedPage((p) => Math.max(p - 1, 1))}
-              >
-                <ChevronLeft size={13} /> Prev
-              </button>
-              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-                Page {publishedPage} of {publishedTotalPages}
-              </span>
-              <button
-                className={`${lStyles.btn} ${lStyles.btnSm}`}
-                disabled={publishedPage >= publishedTotalPages}
-                onClick={() => setPublishedPage((p) => Math.min(p + 1, publishedTotalPages))}
-              >
-                Next <ChevronRight size={13} />
-              </button>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
-      {/* ── PENDING TAB ──────────────────────────────────────────────────────── */}
-      {activeTab === "pending" && (
-        <>
-          <div className={lStyles.resultCount}>
-            Showing {pendingFiltered.length} drafts
-          </div>
-          {fetchingPending ? (
-            <RecordListSkeleton count={3} />
-          ) : (
-          <div className={lStyles.recordList}>
-            {pendingFiltered.length === 0 ? (
-              <EmptyState
-                title="No pending drafts"
-                text="All session minute drafts have been reviewed."
-              />
-            ) : (
-              pendingFiltered.map((item) => (
-                <div key={item.id} className={lStyles.recordCard}>
-                  <div
-                    className={lStyles.recordIcon}
-                    style={{ background: "var(--gray-50)" }}
-                  >
-                    📝
-                  </div>
-                  <div className={lStyles.recordBody}>
-                    <div className={lStyles.recordTitle}>
-                      {item.session_number ||
-                        new Date(item.session_date).toLocaleDateString("en-PH")}
-                    </div>
-                    <div className={lStyles.recordMeta}>
-                      {item.venue && <span>{item.venue}</span>}
-                      {item.revision_count > 0 && (
-                        <span>Revision #{item.revision_count}</span>
-                      )}
-                      <StatusBadge status={item.status} />
-                    </div>
-                  </div>
-                  <div className={lStyles.recordActions}>
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
-                      onClick={() => handleOpenView(item)}
-                    >
-                      <Eye size={13} /> View Draft
-                    </button>
-                    {/* Secretary/Clerk may archive any draft; Councilor/
-                        Vice-Mayor may only withdraw one they created. Once a
-                        record reaches ready_to_publish/approved, it's read-
-                        only for everyone — see the Ready to Publish tab. */}
-                    {!isLockedStatus(item.status) &&
-                      (canManagePending ||
-                        ((isCouncilor || isViceMayor) &&
-                          item.created_by === currentUserId)) && (
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnDanger}`}
-                          onClick={() =>
-                            setDeleteTarget({
-                              id: item.id,
-                              type: "session",
-                              name:
-                                item.session_number ||
-                                new Date(item.session_date).toLocaleDateString("en-PH"),
-                            })
-                          }
-                        >
-                          <Archive size={13} /> Archive
-                        </button>
-                      )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          )}
-        </>
-      )}
-
-      {/* ── READY TO PUBLISH TAB ─────────────────────────────────────────────── */}
-      {activeTab === "ready_to_publish" && (
-        <>
-          <div className={lStyles.resultCount}>
-            Showing {readyToPublishFiltered.length} records
-          </div>
-          {fetchingReadyToPublish ? (
-            <RecordListSkeleton count={3} />
-          ) : (
-          <div className={lStyles.recordList}>
-            {readyToPublishFiltered.length === 0 ? (
-              <EmptyState
-                title="Nothing ready to publish"
-                text="Records approved by the Vice-Mayor and awaiting final publish will show up here."
-              />
-            ) : (
-              readyToPublishFiltered.map((item) => (
-                <div key={item.id} className={lStyles.recordCard}>
-                  <div
-                    className={lStyles.recordIcon}
-                    style={{ background: "var(--gray-50)" }}
-                  >
-                    📝
-                  </div>
-                  <div className={lStyles.recordBody}>
-                    <div className={lStyles.recordTitle}>
-                      {item.session_number ||
-                        new Date(item.session_date).toLocaleDateString("en-PH")}
-                    </div>
-                    <div className={lStyles.recordMeta}>
-                      {item.venue && <span>{item.venue}</span>}
-                      {item.revision_count > 0 && (
-                        <span>Revision #{item.revision_count}</span>
-                      )}
-                      <StatusBadge status={item.status} />
-                    </div>
-                  </div>
-                  <div className={lStyles.recordActions}>
-                    {/* Read-only tab — no edit/comment/archive for anyone
-                        here, just View (which still carries the Approve/
-                        Publish actions once applicable). */}
-                    <button
-                      className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
-                      onClick={() => handleOpenView(item)}
-                    >
-                      <Eye size={13} /> View
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          )}
-        </>
+      {!fetching && totalPages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "14px 0" }}>
+          <button
+            className={`${lStyles.btn} ${lStyles.btnSm}`}
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+          >
+            <ChevronLeft size={13} /> Prev
+          </button>
+          <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+            Page {page} of {totalPages}
+          </span>
+          <button
+            className={`${lStyles.btn} ${lStyles.btnSm}`}
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+          >
+            Next <ChevronRight size={13} />
+          </button>
+        </div>
       )}
 
       {/* ── VIEW SESSION MODAL ───────────────────────────────────────────────── */}
@@ -745,7 +372,6 @@ export default function SessionsPage({
           className={lStyles.viewModalOverlay}
           onClick={() => setViewTarget(null)}
         >
-          <ModalAlert message={reviewError} type="error" />
           <div
             className={lStyles.viewModal}
             onClick={(e) => e.stopPropagation()}
@@ -811,21 +437,6 @@ export default function SessionsPage({
                     </div>
                   </div>
                 )}
-                {viewTarget.status && (
-                  <div className={lStyles.viewModalMetaItem}>
-                    <div
-                      className={`${lStyles.viewModalMetaIcon} ${lStyles.viewModalMetaIconAmber}`}
-                    >
-                      <Eye size={16} />
-                    </div>
-                    <div>
-                      <div className={lStyles.viewModalMetaLabel}>Status</div>
-                      <div className={lStyles.viewModalMetaValue}>
-                        {statusLabel(viewTarget.status)}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className={lStyles.viewModalDivider} />
@@ -842,240 +453,37 @@ export default function SessionsPage({
 
               <div className={lStyles.viewModalDivider} />
 
-              {/* ── Agenda + minutes (editable while under review, read-only once published) ── */}
-              {(() => {
-                const isReviewer =
-                  (isSecretary || isClerk) &&
-                  viewTarget.status &&
-                  viewTarget.status !== "published" &&
-                  !isLockedStatus(viewTarget.status);
-                return (
-                  <>
-                    <div
-                      className={lStyles.viewModalCouncilTitle}
-                      style={{ marginBottom: 8 }}
-                    >
-                      Agenda
-                    </div>
-                    {isReviewer ? (
-                      <textarea
-                        className={lStyles.viewModalOcrText}
-                        rows={4}
-                        value={reviseAgenda}
-                        onChange={(e) => setReviseAgenda(e.target.value)}
-                        placeholder="One agenda item per line..."
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          whiteSpace: "pre-wrap",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        {viewTarget.agenda || "No agenda recorded."}
-                      </div>
-                    )}
+              <div
+                className={lStyles.viewModalCouncilTitle}
+                style={{ marginBottom: 8 }}
+              >
+                Agenda
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  whiteSpace: "pre-wrap",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                {viewTarget.agenda || "No agenda recorded."}
+              </div>
 
-                    <div
-                      className={lStyles.viewModalCouncilTitle}
-                      style={{ margin: "16px 0 8px" }}
-                    >
-                      Minutes
-                    </div>
-                    {isReviewer ? (
-                      <textarea
-                        className={lStyles.viewModalOcrText}
-                        rows={8}
-                        value={reviseMinutes}
-                        onChange={(e) => setReviseMinutes(e.target.value)}
-                        placeholder="Minutes of the session..."
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          whiteSpace: "pre-wrap",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        {viewTarget.minutes_text || "No minutes recorded."}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-
-              {/* ── Review workflow (hidden once published) ── */}
-              {viewTarget.status && viewTarget.status !== "published" && (
-                <>
-                  <div className={lStyles.viewModalDivider} />
-
-                  {/* Replace file — Secretary/Clerk only, and read-only
-                      once the record reaches ready_to_publish/approved. */}
-                  {(isSecretary || isClerk) && !isLockedStatus(viewTarget.status) && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div
-                        className={lStyles.viewModalCouncilTitle}
-                        style={{ marginBottom: 8 }}
-                      >
-                        Or Replace With a File (re-runs text extraction)
-                      </div>
-                      <div
-                        className={lStyles.uploadZone}
-                        onClick={() =>
-                          document.getElementById("reviseFileInputSes")?.click()
-                        }
-                      >
-                        <div className={lStyles.uploadIcon}>📎</div>
-                        <div className={lStyles.uploadText}>
-                          {reviseFile
-                            ? reviseFile.name
-                            : "Click to choose a replacement file"}
-                        </div>
-                        <input
-                          id="reviseFileInputSes"
-                          type="file"
-                          accept=".pdf,.doc,.docx,image/*"
-                          style={{ display: "none" }}
-                          onChange={(e) =>
-                            setReviseFile(e.target.files?.[0] || null)
-                          }
-                        />
-                      </div>
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSm}`}
-                        style={{ marginTop: 8 }}
-                        disabled={reviewSubmitting}
-                        onClick={() => handleReviseSession(viewTarget.id)}
-                      >
-                        <Upload size={13} />{" "}
-                        {viewTarget.status === "needs_revision"
-                          ? "Save & Resubmit"
-                          : "Save Revision"}
-                      </button>
-                    </div>
-                  )}
-
-                  <div className={lStyles.commentsLabel}>Comments</div>
-                  <div className={lStyles.commentsThread}>
-                    {loadingComments ? (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          textAlign: "center",
-                          padding: "1rem",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        Loading comments...
-                      </div>
-                    ) : reviewComments.length === 0 ? (
-                      <div
-                        style={{
-                          fontSize: 13,
-                          textAlign: "center",
-                          padding: "1rem",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        No comments yet
-                      </div>
-                    ) : (
-                      reviewComments.map((c) => (
-                        <div key={c.id} className={lStyles.comment}>
-                          <div className={lStyles.commentMeta}>
-                            <span className={lStyles.commentAuthor}>
-                              {c.author?.name || c.author_role}
-                            </span>
-                            <span>
-                              {new Date(c.created_at).toLocaleString("en-PH", {
-                                month: "short",
-                                day: "numeric",
-                                hour: "numeric",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          </div>
-                          <div className={lStyles.commentText}>{c.text}</div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {(isSecretary || isClerk || isCouncilor || isViceMayor) &&
-                    !isLockedStatus(viewTarget.status) && (
-                    <div className={lStyles.commentInputRow}>
-                      <textarea
-                        className={lStyles.commentInput}
-                        rows={2}
-                        placeholder="Add a comment..."
-                        value={reviewCommentText}
-                        onChange={(e) => setReviewCommentText(e.target.value)}
-                      />
-                      <button
-                        className={`${lStyles.btn} ${lStyles.btnSm}`}
-                        disabled={commentSubmitting || !reviewCommentText.trim()}
-                        onClick={handleSendComment}
-                      >
-                        <Send size={13} />
-                      </button>
-                    </div>
-                  )}
-
-                  <div
-                    className={lStyles.viewModalFileActions}
-                    style={{ marginTop: 16 }}
-                  >
-                    {isSecretary && viewTarget.status === "pending" && (
-                      <>
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleAccept(viewTarget.id)}
-                        >
-                          ✅ Accept
-                        </button>
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
-                          disabled={
-                            reviewSubmitting || !reviewCommentText.trim()
-                          }
-                          title={
-                            !reviewCommentText.trim()
-                              ? "Enter a comment above explaining the requested changes"
-                              : ""
-                          }
-                          onClick={handleRequestChanges}
-                        >
-                          Request Changes
-                        </button>
-                      </>
-                    )}
-
-                    {isViceMayor &&
-                      viewTarget.status === "ready_to_publish" && (
-                        <button
-                          className={lStyles.pillApprove}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleVMApprove(viewTarget.id)}
-                        >
-                          <CheckCircle2 size={16} /> Approve
-                        </button>
-                      )}
-
-                    {isSecretary && viewTarget.status === "approved" && (
-                      <button
-                        className={lStyles.pillApprove}
-                        disabled={reviewSubmitting}
-                        onClick={() => handlePublish(viewTarget.id)}
-                      >
-                        <CheckCircle2 size={16} /> Publish
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
+              <div
+                className={lStyles.viewModalCouncilTitle}
+                style={{ margin: "16px 0 8px" }}
+              >
+                Minutes
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  whiteSpace: "pre-wrap",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                {viewTarget.minutes_text || "No minutes recorded."}
+              </div>
             </div>
           </div>
         </div>
@@ -1083,18 +491,6 @@ export default function SessionsPage({
 
       {presentTarget && (
         <PresentOverlay textContent={presentTarget} onClose={() => setPresentTarget(null)} />
-      )}
-
-      {reviewSuccessMsg && (
-        <ConfirmModal
-          type="success"
-          title="Success"
-          message={reviewSuccessMsg}
-          confirmLabel="OK"
-          cancelLabel={false}
-          onConfirm={clearReviewSuccessMsg}
-          onCancel={clearReviewSuccessMsg}
-        />
       )}
     </>
   );

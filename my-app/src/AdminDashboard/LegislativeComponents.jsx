@@ -354,9 +354,7 @@ export function PublishNumberModal({
         <div className="pnm-card">
           <p className="pnm-title">Publish {label}</p>
           <p className="pnm-message">
-            Enter the official {label.toLowerCase()} for this record. Drafts
-            aren't assigned one until they're actually published, so confirm
-            or edit it here.
+            Enter the official {label.toLowerCase()} for this record.
           </p>
           <input
             className="pnm-input"

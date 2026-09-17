@@ -94,17 +94,53 @@ export const missingFieldsMsg = (fields) => {
 // means an expired token now bounces every page straight back to a login
 // screen that explains why, instead of a confusing half-blank dashboard.
 let sessionExpiryHandled = false;
+
+// authFetch is a plain function, not a hook — it has no component of its own
+// to render a modal from. AdminDashboard.jsx registers a setter here once on
+// mount (see its `useEffect` calling `setConnectionErrorHandler`), so any
+// authFetch call anywhere in the app can still pop the shared
+// ConnectionErrorModal without every one of its ~40 call sites needing to
+// wire that up individually.
+let connectionErrorHandler = null;
+export const setConnectionErrorHandler = (fn) => {
+  connectionErrorHandler = fn;
+};
+const reportConnectionError = (message) => connectionErrorHandler?.(message);
+
 export const authFetch = async (url, options = {}) => {
   const token = localStorage.getItem("token");
   const isFormData = options.body instanceof FormData;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      ...(!isFormData && { "Content-Type": "application/json" }),
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...options.headers,
-    },
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(!isFormData && { "Content-Type": "application/json" }),
+        ...(token && { Authorization: `Bearer ${token}` }),
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    // fetch() itself throws (rather than resolving) when there's no
+    // network at all — e.g. the device is offline. Surface that plainly
+    // instead of letting each call site's own generic "Server error." catch
+    // block leave the user guessing, then let the error keep propagating so
+    // existing per-page error handling still runs too.
+    reportConnectionError(
+      "You appear to be offline. Check your internet connection and try again."
+    );
+    throw err;
+  }
+  // The backend's own verifyToken re-checks the account against Supabase on
+  // every request — a remote service, so it can fail even when the token is
+  // valid and the browser-to-backend hop is fine (see middleware/auth.js).
+  // That's a connectivity problem, not an invalid session, so it's routed
+  // through the same modal instead of authFetch's 401 handling below.
+  if (res.status === 503) {
+    reportConnectionError(
+      "The server couldn't be reached right now. Check your connection and try again."
+    );
+  }
   // Several requests typically fire in parallel on mount — guard so a
   // flood of simultaneous 401s doesn't redirect more than once.
   if (res.status === 401 && !sessionExpiryHandled) {

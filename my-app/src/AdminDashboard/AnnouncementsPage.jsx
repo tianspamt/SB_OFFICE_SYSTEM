@@ -30,7 +30,10 @@ const ROLE_COLORS = {
 // Admin/Staff/Councilor buckets ROLE_COLORS understands.
 function roleLabelFor(author) {
   if (!author) return "Admin";
-  if (author.position === "vice_mayor" || author.position === "councilor") return "Councilor";
+  if (
+    ["vice_mayor", "councilor", "liga_ng_mga_barangay", "sk_federated"].includes(author.position)
+  )
+    return "Councilor";
   return author.role === "admin" ? "Admin" : "Staff";
 }
 

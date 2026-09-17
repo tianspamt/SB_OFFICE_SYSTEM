@@ -31,7 +31,7 @@ const canEditLegislativeRecord = (position) => ['secretary', 'clerk'].includes(p
 const canArchiveLegislativeRecord = (position, status, isOwner) => {
   if (['secretary', 'clerk'].includes(position)) return true
   if (status === 'published') return false
-  return isOwner && ['councilor', 'vice_mayor'].includes(position)
+  return isOwner && ['councilor', 'vice_mayor', 'liga_ng_mga_barangay', 'sk_federated'].includes(position)
 }
 
 // Builds one `column.ilike."%value%"` clause for use inside a Supabase/

@@ -65,6 +65,7 @@ import {
   CouncilorRoleSection,
 } from "./LegislativeComponents";
 import ConfirmModal from "./ConfirmModal";
+import LoadingModal from "./LoadingModal";
 import { ModalAlert } from "./AdminComponents";
 
 const CATEGORIES = ORDINANCE_CATEGORIES;
@@ -1179,9 +1180,14 @@ export default function OrdinancesPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {/* Replace file — Secretary/Clerk only, and read-only
-                      once the record enters its first reading. */}
-                  {(isSecretary || isClerk) && !isLockedStatus(viewTarget.status) && (
+                  {/* Replace file — Secretary/Clerk only. Still allowed
+                      through the three readings (the Secretary may need to
+                      swap in a corrected file while walking a draft through
+                      them), locked out only once it's ready_to_publish/
+                      approved/rejected — see isLockedStatus. */}
+                  {(isSecretary || isClerk) &&
+                    (!isLockedStatus(viewTarget.status) ||
+                      READING_STATUSES.includes(viewTarget.status)) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -1416,6 +1422,17 @@ export default function OrdinancesPage({
           submitting={reviewSubmitting}
           error={publishNumberError}
         />
+      )}
+
+      {/* Covers every review action on this page (Accept/Reject/Advance
+          Reading/VM Approve/Publish/Replace File/Add-Remove Co-Author or
+          Sponsor/comments) — they all funnel through one of these three
+          submitting flags, so one overlay is enough instead of wiring a
+          spinner into each individual button. On a slow connection this is
+          what tells the user their click registered instead of leaving them
+          wondering if a "hang" is really still processing. */}
+      {(reviewSubmitting || addingAllCoAuthors || commentSubmitting) && (
+        <LoadingModal message="Processing..." />
       )}
     </>
   );

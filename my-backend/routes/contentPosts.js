@@ -65,15 +65,15 @@ router.get('/public', async (req, res) => {
 router.post('/', verifyToken, adminOnly, upload.array('images', 10), handleMulterError, async (req, res) => {
   try {
     const { title, body, category, published, pinned } = req.body
-    if (!title || !body)
-      return res.status(400).json({ error: 'Title and body are required.' })
+    if (!title)
+      return res.status(400).json({ error: 'Title is required.' })
 
     const images = await uploadImages(req.files)
 
     const { data, error } = await supabase
       .from('content_posts')
       .insert({
-        title, body, category: normalizeCategory(category),
+        title, body: body || null, category: normalizeCategory(category),
         published: published === undefined ? true : toBool(published),
         pinned: toBool(pinned),
         images, author_id: req.user.id,
@@ -99,8 +99,8 @@ router.put('/:id', verifyToken, adminOnly, upload.array('images', 10), handleMul
     if (fetchErr || !existing) return res.status(404).json({ error: 'Post not found.' })
 
     const { title, body, category, published, pinned } = req.body
-    if (!title || !body)
-      return res.status(400).json({ error: 'Title and body are required.' })
+    if (!title)
+      return res.status(400).json({ error: 'Title is required.' })
 
     let keptImages = []
     try {
@@ -119,7 +119,7 @@ router.put('/:id', verifyToken, adminOnly, upload.array('images', 10), handleMul
     const { data, error } = await supabase
       .from('content_posts')
       .update({
-        title, body, category: normalizeCategory(category),
+        title, body: body || null, category: normalizeCategory(category),
         published: published === undefined ? true : toBool(published),
         pinned: toBool(pinned),
         images,

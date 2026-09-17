@@ -13,23 +13,10 @@ const { sendEmail } = require('../helpers/email')
 const { ROLE_POSITIONS, ALL_POSITIONS, isValidPositionForRole } = require('../helpers/roles')
 
 const SALT_ROUNDS = 10
-
-// Builds a temp password guaranteed to pass the app's own complexity rule
-// (8+ chars, 1 uppercase, 1 digit) without ambiguous-looking characters
-// (no 0/O or 1/l/I) since this gets read off an email and typed by hand.
-const generateTempPassword = () => {
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-  const lower = 'abcdefghijkmnopqrstuvwxyz'
-  const digits = '23456789'
-  const all = upper + lower + digits
-  const pick = (chars) => chars[crypto.randomInt(chars.length)]
-  const chars = [pick(upper), pick(digits), ...Array.from({ length: 8 }, () => pick(all))]
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1)
-    ;[chars[i], chars[j]] = [chars[j], chars[i]]
-  }
-  return chars.join('')
-}
+// Base URL for links embedded in emails (password reset) — same
+// localhost-fallback pattern as the frontend's own API constant
+// (AdminContext.jsx), since there's no deployed URL configured yet.
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
 // POST /api/users
 // Admin-gated creation of a role:'user' account (councilor/vice_mayor) —
@@ -220,17 +207,17 @@ router.put('/:id/password', verifyToken, [
 })
 
 // POST /api/users/:id/reset-password
-// Admin-forced password reset: generates a temp password, emails it to the
-// account's address, and flags must_change_password so the next login
-// requires setting a real one (see LogIn.jsx's forced-change screen and the
-// clearing of this flag above). The temp password is never returned in the
-// API response — only the account owner sees it, via their own inbox.
+// Admin-initiated password reset: emails the account a time-limited,
+// single-use link (see migrations/022_add_password_reset_token.sql) that
+// lets them set their own new password directly, instead of the old
+// flow of generating and emailing a temporary password they'd then have to
+// log in with (see the now-superseded 012_add_must_change_password.sql).
 //
-// The email is sent BEFORE the password is changed in the DB, not after —
-// if it were the other way around and the send failed (bad API key, Brevo
-// outage, etc.), the account would be left with a temp password nobody
-// knows, since it only ever exists in that one email. Sending first means a
-// failure here leaves the real password untouched and safely retryable.
+// The email is sent BEFORE the token is stored, not after — if it were the
+// other way around and the send failed (bad API key, Brevo outage, etc.),
+// the account would be left with a live reset token nobody received a link
+// for. Sending first means a failure here leaves the account untouched and
+// safely retryable.
 router.post('/:id/reset-password', verifyToken, adminOnly, async (req, res) => {
   const { id } = req.params
   try {
@@ -238,37 +225,40 @@ router.post('/:id/reset-password', verifyToken, adminOnly, async (req, res) => {
       .from('users').select('id, username, name, email').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'User not found.' })
 
-    const tempPassword = generateTempPassword()
+    const token = crypto.randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`
 
     try {
       await sendEmail({
         to: [{ email: existing.email, name: existing.name }],
-        subject: 'Your password has been reset',
+        subject: 'Reset your password',
         htmlContent: `
           <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:12px;">
             <div style="text-align:center;margin-bottom:24px;">
               <h2 style="color:#2e7d32;margin:0 0 4px;">Office of Sangguniang Bayan</h2>
               <p style="color:#888;font-size:13px;margin:0;">Municipality of Balilihan, Bohol</p>
             </div>
-            <p style="color:#555;font-size:15px;">An administrator reset the password for your account (<strong>${existing.username}</strong>). Your temporary password is:</p>
-            <div style="font-size:24px;font-weight:bold;letter-spacing:2px;color:#2e7d32;text-align:center;margin:16px 0;padding:16px;background:#f0faf0;border-radius:8px;">${tempPassword}</div>
-            <p style="color:#888;font-size:13px;">You'll be required to set a new password the next time you log in. If you didn't expect this, contact the office immediately.</p>
+            <p style="color:#555;font-size:15px;">An administrator requested a password reset for your account (<strong>${existing.username}</strong>). Click the button below to set a new password:</p>
+            <div style="text-align:center;margin:24px 0;">
+              <a href="${resetLink}" style="display:inline-block;padding:14px 28px;background:#2e7d32;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Reset Password</a>
+            </div>
+            <p style="color:#888;font-size:13px;">This link expires in <strong>1 hour</strong> and can only be used once. If you didn't expect this, contact the office immediately and ignore this email.</p>
           </div>
         `,
       })
     } catch (emailErr) {
       console.error('Password reset email failed:', emailErr.message)
-      return res.status(502).json({ error: 'Could not send the reset email. The password was not changed — please try again.' })
+      return res.status(502).json({ error: 'Could not send the reset email. Please try again.' })
     }
 
-    const hashedPassword = await bcrypt.hash(tempPassword, SALT_ROUNDS)
     const { error } = await supabase
       .from('users')
-      .update({ password: hashedPassword, must_change_password: true })
+      .update({ reset_token: token, reset_token_expires: expiresAt.toISOString() })
       .eq('id', id)
     if (error) return res.status(500).json({ error: error.message })
 
-    await logActivity(req, 'RESET_PASSWORD', 'Users', `Reset password for user: ${existing.username}`)
+    await logActivity(req, 'RESET_PASSWORD', 'Users', `Sent password reset link to: ${existing.username}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })

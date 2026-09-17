@@ -12,8 +12,19 @@ const verifyToken = async (req, res, next) => {
       issuer: 'sangguniang-bayan-system',
       audience: 'sb-client'
     })
-    const { data: user } = await supabase
+    const { data: user, error: dbError } = await supabase
       .from('users').select('is_archived, role, position').eq('id', decoded.id).single()
+    // A Supabase query failure (no internet reaching it, a timeout, a 5xx)
+    // is not the same thing as an invalid token — Supabase is a remote
+    // service, so this can fail even when the token itself is perfectly
+    // valid and the browser-to-backend hop (often just localhost) is fine.
+    // PGRST116 means the query genuinely found zero rows (real "no such
+    // account"); anything else is infrastructure trouble the client should
+    // retry, not a reason to wipe their session — see authFetch in
+    // AdminContext.jsx, which force-logs-out on any 401 from here.
+    if (dbError && dbError.code !== 'PGRST116') {
+      return res.status(503).json({ error: 'Unable to verify your session right now. Please check your connection and try again.' })
+    }
     if (!user)
       return res.status(401).json({ error: 'Account not found.' })
     if (user.is_archived)
@@ -65,7 +76,7 @@ const viceMayorOnly = (req, res, next) => {
 // resolution/session minutes directly rather than only reviewing/approving
 // what someone else submitted.
 const canCreateDraft = (req, res, next) => {
-  if (!['secretary', 'clerk', 'councilor', 'vice_mayor'].includes(req.user?.position))
+  if (!['secretary', 'clerk', 'councilor', 'vice_mayor', 'liga_ng_mga_barangay', 'sk_federated'].includes(req.user?.position))
     return res.status(403).json({ error: 'Secretary, Clerk, Councilor, or Vice-Mayor only.' })
   next()
 }

@@ -125,7 +125,7 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
         const currentCount = await countActiveCouncilors({ councilId: council_id })
         if (currentCount >= COUNCILOR_SEAT_CAP) {
           return res.status(409).json({
-            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'} (typical cap: ${COUNCILOR_SEAT_CAP}). Resubmit with force:true if this is intentional.`,
+            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'}.`,
             seatCapExceeded: true,
           })
         }
@@ -297,7 +297,7 @@ router.post('/:id/terms', verifyToken, adminOnly, secretaryOrClerk, async (req, 
         const currentCount = await countActiveCouncilors({ councilId: council_id, excludeMemberId: id })
         if (currentCount >= COUNCILOR_SEAT_CAP) {
           return res.status(409).json({
-            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'} (typical cap: ${COUNCILOR_SEAT_CAP}). Resubmit with force:true if this is intentional.`,
+            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'}.`,
             seatCapExceeded: true,
           })
         }
@@ -383,7 +383,7 @@ router.put('/:memberId/terms/:termId', verifyToken, adminOnly, secretaryOrClerk,
         const currentCount = await countActiveCouncilors({ councilId: council_id, excludeTermId: termId })
         if (currentCount >= COUNCILOR_SEAT_CAP) {
           return res.status(409).json({
-            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'} (typical cap: ${COUNCILOR_SEAT_CAP}). Resubmit with force:true if this is intentional.`,
+            error: `This council already has ${currentCount} active Councilor${currentCount === 1 ? '' : 's'}.`,
             seatCapExceeded: true,
           })
         }

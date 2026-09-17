@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import LoadingModal from "./LoadingModal";
+import ConnectionErrorModal from "./ConnectionErrorModal";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
 import {
@@ -57,6 +58,7 @@ import {
   fetchCouncilsList,
   ORDINANCE_CATEGORIES,
   RESOLUTION_CATEGORIES,
+  setConnectionErrorHandler,
 } from "./AdminContext";
 import {
   TermStatusBadge,
@@ -108,6 +110,15 @@ export default function AdminDashboard() {
   const showSuccessModal = (msg) => setSuccessModalMsg(msg);
   const [submitting, setSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // authFetch (AdminContext.jsx) has no component of its own to render
+  // from, so it reports connectivity trouble (offline, or a 503 from the
+  // backend's own Supabase check failing) through this one registered
+  // handler instead — see ConnectionErrorModal.jsx.
+  const [connectionError, setConnectionError] = useState("");
+  useEffect(() => {
+    setConnectionErrorHandler(setConnectionError);
+    return () => setConnectionErrorHandler(null);
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   // `sidebarCollapsed` only ever changes via desktop hover (see
@@ -815,7 +826,7 @@ export default function AdminDashboard() {
         method: "POST",
       });
       const data = await res.json();
-      if (res.ok && data.success) showSuccessModal(`Temporary password sent to ${user.email}.`);
+      if (res.ok && data.success) showSuccessModal(`Password reset link sent to ${user.email}.`);
       else showMsg(data.error || "Failed to reset password.", "error");
     } catch {
       showMsg("Server error.", "error");
@@ -1775,7 +1786,14 @@ export default function AdminDashboard() {
   const isSecretary = position === "secretary";
   const isClerk = position === "clerk";
   const isViceMayor = position === "vice_mayor";
-  const isCouncilor = position === "councilor";
+  // Liga ng mga Barangay and SK Federated are ex-officio Sangguniang Bayan
+  // members — same permissions as an elected Councilor throughout the app,
+  // just a distinct position value so the sidebar/Users list can still show
+  // which seat they actually hold.
+  const isCouncilor =
+    position === "councilor" ||
+    position === "liga_ng_mga_barangay" ||
+    position === "sk_federated";
 
   const canManageUsers = isSecretary || isClerk;
   const canViewLogs = isSecretary;
@@ -2167,6 +2185,10 @@ export default function AdminDashboard() {
                   ? "Vice Mayor"
                   : position === "councilor"
                   ? "Councilor"
+                  : position === "liga_ng_mga_barangay"
+                  ? "Liga ng mga Barangay"
+                  : position === "sk_federated"
+                  ? "SK Federated"
                   : isAdmin
                   ? "Administrator"
                   : "User"}
@@ -2251,6 +2273,20 @@ export default function AdminDashboard() {
         </div>
 
         {showLoadingModal && <LoadingModal message="Loading data..." />}
+        {/* Covers every Add/Upload/Save/Reset-password/Delete action across
+            the dashboard — they all toggle this one shared `submitting`
+            flag, so this single overlay stands in for a spinner on every
+            individual button. Shown immediately (no delay, unlike
+            showLoadingModal above): the user just clicked something and is
+            actively waiting, so a moment of silence on a slow connection
+            should never be mistaken for the click not having registered. */}
+        {submitting && <LoadingModal message="Processing..." />}
+        {connectionError && (
+          <ConnectionErrorModal
+            message={connectionError}
+            onClose={() => setConnectionError("")}
+          />
+        )}
 
         {/* ── PAGE COMPONENTS ── */}
         {activeTab === "dashboard" && (
@@ -2371,15 +2407,6 @@ export default function AdminDashboard() {
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditSession}
             readOnly={!canEditLegislative}
-            canPublish={canPublishLegislative}
-            canManagePending={canManagePendingLegislative}
-            currentUserId={admin?.id}
-            isViceMayor={isViceMayor}
-            isSecretary={isSecretary}
-            isClerk={isClerk}
-            isCouncilor={isCouncilor}
-            onRefresh={fetchSessionMinutes}
-            initialSubTab={activeTab === "sessions" ? subTabRequest : null}
           />
         )}
         {activeTab === "session_agendas" && (
@@ -5717,25 +5744,36 @@ export default function AdminDashboard() {
           confirmLabel={
             ARCHIVABLE_TYPES.includes(deleteTarget.type) ? "Archive" : "Delete"
           }
-          onConfirm={() => {
-            if (deleteTarget.type === "user") handleDeleteUser(deleteTarget.id);
-            else if (deleteTarget.type === "ordinance")
-              handleDeleteOrdinance(deleteTarget.id);
-            else if (deleteTarget.type === "resolution")
-              handleDeleteResolution(deleteTarget.id);
-            else if (deleteTarget.type === "official")
-              handleDeleteOfficial(deleteTarget.id);
-            else if (deleteTarget.type === "session")
-              handleDeleteSession(deleteTarget.id);
-            else if (deleteTarget.type === "session_agenda")
-              handleDeleteAgenda(deleteTarget.id);
-            else if (deleteTarget.type === "announcement")
-              handleDeleteAnnouncement(deleteTarget.id);
-            else if (deleteTarget.type === "term")
-              handleDeleteTerm(deleteTarget.memberId, deleteTarget.id);
-            else if (deleteTarget.type === "council")
-              handleDeleteCouncil(deleteTarget.id);
-            setDeleteTarget(null);
+          loading={submitting}
+          onConfirm={async () => {
+            // Awaited (unlike the old fire-and-forget version) so the modal
+            // stays open with a spinner — via `loading` above — for as long
+            // as the request actually takes, instead of closing instantly
+            // and leaving the user staring at nothing on a slow connection
+            // until the success modal eventually appears on its own.
+            setSubmitting(true);
+            try {
+              if (deleteTarget.type === "user") await handleDeleteUser(deleteTarget.id);
+              else if (deleteTarget.type === "ordinance")
+                await handleDeleteOrdinance(deleteTarget.id);
+              else if (deleteTarget.type === "resolution")
+                await handleDeleteResolution(deleteTarget.id);
+              else if (deleteTarget.type === "official")
+                await handleDeleteOfficial(deleteTarget.id);
+              else if (deleteTarget.type === "session")
+                await handleDeleteSession(deleteTarget.id);
+              else if (deleteTarget.type === "session_agenda")
+                await handleDeleteAgenda(deleteTarget.id);
+              else if (deleteTarget.type === "announcement")
+                await handleDeleteAnnouncement(deleteTarget.id);
+              else if (deleteTarget.type === "term")
+                await handleDeleteTerm(deleteTarget.memberId, deleteTarget.id);
+              else if (deleteTarget.type === "council")
+                await handleDeleteCouncil(deleteTarget.id);
+            } finally {
+              setSubmitting(false);
+              setDeleteTarget(null);
+            }
           }}
           onCancel={() => setDeleteTarget(null)}
         />
@@ -5745,7 +5783,7 @@ export default function AdminDashboard() {
         <ConfirmModal
           type="warning"
           title="Reset this account's password?"
-          message={`A new temporary password will be emailed to "${resetPasswordTarget.email}". They'll be required to set a new password the next time they log in.`}
+          message={`A password reset link will be emailed to "${resetPasswordTarget.email}". It lets them set a new password directly and expires in 1 hour.`}
           confirmLabel="Send Reset"
           loading={submitting}
           onConfirm={() => handleResetPassword(resetPasswordTarget)}

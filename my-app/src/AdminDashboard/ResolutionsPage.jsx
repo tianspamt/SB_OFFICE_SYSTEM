@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   X,
+  Check,
   Eye,
   Pencil,
   Archive,
@@ -62,6 +63,7 @@ import {
 } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
 import ConfirmModal from "./ConfirmModal";
+import LoadingModal from "./LoadingModal";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
 
@@ -1147,9 +1149,14 @@ export default function ResolutionsPage({
                 <>
                   <div className={lStyles.viewModalDivider} />
 
-                  {/* Replace file — Secretary/Clerk only, and read-only
-                      once the record enters its first reading. */}
-                  {(isSecretary || isClerk) && !isLockedStatus(viewTarget.status) && (
+                  {/* Replace file — Secretary/Clerk only. Still allowed
+                      through the three readings (the Secretary may need to
+                      swap in a corrected file while walking a draft through
+                      them), locked out only once it's ready_to_publish/
+                      approved/rejected — see isLockedStatus. */}
+                  {(isSecretary || isClerk) &&
+                    (!isLockedStatus(viewTarget.status) ||
+                      READING_STATUSES.includes(viewTarget.status)) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -1270,16 +1277,9 @@ export default function ResolutionsPage({
                     style={{ marginTop: 16 }}
                   >
                     {isSecretary && viewTarget.status === "pending" && (
-                      <>
+                      <div className={lStyles.pendingActionsRow}>
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleAccept(viewTarget.id)}
-                        >
-                          ✅ Accept
-                        </button>
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
                           disabled={
                             reviewSubmitting || !reviewCommentText.trim()
                           }
@@ -1290,22 +1290,22 @@ export default function ResolutionsPage({
                           }
                           onClick={handleRequestChanges}
                         >
-                          Request Changes
+                          <X size={16} /> Request Changes
                         </button>
-                      </>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleAccept(viewTarget.id)}
+                        >
+                          <Check size={16} /> Accept
+                        </button>
+                      </div>
                     )}
 
                     {isSecretary && READING_STATUSES.includes(viewTarget.status) && (
-                      <>
+                      <div className={lStyles.pendingActionsRow}>
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSuccess}`}
-                          disabled={reviewSubmitting}
-                          onClick={() => handleAdvanceReading(viewTarget.id)}
-                        >
-                          <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
-                        </button>
-                        <button
-                          className={`${lStyles.btn} ${lStyles.btnDanger}`}
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
                           disabled={
                             reviewSubmitting ||
                             (viewTarget.status !== "first_reading" &&
@@ -1319,9 +1319,16 @@ export default function ResolutionsPage({
                           }
                           onClick={handleReject}
                         >
-                          Reject
+                          <X size={16} /> Reject
                         </button>
-                      </>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                          disabled={reviewSubmitting}
+                          onClick={() => handleAdvanceReading(viewTarget.id)}
+                        >
+                          <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
+                        </button>
+                      </div>
                     )}
 
                     {isViceMayor &&
@@ -1382,6 +1389,17 @@ export default function ResolutionsPage({
           submitting={reviewSubmitting}
           error={publishNumberError}
         />
+      )}
+
+      {/* Covers every review action on this page (Accept/Reject/Advance
+          Reading/VM Approve/Publish/Replace File/Add-Remove Co-Author or
+          Sponsor/comments) — they all funnel through one of these three
+          submitting flags, so one overlay is enough instead of wiring a
+          spinner into each individual button. On a slow connection this is
+          what tells the user their click registered instead of leaving them
+          wondering if a "hang" is really still processing. */}
+      {(reviewSubmitting || addingAllCoAuthors || commentSubmitting) && (
+        <LoadingModal message="Processing..." />
       )}
     </>
   );
