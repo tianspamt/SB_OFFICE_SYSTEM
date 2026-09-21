@@ -131,7 +131,10 @@ export default function UserFormModal({
             className={styles.input}
             placeholder="Full Name"
             value={form.name}
-            onChange={(e) => onFieldChange("name", e.target.value)}
+            // Letters, spaces, a period (initials, "Ma.", "Jr.") and ñ/Ñ only.
+            onChange={(e) =>
+              onFieldChange("name", e.target.value.replace(/[^A-Za-zñÑ\s.]/g, ""))
+            }
           />
 
           {isEdit && <label className={styles.fieldLabel}>Username <span style={{ color: "#e53e3e" }}>*</span></label>}
