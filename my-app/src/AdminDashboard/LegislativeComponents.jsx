@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import SectorSelect from "./SectorSelect";
 import { Search, Filter, X, Download, UserPlus } from "lucide-react";
 import styles from "./LegislativeModule.module.css";
 // Shares its shimmer classes (.skeleton / .skeletonSolid) with the
@@ -104,8 +105,6 @@ export function FilterPanel({
   onCategoryChange,
   dateValue,
   onDateChange,
-  authorValue,
-  onAuthorChange,
   yearValue,
   onYearChange,
   years,
@@ -125,17 +124,12 @@ export function FilterPanel({
       {categories && (
         <div className={styles.filterField}>
           <span className={styles.filterLabel}>Sector:</span>
-          <select
-            className={styles.filterSelect}
+          <SectorSelect
+            variant="filter"
             value={categoryValue}
-            onChange={(e) => onCategoryChange(e.target.value)}
-          >
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+            onChange={onCategoryChange}
+            options={categories}
+          />
         </div>
       )}
 
@@ -166,19 +160,6 @@ export function FilterPanel({
           onChange={(e) => onDateChange(e.target.value)}
         />
       </div>
-
-      {onAuthorChange && (
-        <div className={styles.filterField}>
-          <span className={styles.filterLabel}>Author:</span>
-          <input
-            className={styles.filterDate}
-            type="text"
-            placeholder="Search author..."
-            value={authorValue}
-            onChange={(e) => onAuthorChange(e.target.value)}
-          />
-        </div>
-      )}
 
       {statuses && (
         <div className={styles.filterField}>
@@ -300,6 +281,8 @@ export function PublishNumberModal({
   detection = null,
   // Lets the user stop waiting on a slow scan and type the values themselves.
   onSkipDetection,
+  // Force the number into capitals as it's typed (resolutions).
+  uppercase = false,
 }) {
   const reading = detection?.status === "reading";
   const found = detection?.status === "done" && (detection.data?.number || detection.data?.date);
@@ -435,7 +418,7 @@ export function PublishNumberModal({
             ref={numberRef}
             placeholder={placeholder}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
             disabled={submitting || reading}
           />
           {onDateChange && (

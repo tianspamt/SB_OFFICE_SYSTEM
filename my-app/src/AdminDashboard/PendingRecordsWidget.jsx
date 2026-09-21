@@ -780,6 +780,7 @@ function ReviewModal({
         }}
         detection={publishDetect.detected}
         onSkipDetection={publishDetect.reset}
+        uppercase={item.record_type === "resolution"}
         dateValue={publishDateValue}
         onDateChange={setPublishDateValue}
         submitting={submitting}

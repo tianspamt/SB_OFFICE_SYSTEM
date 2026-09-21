@@ -10,11 +10,12 @@ const { verifyToken, canCreateDraft, pendingEditors, secretaryOnly } = require('
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC, yearInManila } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC, yearInManila, parseApprovedDay, sortByRecordNumber } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { findDuplicateRecord, duplicateMessage } = require('../helpers/duplicates')
 const { extractMetaHandler, storedMetaHandler } = require('../helpers/documentMeta')
-const { createOfficialRoleRoutes } = require('../helpers/officialRoleRoutes')
+const { createOfficialRoleRoutes, syncRoleLinks } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
 // Historical-accuracy note: `term.position` is the specific membership
@@ -116,13 +117,18 @@ router.get('/', verifyToken, async (req, res) => {
     const publishedOnly = requestedStatuses?.length === 1 && requestedStatuses[0] === 'published'
     const dateColumn = publishedOnly ? 'approved_on' : 'uploaded_at'
 
-    let query = supabase
-      .from('resolutions')
-      .select(`*, resolution_officials (
+    // Published records are listed by record number (see sortByRecordNumber),
+    // which the database can't do — the number is text. So for that list the
+    // query below only fetches id + number, they're ordered here, and just the
+    // requested page is then loaded in full.
+    const LIST_SELECT = `*, resolution_officials (
         official_id, term_id, role,
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
-      )`, { count: 'exact' })
+      )`
+    let query = supabase
+      .from('resolutions')
+      .select(publishedOnly ? 'id, resolution_number, approved_on' : LIST_SELECT, { count: 'exact' })
       .order(dateColumn, { ascending: false, nullsFirst: false })
     if (year) query = query.eq('year', year)
     if (search) {
@@ -152,9 +158,24 @@ router.get('/', verifyToken, async (req, res) => {
     }
     const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
     const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
-    if (page && limit) query = query.range((page - 1) * limit, page * limit - 1)
-    const { data, error, count } = await query
+    if (page && limit && !publishedOnly) query = query.range((page - 1) * limit, page * limit - 1)
+    const { data: found, error, count } = await query
     if (error) return res.status(500).json({ error: error.message })
+
+    let data = found
+    let total = count
+    if (publishedOnly) {
+      const ordered = sortByRecordNumber(found, 'resolution_number')
+      total = ordered.length
+      const ids = (page && limit ? ordered.slice((page - 1) * limit, page * limit) : ordered).map((row) => row.id)
+      data = []
+      if (ids.length > 0) {
+        const { data: full, error: fullErr } = await supabase.from('resolutions').select(LIST_SELECT).in('id', ids)
+        if (fullErr) return res.status(500).json({ error: fullErr.message })
+        const byId = new Map(full.map((row) => [row.id, row]))
+        data = ids.map((id) => byId.get(id)).filter(Boolean)
+      }
+    }
     const parsed = data.map(r => ({
       ...r,
       officials: mapOfficials(r.resolution_officials, 'author'),
@@ -163,7 +184,7 @@ router.get('/', verifyToken, async (req, res) => {
       resolution_officials: undefined
     }))
     if (page && limit) {
-      return res.json({ data: parsed, total: count ?? parsed.length, page, limit, totalPages: Math.max(Math.ceil((count ?? parsed.length) / limit), 1) })
+      return res.json({ data: parsed, total: total ?? parsed.length, page, limit, totalPages: Math.max(Math.ceil((total ?? parsed.length) / limit), 1) })
     }
     res.json(parsed)
   } catch (err) {
@@ -216,11 +237,19 @@ router.post('/:id/detect-meta', verifyToken, secretaryOnly, storedMetaHandler({ 
 // approving what Clerk/Councilor submit.
 router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
-  const { resolution_number, title, year, category, officials } = req.body
+  const { resolution_number, title, year, category, officials, approved_on, co_authors, sponsors } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const { year: parsedYear, error: yearError } = parseYearField(year)
   if (yearError) return res.status(400).json({ error: yearError })
   const officialIds = safeParseJSON(officials, [])
+
+  // Same title or same number as an existing resolution — refuse before the file is stored.
+  try {
+    const dup = await findDuplicateRecord({ table: 'resolutions', numberField: 'resolution_number', title, number: resolution_number })
+    if (dup) return res.status(409).json({ error: duplicateMessage(dup, { lower: 'resolution', numberField: 'resolution_number', title, number: resolution_number }) })
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
+  }
 
   let fileName = null
   try {
@@ -231,7 +260,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     const { data: resolution, error } = await supabase
       .from('resolutions')
       .insert({
-        resolution_number: resolution_number || null,
+        resolution_number: resolution_number ? resolution_number.trim().toUpperCase() : null,
         title,
         year: parsedYear,
         category: category || null,
@@ -292,15 +321,29 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     if (fetchErr || !existing) return res.status(404).json({ error: 'Resolution not found.' })
     if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to edit this resolution.' })
+    const dup = await findDuplicateRecord({ table: 'resolutions', numberField: 'resolution_number', title, number: resolution_number, excludeId: id })
+    if (dup) return res.status(409).json({ error: duplicateMessage(dup, { lower: 'resolution', numberField: 'resolution_number', title, number: resolution_number }) })
+    // The edit form's date is the record's APPROVED date. Once a record has
+    // been approved it can be corrected here (year follows it); before that
+    // there's no approval date yet, so the field is ignored.
+    let newApprovedOn = null
+    if (existing.approved_on && typeof approved_on === 'string' && approved_on.trim()) {
+      newApprovedOn = parseApprovedDay(approved_on)
+      if (!newApprovedOn) return res.status(400).json({ error: 'Approved date must be a valid date (YYYY-MM-DD).' })
+    }
+
     const updateData = {
-      resolution_number: resolution_number || null,
+      resolution_number: resolution_number ? resolution_number.trim().toUpperCase() : null,
       title,
       // Once approved, the record's year is the year it was approved (see
       // helpers/legislativeReviewRoutes.js) — editing the form's date can't
       // move it back to the upload/document year.
-      year: existing.approved_on ? yearInManila(existing.approved_on) : parsedYear,
+      year: newApprovedOn
+        ? newApprovedOn.getUTCFullYear()
+        : existing.approved_on ? yearInManila(existing.approved_on) : parsedYear,
       category: category || null,
     }
+    if (newApprovedOn) updateData.approved_on = newApprovedOn.toISOString()
     // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
     // it goes straight back into the Secretary's queue instead of requiring
     // a separate "resubmit" click.
@@ -342,6 +385,16 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
       })))
       await supabase.from('resolution_officials').insert(rows)
     }
+    // Co-Author / Sponsor are set from the edit form too — but only when the
+    // form sent them, so a client that doesn't know about them leaves the
+    // existing ones alone.
+    if (co_authors !== undefined) {
+      await syncRoleLinks({ table: 'resolution_officials', idColumn: 'resolution_id', id, role: 'co_author', ids: safeParseJSON(co_authors, []) })
+    }
+    if (sponsors !== undefined) {
+      await syncRoleLinks({ table: 'resolution_officials', idColumn: 'resolution_id', id, role: 'sponsor', ids: safeParseJSON(sponsors, []) })
+    }
+
     await logActivity(req, 'UPDATE', 'Resolutions', `Updated resolution: ${title}`)
     res.json({ success: true, data: updated })
   } catch (err) {
@@ -455,6 +508,7 @@ router.use('/', createLegislativeReviewRoutes({
   labelOf: (r) => r.title,
   numberField: 'resolution_number',
   numberLabel: 'Resolution number',
+  uppercaseNumber: true,
   approvedDateField: 'approved_on',
   hasReadings: true,
 }))

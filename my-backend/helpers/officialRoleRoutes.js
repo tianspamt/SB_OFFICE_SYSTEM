@@ -102,4 +102,32 @@ function createOfficialRoleRoutes({ table, parentTable, idColumn, activityModule
   return router
 }
 
-module.exports = { createOfficialRoleRoutes }
+// Makes one role's tagged officials on a record match `ids` — the edit form's
+// way of setting Author / Co-Author / Sponsor. Diffs against what's stored so
+// an official who stays tagged keeps their row (and its historical term_id
+// snapshot); only real removals and additions touch the DB. Scoped to one
+// `role`, so syncing co-authors can never disturb the author or sponsors.
+async function syncRoleLinks({ table, idColumn, id, role, ids }) {
+  const wanted = new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite))
+  const { data: existing, error } = await supabase
+    .from(table).select('official_id').eq(idColumn, id).eq('role', role)
+  if (error) throw new Error(error.message)
+  const have = new Set((existing || []).map((l) => l.official_id))
+  const toRemove = [...have].filter((oid) => !wanted.has(oid))
+  const toAdd = [...wanted].filter((oid) => !have.has(oid))
+
+  if (toRemove.length > 0) {
+    const { error: delErr } = await supabase
+      .from(table).delete().eq(idColumn, id).eq('role', role).in('official_id', toRemove)
+    if (delErr) throw new Error(delErr.message)
+  }
+  if (toAdd.length > 0) {
+    const rows = await Promise.all(toAdd.map(async (oid) => ({
+      [idColumn]: id, official_id: oid, term_id: await resolveCurrentTermId(oid), role,
+    })))
+    const { error: insErr } = await supabase.from(table).insert(rows)
+    if (insErr) throw new Error(insErr.message)
+  }
+}
+
+module.exports = { createOfficialRoleRoutes, syncRoleLinks }

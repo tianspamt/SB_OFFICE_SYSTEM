@@ -70,10 +70,14 @@ const KIND_CONFIG = {
   ordinance: {
     keyword: 'ORD[I1l]NANCE',
     prefix: 'Municipal Ordinance No.',
+    // "Municipal Ordinance No. 2026-011"
+    format: (prefix, seq, year) => (year ? `${prefix} ${year}-${pad(seq, 3)}` : `${prefix} ${seq}`),
   },
   resolution: {
     keyword: 'RES[O0]LUT[I1l][O0]N',
-    prefix: 'Resolution No.',
+    prefix: 'RESOLUTION NO.',
+    // "RESOLUTION NO. 02 - 2025" — always capitals, sequence first
+    format: (prefix, seq, year) => (year ? `${prefix} ${pad(seq, 2)} - ${year}` : `${prefix} ${pad(seq, 2)}`),
   },
 }
 
@@ -138,6 +142,7 @@ const extractNumber = (text, kind) => {
     year: best.year,
     confidence: best.score >= 8 ? 'high' : best.score >= 3 ? 'medium' : 'low',
     prefix: cfg.prefix,
+    format: cfg.format,
   }
 }
 
@@ -254,9 +259,7 @@ const extractLegislativeMeta = (text, kind, options = {}) => {
   let numberDisplay = null
   if (number) {
     const numberYear = number.year || year
-    numberDisplay = numberYear
-      ? `${number.prefix} ${numberYear}-${pad(number.sequence, 3)}`
-      : `${number.prefix} ${number.sequence}`
+    numberDisplay = number.format(number.prefix, number.sequence, numberYear)
   }
 
   return {

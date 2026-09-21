@@ -79,6 +79,7 @@ import OfficialsPage from "./OfficialsPage";
 import SessionsPage from "./SessionsPage";
 import SessionAgendaPage from "./SessionAgendaPage";
 import AnnouncementsPage from "./AnnouncementsPage";
+import SectorSelect from "./SectorSelect";
 import CalendarPage from "./CalendarPage";
 import LogsPage from "./LogsPage";
 import DashboardPage from "./DashboardPage";
@@ -235,7 +236,6 @@ export default function AdminDashboard() {
   const [ordinanceTitle, setOrdinanceTitle] = useState("");
   const [ordinanceDate, setOrdinanceDate] = useState("");
   const [ordinanceFile, setOrdinanceFile] = useState(null);
-  const [ordinanceNumber, setOrdinanceNumber] = useState("");
   const [ordinanceCategory, setOrdinanceCategory] = useState("");
   const [uploadType, setUploadType] = useState("");
   const [selectedOfficials, setSelectedOfficials] = useState([]);
@@ -246,6 +246,8 @@ export default function AdminDashboard() {
   const [editOrdinanceDate, setEditOrdinanceDate] = useState("");
   const [editOrdinanceCategory, setEditOrdinanceCategory] = useState("");
   const [editSelectedOfficials, setEditSelectedOfficials] = useState([]);
+  const [editCoAuthors, setEditCoAuthors] = useState([]);
+  const [editSponsors, setEditSponsors] = useState([]);
   const [editOrdinanceFile, setEditOrdinanceFile] = useState(null);
 
   // resolutions
@@ -253,14 +255,14 @@ export default function AdminDashboard() {
   const [resolutionTitle, setResolutionTitle] = useState("");
   const [resolutionDate, setResolutionDate] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
-  const [resolutionNumber, setResolutionNumber] = useState("");
-  // Result of "detect number & date from the chosen file" per upload form —
-  // see detectRecordMeta below.
+  // Result of "detect the date from the chosen file" per upload form — see
+  // detectRecordMeta below. (The official number isn't collected at upload;
+  // the Secretary sets it when publishing.)
   const [recordScan, setRecordScan] = useState({ ordinance: null, resolution: null });
   const recordScanSeq = useRef({ ordinance: 0, resolution: 0 });
   const recordScanAuto = useRef({
-    ordinance: { number: "", date: "" },
-    resolution: { number: "", date: "" },
+    ordinance: { date: "" },
+    resolution: { date: "" },
   });
   const latestRecordForm = useRef({});
   const [resolutionCategory, setResolutionCategory] = useState("");
@@ -273,6 +275,7 @@ export default function AdminDashboard() {
   const [editResolutionCategory, setEditResolutionCategory] = useState("");
   const [editResolutionSelectedOfficials, setEditResolutionSelectedOfficials] =
     useState([]);
+  const [editResCoAuthors, setEditResCoAuthors] = useState([]);
   const [editResolutionFile, setEditResolutionFile] = useState(null);
 
   // officials — cached via React Query instead of useState/fetchX so
@@ -849,27 +852,26 @@ export default function AdminDashboard() {
     }
   };
 
-  // ─── Detect number & date from the chosen file ───────────────────────────────
+  // ─── Detect the date from the chosen file ────────────────────────────────────
   // Asks the backend to read the file (text layer, Word, or OCR for scans) and
-  // suggest the record's number and date, then prefills those form fields.
-  // Suggestion only: it fills a field just when it's still untouched — the
-  // number if empty, the date if it's still the default of today (or the last
+  // suggest the record's date, then prefills that form field. Suggestion only:
+  // it fills the date just when it's still the default of today (or the last
   // thing this detection filled in itself) — so it never overwrites something
   // the user typed, and nothing is saved until they submit the form.
   useEffect(() => {
-    latestRecordForm.current = { ordinanceNumber, ordinanceDate, resolutionNumber, resolutionDate };
+    latestRecordForm.current = { ordinanceDate, resolutionDate };
   });
   const RECORD_SCAN = {
-    ordinance: { route: "ordinances", setNumber: setOrdinanceNumber, setDate: setOrdinanceDate },
-    resolution: { route: "resolutions", setNumber: setResolutionNumber, setDate: setResolutionDate },
+    ordinance: { route: "ordinances", setDate: setOrdinanceDate },
+    resolution: { route: "resolutions", setDate: setResolutionDate },
   };
   const clearRecordScan = (kind) => {
     recordScanSeq.current[kind]++;
-    recordScanAuto.current[kind] = { number: "", date: "" };
+    recordScanAuto.current[kind] = { date: "" };
     setRecordScan((s) => ({ ...s, [kind]: null }));
   };
   const detectRecordMeta = async (kind, file) => {
-    const { route, setNumber, setDate } = RECORD_SCAN[kind];
+    const { route, setDate } = RECORD_SCAN[kind];
     // A newer file choice (or closing the form) invalidates this request.
     const seq = ++recordScanSeq.current[kind];
     const isCurrent = () => recordScanSeq.current[kind] === seq;
@@ -895,21 +897,15 @@ export default function AdminDashboard() {
 
       const found = data.data;
       const form = latestRecordForm.current;
-      const currentNumber = (kind === "ordinance" ? form.ordinanceNumber : form.resolutionNumber) || "";
       const currentDate = (kind === "ordinance" ? form.ordinanceDate : form.resolutionDate) || "";
       const auto = recordScanAuto.current[kind];
       const applied = {
-        number: Boolean(found.number) && (!currentNumber.trim() || currentNumber === auto.number),
         date:
           Boolean(found.date) &&
           (!currentDate || currentDate === toIsoDate(new Date()) || currentDate === auto.date),
       };
-      if (applied.number) setNumber(found.number);
       if (applied.date) setDate(found.date);
-      recordScanAuto.current[kind] = {
-        number: applied.number ? found.number : auto.number,
-        date: applied.date ? found.date : auto.date,
-      };
+      recordScanAuto.current[kind] = { date: applied.date ? found.date : auto.date };
       show({ status: "done", data: found, applied });
     } catch {
       show({ status: "error", message: "Couldn't read this file automatically." });
@@ -935,7 +931,6 @@ export default function AdminDashboard() {
     fd.append("date", ordinanceDate);
     fd.append("year", ordinanceDate.split("-")[0]);
     fd.append("category", ordinanceCategory);
-    if (ordinanceNumber.trim()) fd.append("ordinance_number", ordinanceNumber.trim());
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
     try {
@@ -952,7 +947,6 @@ export default function AdminDashboard() {
         }
         setOrdinanceTitle("");
         setOrdinanceDate("");
-        setOrdinanceNumber("");
         clearRecordScan("ordinance");
         setOrdinanceFile(null);
         setOrdinanceCategory("");
@@ -971,9 +965,15 @@ export default function AdminDashboard() {
     setEditingOrdinance(o);
     setEditOrdinanceNumber(o.ordinance_number || "");
     setEditOrdinanceTitle(o.title);
-    setEditOrdinanceDate(o.date || (o.year ? `${o.year}-01-01` : ""));
+    // The date is the record's APPROVED date once it has one (not the upload
+    // date); a record not yet approved falls back to its year.
+    setEditOrdinanceDate(
+      o.approved_on ? toIsoDate(new Date(o.approved_on)) : o.date || (o.year ? `${o.year}-01-01` : "")
+    );
     setEditOrdinanceCategory(o.category || "");
     setEditSelectedOfficials(o.officials ? o.officials.map((x) => x.id) : []);
+    setEditCoAuthors((o.co_authors || []).map((x) => x.id));
+    setEditSponsors((o.sponsors || []).map((x) => x.id));
     setEditOrdinanceFile(null);
     setModalMessage("");
     setShowEditOrdinanceModal(true);
@@ -982,6 +982,11 @@ export default function AdminDashboard() {
   // the current pick instead of adding to it.
   const toggleEditOfficial = (id) =>
     setEditSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
+  // Co-Authors and Sponsors, unlike the Author, can be several people.
+  const toggleEditCoAuthor = (id) =>
+    setEditCoAuthors((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const toggleEditSponsor = (id) =>
+    setEditSponsors((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const handleUpdateOrdinance = async () => {
     const missing = missingFieldsMsg([
       [editOrdinanceTitle, "Title"],
@@ -1015,6 +1020,9 @@ export default function AdminDashboard() {
     fd.append("year", editOrdinanceDate.split("-")[0]);
     fd.append("category", editOrdinanceCategory);
     fd.append("officials", JSON.stringify(editSelectedOfficials));
+    fd.append("co_authors", JSON.stringify(editCoAuthors));
+    fd.append("sponsors", JSON.stringify(editSponsors));
+    if (editingOrdinance.approved_on) fd.append("approved_on", editOrdinanceDate);
     if (editOrdinanceFile) fd.append("file", editOrdinanceFile);
     try {
       const res = await authFetch(
@@ -1060,7 +1068,7 @@ export default function AdminDashboard() {
       [resolutionDate, "Date"],
       [resolutionFile, "File"],
       [resolutionCategory, "Sector"],
-      [selectedResolutionOfficials.length > 0, "Author"],
+      [selectedResolutionOfficials.length > 0, "Sponsor"],
     ]);
     if (missing) {
       showModalMsg(missing, "error");
@@ -1072,7 +1080,6 @@ export default function AdminDashboard() {
     fd.append("date", resolutionDate);
     fd.append("year", resolutionDate.split("-")[0]);
     fd.append("category", resolutionCategory);
-    if (resolutionNumber.trim()) fd.append("resolution_number", resolutionNumber.trim());
     fd.append("file", resolutionFile);
     fd.append("officials", JSON.stringify(selectedResolutionOfficials));
     try {
@@ -1085,7 +1092,6 @@ export default function AdminDashboard() {
         showSuccessModal("Resolution uploaded!");
         setResolutionTitle("");
         setResolutionDate("");
-        setResolutionNumber("");
         clearRecordScan("resolution");
         setResolutionFile(null);
         setResolutionCategory("");
@@ -1103,11 +1109,16 @@ export default function AdminDashboard() {
     setEditingResolution(r);
     setEditResolutionNumber(r.resolution_number || "");
     setEditResolutionTitle(r.title);
-    setEditResolutionDate(r.date || (r.year ? `${r.year}-01-01` : ""));
+    // The date is the record's APPROVED date once it has one (not the upload
+    // date); a record not yet approved falls back to its year.
+    setEditResolutionDate(
+      r.approved_on ? toIsoDate(new Date(r.approved_on)) : r.date || (r.year ? `${r.year}-01-01` : "")
+    );
     setEditResolutionCategory(r.category || "");
     setEditResolutionSelectedOfficials(
       r.officials ? r.officials.map((x) => x.id) : []
     );
+    setEditResCoAuthors((r.co_authors || []).map((x) => x.id));
     setEditResolutionFile(null);
     setModalMessage("");
     setShowEditResolutionModal(true);
@@ -1116,12 +1127,15 @@ export default function AdminDashboard() {
   // the current pick instead of adding to it.
   const toggleEditResolutionOfficial = (id) =>
     setEditResolutionSelectedOfficials((p) => (p.includes(id) ? [] : [id]));
+  // Co-Sponsors, unlike the Sponsor, can be several people.
+  const toggleEditResCoAuthor = (id) =>
+    setEditResCoAuthors((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const handleUpdateResolution = async () => {
     const missing = missingFieldsMsg([
       [editResolutionTitle, "Title"],
       [editResolutionDate, "Date"],
       [editResolutionCategory, "Sector"],
-      [editResolutionSelectedOfficials.length > 0, "Author"],
+      [editResolutionSelectedOfficials.length > 0, "Sponsor"],
     ]);
     if (missing) {
       showModalMsg(missing, "error");
@@ -1149,6 +1163,8 @@ export default function AdminDashboard() {
     fd.append("year", editResolutionDate.split("-")[0]);
     fd.append("category", editResolutionCategory);
     fd.append("officials", JSON.stringify(editResolutionSelectedOfficials));
+    fd.append("co_authors", JSON.stringify(editResCoAuthors));
+    if (editingResolution.approved_on) fd.append("approved_on", editResolutionDate);
     if (editResolutionFile) fd.append("file", editResolutionFile);
     try {
       const res = await authFetch(
@@ -1952,7 +1968,6 @@ export default function AdminDashboard() {
   const openOrdinanceModal = () => {
     setModalMessage("");
     setOrdinanceDate(toIsoDate(new Date()));
-    setOrdinanceNumber("");
     clearRecordScan("ordinance");
     setShowOrdinanceModal(true);
   };
@@ -1961,7 +1976,6 @@ export default function AdminDashboard() {
     setResolutionTitle("");
     setResolutionDate(toIsoDate(new Date()));
     setResolutionFile(null);
-    setResolutionNumber("");
     clearRecordScan("resolution");
     setSelectedResolutionOfficials([]);
     setShowResolutionModal(true);
@@ -3565,7 +3579,6 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowOrdinanceModal(false);
             setOrdinanceFile(null);
-            setOrdinanceNumber("");
             clearRecordScan("ordinance");
             setOrdinanceTitle("");
             setOrdinanceDate("");
@@ -3606,7 +3619,6 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowOrdinanceModal(false);
                   setOrdinanceFile(null);
-                  setOrdinanceNumber("");
                   clearRecordScan("ordinance");
                   setOrdinanceTitle("");
                   setOrdinanceDate("");
@@ -3656,31 +3668,14 @@ export default function AdminDashboard() {
                 value={ordinanceDate}
                 onChange={(e) => setOrdinanceDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Ordinance Number</label>
-              <input
-                className={styles.input}
-                placeholder="e.g. Municipal Ordinance No. 2026-011"
-                value={ordinanceNumber}
-                onChange={(e) => setOrdinanceNumber(e.target.value)}
-              />
-              <p
-                className={styles.fileHint}
-                style={{ marginTop: -6, marginBottom: 10 }}
-              >
-                Optional — detected from the file when possible. The Secretary
-                confirms the final number when this record is published.
-              </p>
               <label className={styles.fieldLabel}>Sector</label>
-              <select
-                className={styles.input}
+              <SectorSelect
                 value={ordinanceCategory}
-                onChange={(e) => setOrdinanceCategory(e.target.value)}
-              >
-                <option value="">— Select sector —</option>
-                {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                onChange={setOrdinanceCategory}
+                options={ORDINANCE_CATEGORIES.filter((c) => c !== "All")}
+                placeholder="— Select sector —"
+                searchable
+              />
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
@@ -3834,7 +3829,9 @@ export default function AdminDashboard() {
                 value={editOrdinanceTitle}
                 onChange={(e) => setEditOrdinanceTitle(e.target.value.toUpperCase())}
               />
-              <label className={styles.fieldLabel}>Date</label>
+              <label className={styles.fieldLabel}>
+                {editingOrdinance.approved_on ? "Approved Date" : "Date"}
+              </label>
               <input
                 className={styles.input}
                 type="date"
@@ -3842,16 +3839,13 @@ export default function AdminDashboard() {
                 onChange={(e) => setEditOrdinanceDate(e.target.value)}
               />
               <label className={styles.fieldLabel}>Sector</label>
-              <select
-                className={styles.input}
+              <SectorSelect
                 value={editOrdinanceCategory}
-                onChange={(e) => setEditOrdinanceCategory(e.target.value)}
-              >
-                <option value="">— Select sector —</option>
-                {ORDINANCE_CATEGORIES.filter((c) => c !== "All").map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                onChange={setEditOrdinanceCategory}
+                options={ORDINANCE_CATEGORIES.filter((c) => c !== "All")}
+                placeholder="— Select sector —"
+                searchable
+              />
               <p className={styles.officialsSelectLabel}>
                 Replace file (optional):
               </p>
@@ -3897,6 +3891,28 @@ export default function AdminDashboard() {
                   styles={styles}
                 />
               </div>
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag the Co-Authors <span className={styles.fieldHint}>(optional)</span>:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={editCoAuthors}
+                  onToggle={toggleEditCoAuthor}
+                  styles={styles}
+                />
+              </div>
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag the Sponsors <span className={styles.fieldHint}>(optional)</span>:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={editSponsors}
+                  onToggle={toggleEditSponsor}
+                  styles={styles}
+                />
+              </div>
             </div>
 
             {/* ── Sticky footer ── */}
@@ -3930,7 +3946,6 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowResolutionModal(false);
             setResolutionFile(null);
-            setResolutionNumber("");
             clearRecordScan("resolution");
             setResolutionTitle("");
             setResolutionDate("");
@@ -3971,7 +3986,6 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowResolutionModal(false);
                   setResolutionFile(null);
-                  setResolutionNumber("");
                   clearRecordScan("resolution");
                   setResolutionTitle("");
                   setResolutionDate("");
@@ -4021,31 +4035,14 @@ export default function AdminDashboard() {
                 value={resolutionDate}
                 onChange={(e) => setResolutionDate(e.target.value)}
               />
-              <label className={styles.fieldLabel}>Resolution Number</label>
-              <input
-                className={styles.input}
-                placeholder="e.g. Resolution No. 2026-045"
-                value={resolutionNumber}
-                onChange={(e) => setResolutionNumber(e.target.value)}
-              />
-              <p
-                className={styles.fileHint}
-                style={{ marginTop: -6, marginBottom: 10 }}
-              >
-                Optional — detected from the file when possible. The Secretary
-                confirms the final number when this record is published.
-              </p>
               <label className={styles.fieldLabel}>Sector</label>
-              <select
-                className={styles.input}
+              <SectorSelect
                 value={resolutionCategory}
-                onChange={(e) => setResolutionCategory(e.target.value)}
-              >
-                <option value="">— Select sector —</option>
-                {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                onChange={setResolutionCategory}
+                options={RESOLUTION_CATEGORIES.filter((c) => c !== "All")}
+                placeholder="— Select sector —"
+                searchable
+              />
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
@@ -4079,7 +4076,7 @@ export default function AdminDashboard() {
 
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag the Council Member who authored this resolution:
+                  Tag the Council Member who sponsored this resolution:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
@@ -4191,7 +4188,7 @@ export default function AdminDashboard() {
                 className={styles.input}
                 placeholder="Resolution Number (optional — assigned at publish time if left blank)"
                 value={editResolutionNumber}
-                onChange={(e) => setEditResolutionNumber(e.target.value)}
+                onChange={(e) => setEditResolutionNumber(e.target.value.toUpperCase())}
               />
               <input
                 className={styles.input}
@@ -4199,7 +4196,9 @@ export default function AdminDashboard() {
                 value={editResolutionTitle}
                 onChange={(e) => setEditResolutionTitle(e.target.value.toUpperCase())}
               />
-              <label className={styles.fieldLabel}>Date</label>
+              <label className={styles.fieldLabel}>
+                {editingResolution.approved_on ? "Approved Date" : "Date"}
+              </label>
               <input
                 className={styles.input}
                 type="date"
@@ -4207,16 +4206,13 @@ export default function AdminDashboard() {
                 onChange={(e) => setEditResolutionDate(e.target.value)}
               />
               <label className={styles.fieldLabel}>Sector</label>
-              <select
-                className={styles.input}
+              <SectorSelect
                 value={editResolutionCategory}
-                onChange={(e) => setEditResolutionCategory(e.target.value)}
-              >
-                <option value="">— Select sector —</option>
-                {RESOLUTION_CATEGORIES.filter((c) => c !== "All").map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
+                onChange={setEditResolutionCategory}
+                options={RESOLUTION_CATEGORIES.filter((c) => c !== "All")}
+                placeholder="— Select sector —"
+                searchable
+              />
               <p className={styles.officialsSelectLabel}>
                 Replace file (optional):
               </p>
@@ -4253,12 +4249,23 @@ export default function AdminDashboard() {
               </div>
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
-                  Tag the Council Member who authored this resolution:
+                  Tag the Council Member who sponsored this resolution:
                 </p>
                 <OfficialsCheckList
                   officials={officials}
                   selected={editResolutionSelectedOfficials}
                   onToggle={toggleEditResolutionOfficial}
+                  styles={styles}
+                />
+              </div>
+              <div className={styles.officialsSelectSection}>
+                <p className={styles.officialsSelectLabel}>
+                  Tag the Co-Sponsors <span className={styles.fieldHint}>(optional)</span>:
+                </p>
+                <OfficialsCheckList
+                  officials={officials}
+                  selected={editResCoAuthors}
+                  onToggle={toggleEditResCoAuthor}
                   styles={styles}
                 />
               </div>

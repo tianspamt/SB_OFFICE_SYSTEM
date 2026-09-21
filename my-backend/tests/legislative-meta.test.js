@@ -42,7 +42,10 @@ async function main() {
   ok('number: OCR "l" for "1" + "Series of" year -> 1998-012', m.number === 'Municipal Ordinance No. 1998-012', m.number)
 
   m = extractLegislativeMeta('RESOLUTION NO. 45-2026\nADOPTED this 3rd day of February 2026', 'resolution')
-  ok('number: resolution, sequence-first form -> Resolution No. 2026-045', m.number === 'Resolution No. 2026-045', m.number)
+  ok('number: resolution, sequence-first form -> RESOLUTION NO. 45 - 2026', m.number === 'RESOLUTION NO. 45 - 2026', m.number)
+
+  m = extractLegislativeMeta('Resolution No. 2, Series of 2025\nADOPTED this 3rd day of February 2025', 'resolution')
+  ok('number: resolution sequence is padded to two digits, year after a dash', m.number === 'RESOLUTION NO. 02 - 2025', m.number)
 
   m = extractLegislativeMeta('Amending Ordinance No. 5, series of 2001.\n\nORDINANCE NO. 7 ...', ORDINANCE)
   ok('number: a reference to another ordinance is ignored', m.number === 'Municipal Ordinance No. 7', String(m.number))

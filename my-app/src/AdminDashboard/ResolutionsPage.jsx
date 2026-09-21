@@ -100,7 +100,6 @@ export default function ResolutionsPage({
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
-  const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [presentTarget, setPresentTarget] = useState(null);
@@ -109,7 +108,6 @@ export default function ResolutionsPage({
   // picker from the same full council-member list Councilor Management uses,
   // not from `resolutions`/the officials this one record already has.
   const [selectedCoAuthorId, setSelectedCoAuthorId] = useState("");
-  const [selectedSponsorId, setSelectedSponsorId] = useState("");
   const [addingAllCoAuthors, setAddingAllCoAuthors] = useState(false);
   const { data: allOfficials = [] } = useQuery({
     queryKey: OFFICIALS_QUERY_KEY,
@@ -145,16 +143,8 @@ export default function ResolutionsPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  // Same debouncing as search, and for the same reason — Author is a text
-  // input that hits the server (an ILIKE filter), unlike Category/Year/Date
-  // which are discrete pickers with no per-keystroke concern.
-  const [debouncedAuthor, setDebouncedAuthor] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedAuthor(authorFilter.trim()), 350);
-    return () => clearTimeout(timer);
-  }, [authorFilter]);
   useResetOnChange(
-    [debouncedSearch, yearFilter, catFilter, debouncedAuthor, dateFilter],
+    [debouncedSearch, yearFilter, catFilter, dateFilter],
     setPublishedPage,
     1
   );
@@ -165,7 +155,6 @@ export default function ResolutionsPage({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(yearFilter !== "all" ? { year: yearFilter } : {}),
     ...(catFilter !== "All" ? { category: catFilter } : {}),
-    ...(debouncedAuthor ? { author: debouncedAuthor } : {}),
     ...(dateFilter ? { date: dateFilter } : {}),
   };
   const {
@@ -226,7 +215,6 @@ export default function ResolutionsPage({
     setSearch("");
     setCatFilter("All");
     setDateFilter("");
-    setAuthorFilter("");
     setYearFilter("all");
     setStatusFilter("all");
   };
@@ -249,7 +237,6 @@ export default function ResolutionsPage({
     setReviewCommentText("");
     setReviewFile(null);
     setSelectedCoAuthorId("");
-    setSelectedSponsorId("");
     setAddingAllCoAuthors(false);
     setViewTarget(item);
     if (item.status !== "published") fetchComments(item.id);
@@ -337,7 +324,7 @@ export default function ResolutionsPage({
         body: JSON.stringify({ official_id: selectedCoAuthorId, role: "co_author" }),
       },
       (d) => ({ co_authors: [...(viewTarget.co_authors || []), d] }),
-      "Co-author added!"
+      "Co-sponsor added!"
     );
     if (ok) setSelectedCoAuthorId("");
   };
@@ -349,7 +336,7 @@ export default function ResolutionsPage({
       () => ({
         co_authors: (viewTarget.co_authors || []).filter((m) => m.id !== officialId),
       }),
-      "Co-author removed."
+      "Co-sponsor removed."
     );
 
   // Bypasses runReviewAction (fired one at a time here, in parallel) because
@@ -390,36 +377,13 @@ export default function ResolutionsPage({
         refreshAll();
       }
       if (added.length < candidates.length) {
-        setReviewError("Some councilors couldn't be added as co-author.");
+        setReviewError("Some councilors couldn't be added as co-sponsor.");
       }
     } finally {
       setAddingAllCoAuthors(false);
     }
   };
 
-  const handleAddSponsor = async () => {
-    if (!viewTarget || !selectedSponsorId) return;
-    const ok = await runReviewAction(
-      `/api/resolutions/${viewTarget.id}/officials`,
-      {
-        method: "POST",
-        body: JSON.stringify({ official_id: selectedSponsorId, role: "sponsor" }),
-      },
-      (d) => ({ sponsors: [...(viewTarget.sponsors || []), d] }),
-      "Sponsor added!"
-    );
-    if (ok) setSelectedSponsorId("");
-  };
-
-  const handleRemoveSponsor = (officialId) =>
-    runReviewAction(
-      `/api/resolutions/${viewTarget.id}/officials/${officialId}?role=sponsor`,
-      { method: "DELETE" },
-      () => ({
-        sponsors: (viewTarget.sponsors || []).filter((m) => m.id !== officialId),
-      }),
-      "Sponsor removed."
-    );
 
   const handleVMApprove = (id) =>
     runReviewAction(
@@ -515,19 +479,11 @@ export default function ResolutionsPage({
         (off.full_name || "").toLowerCase().includes(q)
       );
     const matchesCategory = catFilter === "All" || r.category === catFilter;
-    // Searches the real officials relation (Tag Council Members), not a
-    // free-text author field — see the same change on the backend's
-    // GET /api/resolutions (findRecordIdsByAuthorName).
-    const matchesAuthor =
-      !authorFilter ||
-      (r.officials || []).some((off) =>
-        (off.full_name || "").toLowerCase().includes(authorFilter.toLowerCase())
-      );
     const matchesYear = yearFilter === "all" || String(r.year) === yearFilter;
     const matchesDate =
       !dateFilter || (r.uploaded_at || "").slice(0, 10) === dateFilter;
     const matchesStatus = statusFilter === "all" || r.status === statusFilter;
-    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate && matchesStatus;
+    return matchesSearch && matchesCategory && matchesYear && matchesDate && matchesStatus;
   };
   const pendingFiltered = pendingResolutions.filter(matchesPendingFilters);
   const pendingCount = pendingResolutions.length;
@@ -588,7 +544,7 @@ export default function ResolutionsPage({
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder="Search by title, number, category, or author..."
+            placeholder="Search by title, number, category, or sponsor..."
           />
         </div>
         <FilterPanel
@@ -597,8 +553,6 @@ export default function ResolutionsPage({
           onCategoryChange={setCatFilter}
           dateValue={dateFilter}
           onDateChange={setDateFilter}
-          authorValue={authorFilter}
-          onAuthorChange={setAuthorFilter}
           yearValue={yearFilter}
           onYearChange={setYearFilter}
           years={availableYears}
@@ -673,7 +627,7 @@ export default function ResolutionsPage({
                       <StatusBadge status={r.status} />
                       {r.officials?.length > 0 && (
                         <span
-                          title="Author"
+                          title="Sponsor"
                           style={{
                             fontSize: 11,
                             color: "var(--color-text-secondary)",
@@ -1081,7 +1035,7 @@ export default function ResolutionsPage({
                   <div className={lStyles.viewModalCouncilSection}>
                     <div className={lStyles.viewModalCouncilHeader}>
                       <div className={lStyles.viewModalCouncilTitle}>
-                        Author
+                        Sponsor
                       </div>
                       <div className={lStyles.viewModalCouncilCount}>
                         {viewTarget.officials.length} member
@@ -1120,21 +1074,21 @@ export default function ResolutionsPage({
                 </>
               )}
 
-              {/* ── Co-Author / Sponsor ── */}
+              {/* ── Co-Sponsor ── (a resolution's main Sponsor is the tagged
+                  member above; there's no separate Sponsor role for it) */}
               {(() => {
                 const canEditRoles =
                   isSecretary && READING_STATUSES.includes(viewTarget.status);
                 if (
                   !canEditRoles &&
-                  !viewTarget.co_authors?.length &&
-                  !viewTarget.sponsors?.length
+                  !viewTarget.co_authors?.length
                 )
                   return null;
                 return (
                   <>
                     <div className={lStyles.viewModalDivider} />
                     <CouncilorRoleSection
-                      title="Co-Author"
+                      title="Co-Sponsor"
                       members={viewTarget.co_authors || []}
                       canEdit={canEditRoles}
                       availableOfficials={allOfficials.filter(
@@ -1150,22 +1104,6 @@ export default function ResolutionsPage({
                       submitting={reviewSubmitting}
                       onAddAll={handleAddAllCoAuthors}
                       addingAll={addingAllCoAuthors}
-                    />
-                    <CouncilorRoleSection
-                      title="Sponsor"
-                      members={viewTarget.sponsors || []}
-                      canEdit={canEditRoles}
-                      availableOfficials={allOfficials.filter(
-                        (o) =>
-                          !(viewTarget.sponsors || []).some(
-                            (m) => m.id === o.id
-                          )
-                      )}
-                      selectedId={selectedSponsorId}
-                      onSelectedIdChange={setSelectedSponsorId}
-                      onAdd={handleAddSponsor}
-                      onRemove={handleRemoveSponsor}
-                      submitting={reviewSubmitting}
                     />
                   </>
                 );
@@ -1407,6 +1345,7 @@ export default function ResolutionsPage({
           }}
           detection={publishDetect.detected}
           onSkipDetection={publishDetect.reset}
+          uppercase
           dateValue={publishDateValue}
           onDateChange={setPublishDateValue}
           submitting={reviewSubmitting}

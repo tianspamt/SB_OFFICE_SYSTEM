@@ -1,8 +1,9 @@
 const express = require('express')
 const supabase = require('../config/supabase')
 const { verifyToken, secretaryOnly, viceMayorOnly } = require('../middleware/auth')
-const { canArchiveLegislativeRecord, escapeHtml, yearInManila } = require('./utils')
+const { canArchiveLegislativeRecord, escapeHtml, yearInManila, parseApprovedDay } = require('./utils')
 const { logActivity } = require('./logger')
+const { findDuplicateRecord } = require('./duplicates')
 const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = require('./notify')
 
 // Builds the shared review-workflow routes — accept / request-changes /
@@ -57,6 +58,8 @@ function createLegislativeReviewRoutes({
   labelOf,
   numberField,
   numberLabel,
+  // Store the published number in capitals (resolutions: "RESOLUTION NO. 02 - 2025").
+  uppercaseNumber = false,
   approvedDateField,
   hasReadings,
 }) {
@@ -296,29 +299,25 @@ function createLegislativeReviewRoutes({
     // pre-fills it from the document). Stored at noon UTC so it reads as the
     // same calendar day in any timezone the office might view it from.
     if (approvedDateField && typeof req.body[approvedDateField] === 'string' && req.body[approvedDateField].trim()) {
-      const day = req.body[approvedDateField].trim()
-      const parsed = new Date(`${day}T12:00:00.000Z`)
-      const valid =
-        /^\d{4}-\d{2}-\d{2}$/.test(day) &&
-        !Number.isNaN(parsed.getTime()) &&
-        parsed.toISOString().slice(0, 10) === day &&
-        parsed.getUTCFullYear() >= 1900 && parsed.getUTCFullYear() <= 2100
-      if (!valid) return res.status(400).json({ error: 'Approved date must be a valid date (YYYY-MM-DD).' })
+      const parsed = parseApprovedDay(req.body[approvedDateField])
+      if (!parsed) return res.status(400).json({ error: 'Approved date must be a valid date (YYYY-MM-DD).' })
       patch[approvedDateField] = parsed.toISOString()
       patch.year = parsed.getUTCFullYear()
     }
     if (numberField) {
-      const number = typeof req.body[numberField] === 'string' ? req.body[numberField].trim() : ''
+      let number = typeof req.body[numberField] === 'string' ? req.body[numberField].trim() : ''
+      if (uppercaseNumber) number = number.toUpperCase()
       if (!number) return res.status(400).json({ error: `${numberLabel} is required to publish.` })
 
       // Case-insensitive duplicate check across every other record of this
       // type, not just the currently loaded page — the frontend's own check
       // only sees what it already fetched, so this is the authoritative one.
-      const { data: others, error: dupErr } = await supabase.from(table).select(`id, ${numberField}`).neq('id', id)
-      if (dupErr) return res.status(500).json({ error: dupErr.message })
-      const isDuplicate = (others || []).some(
-        (r) => (r[numberField] || '').trim().toLowerCase() === number.toLowerCase()
-      )
+      let isDuplicate
+      try {
+        isDuplicate = !!(await findDuplicateRecord({ table, numberField, number, excludeId: id }))
+      } catch (dupErr) {
+        return res.status(500).json({ error: dupErr.message })
+      }
       if (isDuplicate) {
         return res.status(400).json({ error: `"${number}" is already in use by another ${lower}. Please choose a different number.` })
       }

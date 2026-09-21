@@ -220,15 +220,52 @@ export const fetchPendingList = async (route, statusQ) => {
 // what the filter dropdown offers to search for it. "All" is the filter-only
 // sentinel meaning "no category filter applied"; upload/edit forms slice it
 // off since a record's actual category can't itself be "All".
-export const ORDINANCE_CATEGORIES = [
-  "All", "Tax", "Education", "Agriculture", "Environment",
-  "Public Works", "Health", "Infrastructure",
+// Ordinances and resolutions share one sector list — the Sangguniang Bayan
+// standing committees/sectors.
+const LEGISLATIVE_SECTORS = [
+  "Finance",
+  "Budget and Appropriation",
+  "Social Welfare Services",
+  "Community Development",
+  "Infrastructures",
+  "Transportation",
+  "Franchises",
+  "Communications",
+  "Business and Trade",
+  "Industries",
+  "Cooperatives",
+  "Ways and Means",
+  "Agriculture",
+  "Tourism",
+  "Health and Sanitation",
+  "Barangay Affairs",
+  "Youth and Sports",
+  "Education",
+  "Culture and Arts",
+  "Power and Energy",
+  "Waterworks",
+  "Public Utilities",
+  "Peace and Order",
+  "Public Safety",
+  "Human Rights",
+  "Good Government",
+  "Rules",
+  "Review of Ordinances and Related Issuances",
+  "Labor and Employment",
+  "Zoning",
+  "Environmental Protection",
+  "Natural Resources",
+  "Women and Gender",
+  "Family Welfare",
+  "Disaster Risk Reduction and Management",
+  "Public Market",
+  "Slaughterhouse",
+  "Public Accountability / Blue Ribbon",
 ];
 
-export const RESOLUTION_CATEGORIES = [
-  "All", "Finance", "Health", "Infrastructure", "Education",
-  "Environment", "Public Safety", "Agriculture",
-];
+export const ORDINANCE_CATEGORIES = ["All", ...LEGISLATIVE_SECTORS];
+
+export const RESOLUTION_CATEGORIES = ["All", ...LEGISLATIVE_SECTORS];
 
 // ─── React Query: published legislative records ─────────────────────────────────
 // Server-paginated, so the key includes page/search/year(/type) — each

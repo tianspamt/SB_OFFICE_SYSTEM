@@ -276,6 +276,22 @@ function CouncilFormModal({ mode = "add", initialLabel = "", onClose, onConfirm 
   );
 }
 
+// ── search ────────────────────────────────────────────────────────────────────
+
+// Does this member/term entry match a typed query? Name or position, case-
+// and spacing-insensitive. Shared by the page-wide search (which decides which
+// councils to show) and each council's own box (which narrows within one).
+const norm = (v) => String(v || "").toLowerCase().replace(/\s+/g, " ").trim();
+function entryMatches({ member, term }, query) {
+  const q = norm(query);
+  if (!q) return true;
+  return (
+    norm(member.full_name).includes(q) ||
+    norm(term?.position).includes(q) ||
+    norm(member.position).includes(q)
+  );
+}
+
 // ── CouncilGroup ──────────────────────────────────────────────────────────────
 
 function CouncilGroup({
@@ -286,6 +302,7 @@ function CouncilGroup({
   onToggle,
   search,
   onSearch,
+  globalSearch = "",
   onAddMember,
   onEdit,
   onDelete,
@@ -296,15 +313,17 @@ function CouncilGroup({
 }) {
   const activeCount = entries.filter((e) => e.term?.status === "active").length;
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return entries;
-    const q = search.toLowerCase();
-    return entries.filter(
-      (e) =>
-        (e.member.full_name || "").toLowerCase().includes(q) ||
-        (e.member.position || "").toLowerCase().includes(q)
-    );
-  }, [entries, search]);
+  // A page-wide search that matches the council's own label (say "2022")
+  // keeps every member of it; otherwise only members matching the query stay.
+  const labelMatches = !!norm(globalSearch) && norm(termPeriod).includes(norm(globalSearch));
+  const filtered = useMemo(
+    () =>
+      entries.filter(
+        (e) =>
+          (labelMatches || entryMatches(e, globalSearch)) && entryMatches(e, search)
+      ),
+    [entries, search, globalSearch, labelMatches]
+  );
 
   return (
     <div
@@ -438,6 +457,9 @@ export default function OfficialsPage({
 }) {
   const [openGroups, setOpenGroups] = useState({});
   const [groupSearch, setGroupSearch] = useState({});
+  // Page-wide search — finds a member by name across every council, for when
+  // nobody remembers which term they were elected in.
+  const [globalSearch, setGlobalSearch] = useState("");
   const [showAddCouncil, setShowAddCouncil] = useState(false);
   // { id, label } of the council currently being renamed, or null.
   const [editCouncilTarget, setEditCouncilTarget] = useState(null);
@@ -477,6 +499,24 @@ export default function OfficialsPage({
       return bStart - aStart || bEnd - aEnd;
     });
   }, [grouped, councils]);
+
+  const searching = !!norm(globalSearch);
+  const visibleGroups = useMemo(() => {
+    if (!searching) return allGroups;
+    return allGroups.filter(
+      (g) =>
+        norm(g.termPeriod).includes(norm(globalSearch)) ||
+        g.entries.some((e) => entryMatches(e, globalSearch))
+    );
+  }, [allGroups, globalSearch, searching]);
+  const matchCount = useMemo(
+    () =>
+      visibleGroups.reduce((n, g) => {
+        if (norm(g.termPeriod).includes(norm(globalSearch))) return n + g.entries.length;
+        return n + g.entries.filter((e) => entryMatches(e, globalSearch)).length;
+      }, 0),
+    [visibleGroups, globalSearch]
+  );
 
   const toggleGroup = (key) =>
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -571,21 +611,52 @@ export default function OfficialsPage({
         )}
       </div>
 
+      {/* ── page-wide search ── */}
+      {allGroups.length > 0 && (
+        <>
+          <div className={styles.searchBar} style={{ marginBottom: 12 }}>
+            <Search size={14} style={{ color: "#a0aec0", flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="Search any official by name or position, across all councils…"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+            />
+            {globalSearch && (
+              <button className={styles.clearSearch} onClick={() => setGlobalSearch("")}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {searching && (
+            <div className={styles.resultInfo}>
+              {matchCount} match{matchCount !== 1 ? "es" : ""} in {visibleGroups.length}{" "}
+              council{visibleGroups.length !== 1 ? "s" : ""}
+            </div>
+          )}
+        </>
+      )}
+
       {/* ── council group list ── */}
       {allGroups.length === 0 ? (
         <div className={styles.empty}>
           No councils yet. Click <strong>Add Council</strong> to create one,
           then add members to it.
         </div>
+      ) : visibleGroups.length === 0 ? (
+        <div className={styles.empty}>
+          No official or council matches “{globalSearch.trim()}”.
+        </div>
       ) : (
         <div className={styles.groupList}>
-          {allGroups.map(({ key, councilId, termPeriod, entries }) => (
+          {visibleGroups.map(({ key, councilId, termPeriod, entries }) => (
             <CouncilGroup
               key={key}
               termPeriod={termPeriod}
               councilId={councilId}
               entries={entries}
-              isOpen={!!openGroups[key]}
+              isOpen={searching || !!openGroups[key]}
+              globalSearch={globalSearch}
               onToggle={() => toggleGroup(key)}
               search={groupSearch[key] || ""}
               onSearch={(val) =>

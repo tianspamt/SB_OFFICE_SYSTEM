@@ -103,7 +103,6 @@ export default function OrdinancesPage({
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
-  const [authorFilter, setAuthorFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [presentTarget, setPresentTarget] = useState(null);
@@ -151,17 +150,9 @@ export default function OrdinancesPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  // Same debouncing as search, and for the same reason — Author is a text
-  // input that hits the server (an ILIKE filter), unlike Category/Year/Date
-  // which are discrete pickers with no per-keystroke concern.
-  const [debouncedAuthor, setDebouncedAuthor] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedAuthor(authorFilter.trim()), 350);
-    return () => clearTimeout(timer);
-  }, [authorFilter]);
   // A filter change invalidates whatever page you were on.
   useResetOnChange(
-    [debouncedSearch, yearFilter, catFilter, debouncedAuthor, dateFilter],
+    [debouncedSearch, yearFilter, catFilter, dateFilter],
     setPublishedPage,
     1
   );
@@ -176,7 +167,6 @@ export default function OrdinancesPage({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(yearFilter !== "all" ? { year: yearFilter } : {}),
     ...(catFilter !== "All" ? { category: catFilter } : {}),
-    ...(debouncedAuthor ? { author: debouncedAuthor } : {}),
     ...(dateFilter ? { date: dateFilter } : {}),
   };
   const {
@@ -238,7 +228,6 @@ export default function OrdinancesPage({
     setSearch("");
     setCatFilter("All");
     setDateFilter("");
-    setAuthorFilter("");
     setYearFilter("all");
     setStatusFilter("all");
   };
@@ -529,19 +518,11 @@ export default function OrdinancesPage({
         (off.full_name || "").toLowerCase().includes(q)
       );
     const matchesCategory = catFilter === "All" || o.category === catFilter;
-    // Searches the real officials relation (Tag Council Members), not a
-    // free-text author field — see the same change on the backend's
-    // GET /api/ordinances (findRecordIdsByAuthorName).
-    const matchesAuthor =
-      !authorFilter ||
-      (o.officials || []).some((off) =>
-        (off.full_name || "").toLowerCase().includes(authorFilter.toLowerCase())
-      );
     const matchesYear = yearFilter === "all" || String(o.year) === yearFilter;
     const matchesDate =
       !dateFilter || (o.uploaded_at || "").slice(0, 10) === dateFilter;
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
-    return matchesSearch && matchesCategory && matchesAuthor && matchesYear && matchesDate && matchesStatus;
+    return matchesSearch && matchesCategory && matchesYear && matchesDate && matchesStatus;
   };
   const pendingFiltered = pendingOrdinances.filter(matchesPendingFilters);
   const pendingCount = pendingOrdinances.length;
@@ -610,8 +591,6 @@ export default function OrdinancesPage({
           onCategoryChange={setCatFilter}
           dateValue={dateFilter}
           onDateChange={setDateFilter}
-          authorValue={authorFilter}
-          onAuthorChange={setAuthorFilter}
           yearValue={yearFilter}
           onYearChange={setYearFilter}
           years={availableYears}

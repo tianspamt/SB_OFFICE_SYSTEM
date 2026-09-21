@@ -1,6 +1,6 @@
 // RecordScanNotice.jsx
-// Status line under the upload form's file picker for the "detect number and
-// date from the file" prefill (see detectRecordMeta in AdminDashboard.jsx and
+// Status line under the upload form's file picker for the "detect the date
+// from the file" prefill (see detectRecordMeta in AdminDashboard.jsx and
 // POST /api/{ordinances,resolutions}/extract-meta). It only ever *reports*
 // what was suggested — the values themselves land in the ordinary form
 // fields, where the user checks and edits them before uploading.
@@ -8,7 +8,7 @@
 // scan: null
 //     | { status: "reading" }
 //     | { status: "error", message }
-//     | { status: "done", data, applied: { number, date } }
+//     | { status: "done", data, applied: { date } }
 
 import { Loader2, FileSearch, AlertTriangle, Info } from "lucide-react";
 
@@ -58,7 +58,7 @@ export default function RecordScanNotice({ scan }) {
         <style>{`@keyframes rsnSpin { to { transform: rotate(360deg) } }`}</style>
         <Loader2 size={15} style={{ flexShrink: 0, marginTop: 2, animation: "rsnSpin 0.8s linear infinite" }} />
         <span>
-          Reading the file to detect its number and date… scanned documents can
+          Reading the file to detect its date… scanned documents can
           take up to a minute. You can keep filling in the form meanwhile.
         </span>
       </div>
@@ -69,41 +69,35 @@ export default function RecordScanNotice({ scan }) {
     return (
       <div style={{ ...BOX, ...TONES.muted }}>
         <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-        <span>{scan.message || "Couldn't read this file automatically."} Enter the number and date manually.</span>
+        <span>{scan.message || "Couldn't read this file automatically."} Enter the date manually.</span>
       </div>
     );
   }
 
   const { data, applied } = scan;
-  if (!data.number && !data.date) {
+  if (!data.date) {
     return (
       <div style={{ ...BOX, ...TONES.muted }}>
         <FileSearch size={15} style={{ flexShrink: 0, marginTop: 2 }} />
         <span>
-          Couldn't find a number or date in this file. Enter them manually.
+          Couldn't find a date in this file. Enter it manually.
         </span>
       </div>
     );
   }
 
-  const needsCare =
-    data.yearMismatch || data.numberConfidence === "low" || data.dateConfidence === "low";
+  const needsCare = data.yearMismatch || data.dateConfidence === "low";
   return (
     <div style={{ ...BOX, ...(needsCare ? TONES.warn : TONES.ok), flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 600 }}>
         {needsCare ? <AlertTriangle size={15} /> : <FileSearch size={15} />}
         Detected from the file — please check before saving
       </div>
-      {data.number && (
-        <Row label="Number" value={data.number} applied={applied.number} confidence={data.numberConfidence} />
-      )}
-      {data.date && (
-        <Row label="Date" value={formatDate(data.date)} applied={applied.date} confidence={data.dateConfidence} />
-      )}
+      <Row label="Date" value={formatDate(data.date)} applied={applied.date} confidence={data.dateConfidence} />
       {data.yearMismatch && (
         <div>
-          The date's year doesn't match the year in the number — one of them
-          may have been misread from the scan.
+          The date's year doesn't match the year printed in the document's
+          number — one of them may have been misread from the scan.
         </div>
       )}
     </div>

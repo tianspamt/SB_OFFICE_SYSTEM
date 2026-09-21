@@ -1,4 +1,5 @@
-import { AlertCircle, CalendarDays, Upload, CheckSquare } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, CalendarDays, Upload, CheckSquare, Search, X } from "lucide-react";
 import { COLOR_SWATCHES, OFFICIAL_POSITIONS } from "./AdminContext";
 
 // ─── User Avatar (photo if set, initials fallback) ───────────────────────────
@@ -148,23 +149,79 @@ export const TermFormFields = ({ form, setForm, styles }) => (
 // from their active (or most recent) term, not a static per-person field —
 // so a person who's held more than one seat over time shows whichever one
 // applies now, not a stale value.
-export const OfficialsCheckList = ({ officials, selected, onToggle, styles }) => (
-  <div className={styles.officialsCheckList}>
-    {officials.length === 0 && <p className={styles.fileHint}>No council members yet.</p>}
-    {officials.map((o) => (
-      <label key={o.id} className={`${styles.checkItem} ${selected.includes(o.id) ? styles.checkItemSelected : ""}`}>
-        <input type="checkbox" checked={selected.includes(o.id)} onChange={() => onToggle(o.id)} />
-        {o.photo
-          ? <img src={o.photo} alt={o.full_name} className={styles.checkPhoto} />
-          : <div className={styles.checkAvatar}>{o.full_name.charAt(0)}</div>}
-        <div>
-          <div style={{ fontWeight: "600", fontSize: "13px" }}>{o.full_name}</div>
-          <div style={{ fontSize: "11px", color: "#718096" }}>{o.position || "—"}</div>
+// The search box narrows the list by name or position. Picks live in the
+// parent's `selected`, so a member stays selected even while filtered out.
+export const OfficialsCheckList = ({ officials, selected, onToggle, styles }) => {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? officials.filter(
+        (o) =>
+          (o.full_name || "").toLowerCase().includes(q) ||
+          (o.position || "").toLowerCase().includes(q)
+      )
+    : officials;
+  const hiddenSelected = selected.filter((id) => !shown.some((o) => o.id === id)).length;
+
+  return (
+    <>
+      {officials.length > 0 && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+            padding: "8px 12px", background: "#f8fafc",
+            border: "1px solid #e2e8f0", borderRadius: 8,
+          }}
+        >
+          <Search size={14} style={{ color: "#a0aec0", flexShrink: 0 }} />
+          <input
+            type="text"
+            placeholder="Search council member by name or position…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              flex: 1, minWidth: 0, border: "none", outline: "none",
+              background: "transparent", fontFamily: "inherit", fontSize: 14, color: "#2d3748",
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", display: "flex", padding: 0 }}
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
-      </label>
-    ))}
-  </div>
-);
+      )}
+      <div className={styles.officialsCheckList}>
+        {officials.length === 0 && <p className={styles.fileHint}>No council members yet.</p>}
+        {officials.length > 0 && shown.length === 0 && (
+          <p className={styles.fileHint}>No council member matches “{query.trim()}”.</p>
+        )}
+        {shown.map((o) => (
+          <label key={o.id} className={`${styles.checkItem} ${selected.includes(o.id) ? styles.checkItemSelected : ""}`}>
+            <input type="checkbox" checked={selected.includes(o.id)} onChange={() => onToggle(o.id)} />
+            {o.photo
+              ? <img src={o.photo} alt={o.full_name} className={styles.checkPhoto} />
+              : <div className={styles.checkAvatar}>{o.full_name.charAt(0)}</div>}
+            <div>
+              <div style={{ fontWeight: "600", fontSize: "13px" }}>{o.full_name}</div>
+              <div style={{ fontSize: "11px", color: "#718096" }}>{o.position || "—"}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+      {hiddenSelected > 0 && (
+        <p className={styles.fileHint} style={{ marginTop: 6 }}>
+          {hiddenSelected} selected member{hiddenSelected !== 1 ? "s" : ""} hidden by the search.
+        </p>
+      )}
+    </>
+  );
+};
 
 // ─── Event Form Fields ────────────────────────────────────────────────────────
 export const EventFormFields = ({ form, setForm, styles }) => (

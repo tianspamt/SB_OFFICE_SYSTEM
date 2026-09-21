@@ -78,7 +78,51 @@ const dayBoundsUTC = (dateStr) => {
 const yearInManila = (value) =>
   Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric' }).format(new Date(value)))
 
+// Parses the "Approved date" a Secretary types (YYYY-MM-DD) into the Date
+// stored for it — noon UTC, so it reads as the same calendar day in any
+// timezone the office might view it from. Returns null for anything that
+// isn't a real calendar date between 1900 and 2100.
+const parseApprovedDay = (value) => {
+  const day = typeof value === 'string' ? value.trim() : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+  const parsed = new Date(`${day}T12:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) return null
+  const year = parsed.getUTCFullYear()
+  return year >= 1900 && year <= 2100 ? parsed : null
+}
+
+// Year and sequence out of a record number in any of the office's formats:
+//   "Municipal Ordinance No. 2025-04"  -> year 2025, seq 4
+//   "RESOLUTION NO. 02 - 2025"         -> year 2025, seq 2
+//   "RES-2025-045"                     -> year 2025, seq 45
+// The 4-digit group between 1900 and 2100 is the year, the other group the
+// sequence. A number with no digits sorts as year 0 / seq 0 (last, newest-first).
+const recordNumberKey = (number) => {
+  const groups = String(number ?? '').match(/\d+/g) || []
+  let year = 0
+  let seq = 0
+  for (const g of groups) {
+    const n = Number(g)
+    if (!year && g.length === 4 && n >= 1900 && n <= 2100) year = n
+    else if (!seq) seq = n
+  }
+  return { year, seq }
+}
+
+// Newest/highest number first: by year, then sequence — so 2025-09 and 2025-08
+// come before 2025-04, and 2026-01 before all of 2025. Records that tie (or
+// have no number) keep their incoming order, which the callers already have
+// newest-approved-first. Returns a new array.
+const sortByRecordNumber = (rows, numberField) =>
+  rows
+    .map((row, index) => ({ row, index, key: recordNumberKey(row[numberField]) }))
+    .sort((a, b) => b.key.year - a.key.year || b.key.seq - a.key.seq || a.index - b.index)
+    .map((x) => x.row)
+
 module.exports = {
+  recordNumberKey,
+  sortByRecordNumber,
+  parseApprovedDay,
   yearInManila,
   isValidEmail, getIP, safeParseJSON, escapeHtml,
   canEditLegislativeRecord, canArchiveLegislativeRecord, orIlikeClause, dayBoundsUTC,
