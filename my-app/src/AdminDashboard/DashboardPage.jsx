@@ -30,11 +30,19 @@ import PendingRecordsWidget from "./PendingRecordsWidget";
 import { PresentOverlay } from "./LegislativeComponents";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
-import { useIsMobile } from "./AdminContext";
+import { useIsMobile, toIsoDate } from "./AdminContext";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const getFileUrl = (filepath) =>
   `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
+
+// "14:30:00" -> "2:30 PM"
+const formatEventTime = (t) => {
+  const [h, m] = String(t).split(":");
+  const hour = Number(h);
+  if (Number.isNaN(hour)) return t;
+  return `${((hour + 11) % 12) + 1}:${m || "00"} ${hour >= 12 ? "PM" : "AM"}`;
+};
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "—";
@@ -263,6 +271,36 @@ const SessionCard = ({ item, onView }) => (
   </div>
 );
 
+// ─── Order of Business Card ────────────────────────────────────────────────────
+// "View" opens the uploaded file itself (there's no typed content to show).
+const AgendaCard = ({ item, onView }) => (
+  <div className={styles.dashItemCard}>
+    <div className={styles.dashCardTop}>
+      <span className={styles.dashSessionBadge}>
+        {item.session_type === "special" ? "Special Session" : "Regular Session"}
+      </span>
+    </div>
+    <h4 className={styles.dashCardTitle}>
+      {item.session_number || formatDate(item.session_date)}
+    </h4>
+    {item.venue && (
+      <span className={styles.dashCardCategory}>
+        <MapPin size={10} />
+        {item.venue}
+      </span>
+    )}
+    <div className={styles.dashCardFooter}>
+      <span className={styles.dashCardDate}>
+        <Calendar size={11} />
+        {formatDate(item.session_date)}
+      </span>
+      <button className={styles.dashCardBtn} onClick={onView}>
+        View <ChevronRight size={12} />
+      </button>
+    </div>
+  </div>
+);
+
 // ─── Announcement Card (full — used elsewhere if needed) ──────────────────────
 const AnnouncementCard = ({ post }) => (
   <div className={styles.dashPostCard}>
@@ -319,6 +357,8 @@ const DashboardPage = ({
   ordinances = [],
   resolutions = [],
   sessionMinutes = [],
+  sessionAgendas = [],
+  events = [],
   announcements = [],
   unreadAnnouncements = 0,
   loading = false,
@@ -359,20 +399,24 @@ const DashboardPage = ({
   const latestSessions = publishedSessions.slice(0, 6);
   const latestAnnouncements = announcements.slice(0, 2);
 
-  // Upcoming sessions: soonest future session first; if none are upcoming,
-  // fall back to the most recently held ones so the widget isn't empty.
-  const today = new Date().toISOString().split("T")[0];
-  const upcomingSessions = [...sessionMinutes]
-    .filter((s) => s.session_date && s.session_date >= today)
-    .sort((a, b) => (a.session_date < b.session_date ? -1 : 1))
-    .slice(0, 2);
-  const recentSessionsFallback =
-    upcomingSessions.length > 0
-      ? upcomingSessions
-      : [...sessionMinutes]
-          .filter((s) => s.session_date)
-          .sort((a, b) => (a.session_date > b.session_date ? -1 : 1))
-          .slice(0, 2);
+  // Upcoming events: scheduled calendar events that haven't finished yet
+  // (holidays live in a separate source and are deliberately not included),
+  // soonest first. A multi-day event stays listed until its last day.
+  const todayIso = toIsoDate(new Date());
+  const upcomingEvents = [...events]
+    .filter((e) => e.start_date && (e.end_date || e.start_date) >= todayIso)
+    .sort((a, b) =>
+      `${a.start_date} ${a.all_day ? "" : a.start_time || ""}` <
+      `${b.start_date} ${b.all_day ? "" : b.start_time || ""}`
+        ? -1
+        : 1
+    )
+    .slice(0, 3);
+  // Latest order of business: the most recently dated ones first.
+  const sortedAgendas = [...sessionAgendas]
+    .filter((a) => a.session_date)
+    .sort((a, b) => (a.session_date > b.session_date ? -1 : 1));
+  const latestAgendas = sortedAgendas.slice(0, 6);
 
   // Everything still somewhere in the review pipeline (pending,
   // needs_revision, ready_to_publish, or approved) across all three record
@@ -456,6 +500,24 @@ const DashboardPage = ({
       emptyLabel: "session minutes",
       renderItem: (item) => (
         <SessionCard key={item.id} item={item} onView={() => setViewTarget({ type: "session", item })} />
+      ),
+    },
+    {
+      // id doubles as the tab "View all" navigates to.
+      id: "session_agendas",
+      label: "Order of Business",
+      icon: ClipboardList,
+      color: "#00897b",
+      count: sortedAgendas.length,
+      items: latestAgendas,
+      emptyIcon: ClipboardList,
+      emptyLabel: "order of business",
+      renderItem: (item) => (
+        <AgendaCard
+          key={item.id}
+          item={item}
+          onView={() => window.open(getFileUrl(item.filepath), "_blank", "noopener")}
+        />
       ),
     },
   ];
@@ -624,25 +686,33 @@ const DashboardPage = ({
         )}
       </DashWidget>
 
-      <DashWidget icon={Clock} title="Upcoming sessions">
+      <DashWidget icon={Clock} title="Upcoming events">
         {loading ? (
           <div className={styles.dashUpcomingList}>
             {Array.from({ length: 2 }).map((_, i) => (
               <DashUpcomingItemSkeleton key={i} />
             ))}
           </div>
-        ) : recentSessionsFallback.length === 0 ? (
-          <p className={styles.dashWidgetEmpty}>No sessions on record.</p>
+        ) : upcomingEvents.length === 0 ? (
+          <p className={styles.dashWidgetEmpty}>No upcoming events.</p>
         ) : (
           <div className={styles.dashUpcomingList}>
-            {recentSessionsFallback.map((s) => (
-              <div key={s.id} className={styles.dashUpcomingItem}>
+            {upcomingEvents.map((e) => (
+              <div key={e.id} className={styles.dashUpcomingItem}>
                 <div className={styles.dashUpcomingDate}>
-                  {formatDate(s.session_date)}
+                  {formatDate(e.start_date)}
+                  {e.end_date && e.end_date !== e.start_date
+                    ? ` – ${formatDate(e.end_date)}`
+                    : ""}
                 </div>
-                <div className={styles.dashUpcomingTitle}>
-                  {s.title || s.session_type || "Session"}
-                </div>
+                <div className={styles.dashUpcomingTitle}>{e.title}</div>
+                {(!e.all_day && e.start_time) || e.location ? (
+                  <div style={{ fontSize: 12, color: "#718096", marginTop: 2 }}>
+                    {!e.all_day && e.start_time ? formatEventTime(e.start_time) : ""}
+                    {!e.all_day && e.start_time && e.location ? " · " : ""}
+                    {e.location || ""}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -650,9 +720,9 @@ const DashboardPage = ({
         {onNavigate && (
           <button
             className={styles.dashWidgetViewAll}
-            onClick={() => onNavigate("sessions")}
+            onClick={() => onNavigate("calendar")}
           >
-            View all sessions <ArrowUpRight size={12} />
+            View calendar <ArrowUpRight size={12} />
           </button>
         )}
       </DashWidget>

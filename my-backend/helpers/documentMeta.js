@@ -1,5 +1,5 @@
-// Reads an uploaded ordinance/resolution file and suggests its official number
-// and date, for the upload form to prefill. Suggestion only — nothing is
+// Reads an uploaded ordinance/resolution/session file and suggests its official
+// number (for a session: its title, e.g. "2nd Regular Session, 2026") and date, for the upload form to prefill. Suggestion only — nothing is
 // saved, and the user confirms the values before submitting.
 //
 // Word files and PDFs with a text layer are read directly. Images and
@@ -28,6 +28,7 @@ const yearOf = (isoDate) => Number(isoDate.slice(0, 4))
 const EMPTY = {
   number: null, numberRaw: null, numberConfidence: null, numberYear: null,
   date: null, dateRaw: null, dateConfidence: null, dateCandidates: [],
+  sessionType: null, venue: null,
 }
 
 // Per field, keep whichever pass was more confident (earlier pass wins ties);
@@ -49,6 +50,9 @@ const merge = (best, next) => {
     dateRaw: takeDate ? next.dateRaw : best.dateRaw,
     dateConfidence: takeDate ? next.dateConfidence : best.dateConfidence,
     dateCandidates: [...pool.values()],
+    // Session documents only: keep the first non-empty finding.
+    sessionType: best.sessionType || next.sessionType || null,
+    venue: best.venue || next.venue || null,
   }
 }
 
@@ -79,6 +83,8 @@ const finalize = (found) => {
     dateConfidence,
     year: date ? yearOf(date) : numberYear,
     yearMismatch: Boolean(date && numberYear && yearOf(date) !== numberYear),
+    sessionType: found.sessionType || null,
+    venue: found.venue || null,
   }
 }
 
@@ -118,6 +124,9 @@ const toResponse = (meta) => ({
     dateConfidence: meta.dateConfidence,
     year: meta.year,
     yearMismatch: meta.yearMismatch,
+    // Session minutes / order of business only (null for ordinances/resolutions).
+    sessionType: meta.sessionType || null,
+    venue: meta.venue || null,
     method: meta.method,
   },
 })

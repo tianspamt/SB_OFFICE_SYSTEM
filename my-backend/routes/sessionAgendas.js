@@ -4,9 +4,10 @@ const router = express.Router()
 const supabase = require('../config/supabase')
 const { verifyToken, secretaryOrClerk, canCreateDraft } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
+const { extractMetaHandler } = require('../helpers/documentMeta')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { orIlikeClause } = require('../helpers/utils')
+const { orIlikeClause, SESSION_VENUE } = require('../helpers/utils')
 const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify')
 
 // An agenda is always a typed document, never a scanned photo — unlike
@@ -73,6 +74,11 @@ router.get('/:id', verifyToken, async (req, res) => {
 // legislative record types. No draft/review step: the agenda is meant to be
 // seen ahead of the meeting it's for, so it goes live the moment it's
 // uploaded.
+// POST /api/session-agendas/extract-meta — reads the chosen file and suggests the session's
+// title (number), type, date and venue for the upload form to prefill. Nothing
+// is saved. Same reader as ordinances/resolutions (Word, PDF text, OCR).
+router.post('/extract-meta', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, extractMetaHandler('agenda'))
+
 router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
   if (!ALLOWED_MIMES.includes(req.file.mimetype))
@@ -91,7 +97,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         session_number: session_number || null,
         session_date,
         session_type: session_type || 'regular',
-        venue: venue || null,
+        venue: venue || SESSION_VENUE,
         filename: req.file.originalname,
         filetype: req.file.mimetype,
         filepath: fileName,

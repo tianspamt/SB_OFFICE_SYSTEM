@@ -434,20 +434,9 @@ export const MONTHS = [
 
 export const getCurrentYear = () => new Date().getFullYear();
 
-const ordinalSuffix = (n) => {
-  const v = n % 100;
-  if (v >= 11 && v <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1:
-      return `${n}st`;
-    case 2:
-      return `${n}nd`;
-    case 3:
-      return `${n}rd`;
-    default:
-      return `${n}th`;
-  }
-};
+// Where Sangguniang Bayan sessions are held — pre-filled as the venue of new
+// session minutes and order of business.
+export const SESSION_VENUE = "Governor Lino I. Chatto Memorial Session Hall";
 
 // Pulls the trailing numeric sequence out of a record number string, e.g.
 // "Ordinance No. 2026-007" -> 7
@@ -484,24 +473,29 @@ export const suggestResolutionNumber = (resolutions = [], year) => {
   return `Resolution No. ${y}-${String(next).padStart(3, "0")}`;
 };
 
-// Suggests the next session number for the given year + session type,
-// following the office's "{ordinal} Regular/Special Session, {year}"
-// convention. Sequence resets every year, per session type.
-export const suggestSessionNumber = (
-  sessionMinutes = [],
-  year,
-  sessionType = "regular"
-) => {
+// Suggests the next session-minutes number for the given year, following the
+// office's "MINUTES NO. {sequence} - {year}" convention (e.g. "MINUTES NO. 03 -
+// 2025"). Sequence resets every year and counts every session held that year,
+// regular or special; it skips past any number already taken. `sessionType` is
+// accepted for the callers that still pass it but no longer affects the number.
+export const suggestSessionNumber = (sessionMinutes = [], year) => {
   const y = String(year || getCurrentYear());
-  const label =
-    sessionType === "special" ? "Special Session" : "Regular Session";
   const count = sessionMinutes.filter((s) => {
     const sy = s.session_date
       ? new Date(s.session_date).getFullYear().toString()
       : "";
-    return sy === y && (s.session_type || "regular") === sessionType;
+    return sy === y;
   }).length;
-  return `${ordinalSuffix(count + 1)} ${label}, ${y}`;
+  const taken = new Set(
+    sessionMinutes.map((s) => (s.session_number || "").trim().toUpperCase())
+  );
+  let next = count + 1;
+  let suggestion = `MINUTES NO. ${String(next).padStart(2, "0")} - ${y}`;
+  while (taken.has(suggestion)) {
+    next += 1;
+    suggestion = `MINUTES NO. ${String(next).padStart(2, "0")} - ${y}`;
+  }
+  return suggestion;
 };
 
 // Case-insensitive, whitespace-trimmed duplicate check across a list of

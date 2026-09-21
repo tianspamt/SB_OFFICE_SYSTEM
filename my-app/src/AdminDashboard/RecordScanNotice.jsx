@@ -49,8 +49,13 @@ function Row({ label, value, applied, confidence }) {
   );
 }
 
-export default function RecordScanNotice({ scan }) {
+// variant "session" (session minutes / order of business): reports the
+// session's title, date and type instead of just a date (the venue is always
+// the session hall, so it isn't read from the file).
+export default function RecordScanNotice({ scan, variant = "record" }) {
   if (!scan) return null;
+  const isSession = variant === "session";
+  const wording = isSession ? "its title, date and type" : "its date";
 
   if (scan.status === "reading") {
     return (
@@ -58,7 +63,7 @@ export default function RecordScanNotice({ scan }) {
         <style>{`@keyframes rsnSpin { to { transform: rotate(360deg) } }`}</style>
         <Loader2 size={15} style={{ flexShrink: 0, marginTop: 2, animation: "rsnSpin 0.8s linear infinite" }} />
         <span>
-          Reading the file to detect its date… scanned documents can
+          Reading the file to detect {wording}… scanned documents can
           take up to a minute. You can keep filling in the form meanwhile.
         </span>
       </div>
@@ -69,12 +74,41 @@ export default function RecordScanNotice({ scan }) {
     return (
       <div style={{ ...BOX, ...TONES.muted }}>
         <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-        <span>{scan.message || "Couldn't read this file automatically."} Enter the date manually.</span>
+        <span>{scan.message || "Couldn't read this file automatically."} Enter the details manually.</span>
       </div>
     );
   }
 
   const { data, applied } = scan;
+
+  if (isSession) {
+    const typeLabel = data.sessionType === "special" ? "Special Session" : "Regular Session";
+    if (!data.number && !data.date && !data.sessionType) {
+      return (
+        <div style={{ ...BOX, ...TONES.muted }}>
+          <FileSearch size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>Couldn't find a session title or date in this file. Enter them manually.</span>
+        </div>
+      );
+    }
+    const care = data.numberConfidence === "low" || data.dateConfidence === "low";
+    return (
+      <div style={{ ...BOX, ...(care ? TONES.warn : TONES.ok), flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 600 }}>
+          {care ? <AlertTriangle size={15} /> : <FileSearch size={15} />}
+          Detected from the file — please check before saving
+        </div>
+        {data.number && (
+          <Row label="Title" value={data.number} applied={applied.number} confidence={data.numberConfidence} />
+        )}
+        {data.date && (
+          <Row label="Date" value={formatDate(data.date)} applied={applied.date} confidence={data.dateConfidence} />
+        )}
+        {data.sessionType && <Row label="Type" value={typeLabel} applied={applied.type} />}
+      </div>
+    );
+  }
+
   if (!data.date) {
     return (
       <div style={{ ...BOX, ...TONES.muted }}>

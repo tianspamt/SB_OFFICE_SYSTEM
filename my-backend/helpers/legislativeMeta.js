@@ -247,10 +247,138 @@ const extractDate = (text, { preferApproved = false } = {}) => {
   return { value: best.value, raw: best.raw, confidence: best.confidence, candidates }
 }
 
+// ─── Session (minutes / order of business) ───────────────────────────────────
+// A session document's "title" is its session number — "2nd Regular Session,
+// 2026" — the same format the upload form suggests. Read from a heading like
+// "MINUTES OF THE 2ND REGULAR SESSION" / "Second Special Session", alongside
+// the session's type, date and venue.
+
+const ONES = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9 }
+const TEENS = {
+  tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15,
+  sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19,
+}
+const TENS_ORDINAL = { twentieth: 20, thirtieth: 30, fortieth: 40, fiftieth: 50 }
+const TENS_CARDINAL = { twenty: 20, thirty: 30, forty: 40, fifty: 50 }
+
+// "second" -> 2, "twelfth" -> 12, "twenty-first" -> 21; null for any other word.
+const ordinalWordToNumber = (word) => {
+  const w = word.toLowerCase().replace(/\s+/g, '-')
+  if (ONES[w]) return ONES[w]
+  if (TEENS[w]) return TEENS[w]
+  if (TENS_ORDINAL[w]) return TENS_ORDINAL[w]
+  const [tens, ones] = w.split('-')
+  if (TENS_CARDINAL[tens] && ONES[ones]) return TENS_CARDINAL[tens] + ONES[ones]
+  return null
+}
+
+// A mention that's *about another* session ("reading of the minutes of the
+// previous regular session", "approval of the minutes of the 3rd regular
+// session") is not this document's own heading.
+const SESSION_REFERENCE_LEAD = /\b(previous|preceding|last|prior|approval\s+of|reading\s+of|reading\s+and\s+approval\s+of)\b[^.\n]{0,50}$/i
+
+const extractSessionNumber = (text) => {
+  const found = []
+  const consider = (m, ordinal, type, year = null, bonus = 0) => {
+    if (!ordinal || ordinal < 1 || ordinal > 99) return
+    const lead = text.slice(Math.max(0, m.index - 70), m.index)
+    let score = bonus
+    if (m.index < 700) score += 6
+    else if (m.index < 1500) score += 2
+    if (m[0] === m[0].toUpperCase()) score += 2
+    if (/minutes\s+of\s+the\s*$/i.test(lead)) score += 3
+    if (SESSION_REFERENCE_LEAD.test(lead)) score -= 8
+    found.push({ ordinal, year, type: type ? type.toLowerCase() : null, raw: m[0].replace(/\s+/g, ' ').trim(), score, index: m.index })
+  }
+
+  // "2nd Regular Session"
+  const numeric = /(?<![0-9A-Za-z])(\d{1,2})\s*(?:st|nd|rd|th)\s+(regular|special)\s+session/gi
+  let m
+  while ((m = numeric.exec(text)) !== null) consider(m, Number(m[1]), m[2])
+
+  // "Second Regular Session" / "Twenty-first Special Session"
+  const worded = /(?<![A-Za-z])([A-Za-z]+(?:[-\s][A-Za-z]+)?)\s+(regular|special)\s+session/gi
+  while ((m = worded.exec(text)) !== null) {
+    // The capture can be two words ("the second"), so also try just the last.
+    const ordinal = ordinalWordToNumber(m[1]) ?? ordinalWordToNumber(m[1].split(/[-\s]/).pop())
+    consider(m, ordinal, m[2])
+  }
+
+  // "Regular Session No. 12"
+  const numbered = /(regular|special)\s+session\s+(?:no\.?|number)\s*(\d{1,2})(?![0-9])/gi
+  while ((m = numbered.exec(text)) !== null) consider(m, Number(m[2]), m[1])
+
+  // The document's own number: "MINUTES NO. 03 - 2025" / "AGENDA NO. 3".
+  const explicit = /(?:minutes|agenda|order\s+of\s+business)\s+(?:no\.?|number)\s*(\d{1,2})(?![0-9])(?:\s*[-–—/]\s*((?:19|20)\d{2})(?![0-9]))?/gi
+  while ((m = explicit.exec(text)) !== null) consider(m, Number(m[1]), null, m[2] ? Number(m[2]) : null, 4)
+
+  // The session's type ("Regular"/"Special") is its own field — read from the
+  // best heading, else from an early "Regular Session" near the top.
+  const typeFromText = () => {
+    const t = /(regular|special)\s+session/i.exec(text.slice(0, 1500))
+    return t ? t[1].toLowerCase() : null
+  }
+
+  if (found.length) {
+    found.sort((a, b) => b.score - a.score || a.index - b.index)
+    const best = found[0]
+    return {
+      ordinal: best.ordinal,
+      year: best.year,
+      type: best.type || typeFromText(),
+      raw: best.raw,
+      confidence: best.score >= 8 ? 'high' : best.score >= 3 ? 'medium' : 'low',
+    }
+  }
+
+  // No number anywhere — still report the type from an early "Regular Session".
+  const type = typeFromText()
+  return type ? { ordinal: null, year: null, type, raw: null, confidence: 'low' } : null
+}
+
+// "…held at the Sangguniang Bayan Session Hall on March 5, 2026" -> the hall.
+const extractVenue = (text) => {
+  const m = /\b(?:held|conducted|convened)\s+(?:at|in)\s+the\s+([^\n.,;]{3,80})/i.exec(text)
+  if (!m) return null
+  const venue = m[1].split(/\s+(?:on|this|last|today|thereof|at|in)\b/i)[0].trim()
+  return venue.length >= 3 ? venue : null
+}
+
+// Title prefix per document: "MINUTES NO. 01 - 2025" / "AGENDA NO. 01 - 2025".
+const SESSION_TITLE_PREFIX = { minutes: 'MINUTES NO.', agenda: 'AGENDA NO.' }
+
+const extractSessionMeta = (cleaned, options, kind) => {
+  const session = extractSessionNumber(cleaned)
+  const date = extractDate(cleaned, options)
+  const dateYear = date ? Number(date.value.slice(0, 4)) : null
+  // A year printed in the document's own number wins over the session date's.
+  const year = session?.year || dateYear
+
+  let title = null
+  if (session?.ordinal) {
+    title = `${SESSION_TITLE_PREFIX[kind]} ${pad(session.ordinal, 2)}${year ? ` - ${year}` : ''}`
+  }
+
+  return {
+    number: title,
+    numberRaw: session?.ordinal ? session.raw : null,
+    numberConfidence: session?.ordinal ? session.confidence : null,
+    numberYear: null,
+    sessionType: session?.type || null,
+    venue: extractVenue(cleaned),
+    date: date?.value || null,
+    dateRaw: date?.raw || null,
+    dateConfidence: date?.confidence || null,
+    dateCandidates: date?.candidates || [],
+    year,
+  }
+}
+
 // ─── Public entry ────────────────────────────────────────────────────────────
 
 const extractLegislativeMeta = (text, kind, options = {}) => {
   const cleaned = String(text || '').replace(/\r/g, '')
+  if (SESSION_TITLE_PREFIX[kind]) return extractSessionMeta(cleaned, options, kind)
   const number = extractNumber(cleaned, kind)
   const date = extractDate(cleaned, options)
 

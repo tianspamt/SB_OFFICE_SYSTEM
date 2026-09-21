@@ -53,6 +53,7 @@ import {
   tabTitles,
   getCurrentYear,
   suggestSessionNumber,
+  SESSION_VENUE,
   isDuplicateRecordNumber,
   OFFICIALS_QUERY_KEY,
   fetchOfficialsList,
@@ -258,11 +259,16 @@ export default function AdminDashboard() {
   // Result of "detect the date from the chosen file" per upload form — see
   // detectRecordMeta below. (The official number isn't collected at upload;
   // the Secretary sets it when publishing.)
-  const [recordScan, setRecordScan] = useState({ ordinance: null, resolution: null });
-  const recordScanSeq = useRef({ ordinance: 0, resolution: 0 });
+  // minutes / agenda: the session-minutes and order-of-business upload forms.
+  const [recordScan, setRecordScan] = useState({
+    ordinance: null, resolution: null, minutes: null, agenda: null,
+  });
+  const recordScanSeq = useRef({ ordinance: 0, resolution: 0, minutes: 0, agenda: 0 });
   const recordScanAuto = useRef({
     ordinance: { date: "" },
     resolution: { date: "" },
+    minutes: {},
+    agenda: {},
   });
   const latestRecordForm = useRef({});
   const [resolutionCategory, setResolutionCategory] = useState("");
@@ -387,7 +393,7 @@ export default function AdminDashboard() {
     session_number: "",
     session_date: "",
     session_type: "regular",
-    venue: "",
+    venue: SESSION_VENUE,
     agenda: "",
     minutes_text: "",
   });
@@ -410,7 +416,7 @@ export default function AdminDashboard() {
     session_number: "",
     session_date: "",
     session_type: "regular",
-    venue: "",
+    venue: SESSION_VENUE,
   });
   const [agendaFile, setAgendaFile] = useState(null);
   const [editingAgenda, setEditingAgenda] = useState(null);
@@ -503,6 +509,9 @@ export default function AdminDashboard() {
     fetchAnnouncements();
     fetchUnreadAnnouncements();
     fetchActiveStaffCount();
+    // The dashboard's "Upcoming events" widget needs these before the
+    // Calendar tab is ever opened.
+    fetchLocalEvents();
   }, []);
 
   useEffect(() => {
@@ -858,7 +867,7 @@ export default function AdminDashboard() {
   // thing this detection filled in itself) — so it never overwrites something
   // the user typed, and nothing is saved until they submit the form.
   useEffect(() => {
-    latestRecordForm.current = { ordinanceDate, resolutionDate };
+    latestRecordForm.current = { ordinanceDate, resolutionDate, sessionForm, agendaForm };
   });
   const RECORD_SCAN = {
     ordinance: { route: "ordinances", setDate: setOrdinanceDate },
@@ -866,8 +875,75 @@ export default function AdminDashboard() {
   };
   const clearRecordScan = (kind) => {
     recordScanSeq.current[kind]++;
-    recordScanAuto.current[kind] = { date: "" };
+    recordScanAuto.current[kind] = kind === "minutes" || kind === "agenda" ? {} : { date: "" };
     setRecordScan((s) => ({ ...s, [kind]: null }));
+  };
+  // Session minutes / order of business: reads the chosen file for the
+  // session's title (number, e.g. "2nd Regular Session, 2026"), date, type and
+  // venue, and prefills the form. Same rule as above — a field is only filled
+  // while it's still untouched (empty, the auto-suggested number, or what an
+  // earlier detection put there), and nothing is saved until the form is.
+  const detectSessionMeta = async (target, file) => {
+    const route = target === "minutes" ? "session-minutes" : "session-agendas";
+    const setForm = target === "minutes" ? setSessionForm : setAgendaForm;
+    const seq = ++recordScanSeq.current[target];
+    const isCurrent = () => recordScanSeq.current[target] === seq;
+    const show = (value) => {
+      if (isCurrent()) setRecordScan((s) => ({ ...s, [target]: value }));
+    };
+
+    if (!file) {
+      show(null);
+      return;
+    }
+    show({ status: "reading" });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await authFetch(`${API}/api/${route}/extract-meta`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!isCurrent()) return;
+      if (!res.ok || !data.success) {
+        show({ status: "error", message: data.error });
+        return;
+      }
+
+      const found = data.data;
+      const form = (target === "minutes" ? latestRecordForm.current.sessionForm : latestRecordForm.current.agendaForm) || {};
+      const auto = recordScanAuto.current[target];
+      const suggestion = target === "minutes" ? lastSessionSuggestion.current : "";
+      const applied = {
+        number:
+          Boolean(found.number) &&
+          (!(form.session_number || "").trim() || form.session_number === suggestion || form.session_number === auto.number),
+        date: Boolean(found.date) && (!form.session_date || form.session_date === auto.date),
+        type: Boolean(found.sessionType) && (form.session_type === "regular" || form.session_type === auto.type),
+      };
+      setForm((prev) => {
+        const next = { ...prev };
+        if (applied.date) next.session_date = found.date;
+        if (applied.type) next.session_type = found.sessionType;
+        if (applied.number) {
+          next.session_number = found.number;
+        } else if (applied.type && target === "minutes" && prev.session_number === lastSessionSuggestion.current) {
+          // Still the auto-suggested number, but the type just changed —
+          // re-suggest for the new type, like picking the type by hand does.
+          const year = next.session_date ? new Date(next.session_date).getFullYear() : getCurrentYear();
+          const suggested = suggestSessionNumber(sessionMinutes, year, next.session_type);
+          lastSessionSuggestion.current = suggested;
+          next.session_number = suggested;
+        }
+        return next;
+      });
+      recordScanAuto.current[target] = {
+        number: applied.number ? found.number : auto.number,
+        date: applied.date ? found.date : auto.date,
+        type: applied.type ? found.sessionType : auto.type,
+      };
+      show({ status: "done", data: found, applied });
+    } catch {
+      show({ status: "error", message: "Couldn't read this file automatically." });
+    }
   };
   const detectRecordMeta = async (kind, file) => {
     const { route, setDate } = RECORD_SCAN[kind];
@@ -1448,11 +1524,12 @@ export default function AdminDashboard() {
       session_number: suggested,
       session_date: "",
       session_type: "regular",
-      venue: "",
+      venue: SESSION_VENUE,
       agenda: "",
       minutes_text: "",
     });
     setSessionFile(null);
+    clearRecordScan("minutes");
   };
   const handleAddSession = async () => {
     if (!sessionForm.session_date) {
@@ -1576,9 +1653,10 @@ export default function AdminDashboard() {
       session_number: "",
       session_date: "",
       session_type: "regular",
-      venue: "",
+      venue: SESSION_VENUE,
     });
     setAgendaFile(null);
+    clearRecordScan("agenda");
   };
   const handleAddAgenda = async () => {
     if (!agendaForm.session_date) {
@@ -1946,7 +2024,7 @@ export default function AdminDashboard() {
   // Officials, none of which this page renders), so its skeleton clears as
   // soon as its own data is in, not whenever any unrelated tab is still loading.
   const dashboardLoading =
-    fetchingOrdinances || fetchingResolutions || fetchingMinutes || fetchingAnnouncements;
+    fetchingOrdinances || fetchingResolutions || fetchingMinutes || fetchingAnnouncements || fetchingAgendas;
 
   // ── Quick-action openers ── shared by the sidebar "+ Add" buttons and the
   // Dashboard's Quick Actions panel.
@@ -2383,6 +2461,8 @@ export default function AdminDashboard() {
             ordinances={ordinances}
             resolutions={resolutions}
             sessionMinutes={sessionMinutes}
+            sessionAgendas={sessionAgendas}
+            events={localEvents}
             announcements={announcements}
             unreadAnnouncements={unreadAnnouncements}
             loading={dashboardLoading}
@@ -4451,12 +4531,12 @@ export default function AdminDashboard() {
                   <label className={styles.fieldLabel}>Session Number</label>
                   <input
                     className={styles.input}
-                    placeholder="e.g. 12th Regular Session"
+                    placeholder="e.g. MINUTES NO. 01 - 2025"
                     value={sessionForm.session_number}
                     onChange={(e) =>
                       setSessionForm({
                         ...sessionForm,
-                        session_number: e.target.value,
+                        session_number: e.target.value.toUpperCase(),
                       })
                     }
                   />
@@ -4549,7 +4629,11 @@ export default function AdminDashboard() {
                       accept=".pdf,.doc,.docx,image/*"
                       id="sessionFileInput"
                       style={{ display: "none" }}
-                      onChange={(e) => setSessionFile(e.target.files[0])}
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        setSessionFile(file);
+                        detectSessionMeta("minutes", file);
+                      }}
                     />
                     <label
                       htmlFor="sessionFileInput"
@@ -4571,6 +4655,7 @@ export default function AdminDashboard() {
                       Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
                     </p>
                   </div>
+                  <RecordScanNotice scan={recordScan.minutes} variant="session" />
                 </>
             </div>
 
@@ -4676,12 +4761,12 @@ export default function AdminDashboard() {
                   <label className={styles.fieldLabel}>Session Number</label>
                   <input
                     className={styles.input}
-                    placeholder="e.g. 12th Regular Session"
+                    placeholder="e.g. MINUTES NO. 01 - 2025"
                     value={editSessionForm.session_number}
                     onChange={(e) =>
                       setEditSessionForm({
                         ...editSessionForm,
-                        session_number: e.target.value,
+                        session_number: e.target.value.toUpperCase(),
                       })
                     }
                   />
@@ -4870,12 +4955,12 @@ export default function AdminDashboard() {
                   <label className={styles.fieldLabel}>Session Number</label>
                   <input
                     className={styles.input}
-                    placeholder="e.g. 12th Regular Session"
+                    placeholder="e.g. AGENDA NO. 01 - 2025"
                     value={agendaForm.session_number}
                     onChange={(e) =>
                       setAgendaForm({
                         ...agendaForm,
-                        session_number: e.target.value,
+                        session_number: e.target.value.toUpperCase(),
                       })
                     }
                   />
@@ -4930,7 +5015,11 @@ export default function AdminDashboard() {
                   accept=".pdf,.doc,.docx"
                   id="agendaFileInput"
                   style={{ display: "none" }}
-                  onChange={(e) => setAgendaFile(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    setAgendaFile(file);
+                    detectSessionMeta("agenda", file);
+                  }}
                 />
                 <label htmlFor="agendaFileInput" className={styles.fileLabel}>
                   {agendaFile ? (
@@ -4950,6 +5039,7 @@ export default function AdminDashboard() {
                   auto-detects which.
                 </p>
               </div>
+              <RecordScanNotice scan={recordScan.agenda} variant="session" />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -5054,12 +5144,12 @@ export default function AdminDashboard() {
                   <label className={styles.fieldLabel}>Session Number</label>
                   <input
                     className={styles.input}
-                    placeholder="e.g. 12th Regular Session"
+                    placeholder="e.g. AGENDA NO. 01 - 2025"
                     value={editAgendaForm.session_number}
                     onChange={(e) =>
                       setEditAgendaForm({
                         ...editAgendaForm,
-                        session_number: e.target.value,
+                        session_number: e.target.value.toUpperCase(),
                       })
                     }
                   />

@@ -119,7 +119,12 @@ const sortByRecordNumber = (rows, numberField) =>
     .sort((a, b) => b.key.year - a.key.year || b.key.seq - a.key.seq || a.index - b.index)
     .map((x) => x.row)
 
+// Where Sangguniang Bayan sessions are held — the venue saved for new session
+// minutes / order of business when none is given.
+const SESSION_VENUE = 'Governor Lino I. Chatto Memorial Session Hall'
+
 module.exports = {
+  SESSION_VENUE,
   recordNumberKey,
   sortByRecordNumber,
   parseApprovedDay,

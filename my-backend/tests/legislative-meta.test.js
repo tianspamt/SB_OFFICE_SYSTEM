@@ -80,6 +80,36 @@ async function main() {
   m = extractLegislativeMeta('nothing useful in here', ORDINANCE)
   ok('nothing detectable -> all null', m.number === null && m.date === null)
 
+  // ── session minutes / order of business ──────────────────────────────────
+  m = extractLegislativeMeta(
+    'REPUBLIC OF THE PHILIPPINES\nMINUTES OF THE 2ND REGULAR SESSION OF THE SANGGUNIANG BAYAN\nheld at the Session Hall on March 5, 2026 at 9:00 AM', 'minutes')
+  ok('minutes: "2ND REGULAR SESSION" + date -> "MINUTES NO. 02 - 2026"', m.number === 'MINUTES NO. 02 - 2026' && m.sessionType === 'regular', m.number)
+  ok('minutes: date read from the "held on" line', m.date === '2026-03-05', m.date)
+  ok('minutes: venue read from "held at the ..."', m.venue === 'Session Hall', m.venue)
+
+  m = extractLegislativeMeta('ORDER OF BUSINESS\nfor the Twelfth Special Session\nOctober 14, 2025', 'agenda')
+  ok('agenda: worded ordinal + special -> "AGENDA NO. 12 - 2025"', m.number === 'AGENDA NO. 12 - 2025' && m.sessionType === 'special', m.number)
+
+  m = extractLegislativeMeta('Agenda for the twenty-first regular session on 01/06/2026', 'agenda')
+  ok('agenda: compound ordinal "twenty-first" -> AGENDA NO. 21 - 2026', m.number === 'AGENDA NO. 21 - 2026', m.number)
+
+  m = extractLegislativeMeta('AGENDA NO. 3 - 2024\nRegular Session held on February 9, 2025', 'agenda')
+  ok('agenda: the document\'s own "AGENDA NO. 3 - 2024" is used, with its own year', m.number === 'AGENDA NO. 03 - 2024' && m.sessionType === 'regular', m.number)
+
+  m = extractLegislativeMeta('MINUTES NO. 7\nheld on June 2, 2026', 'minutes')
+  ok('minutes: own number with no year takes the date\'s year', m.number === 'MINUTES NO. 07 - 2026', m.number)
+
+  m = extractLegislativeMeta(
+    'MINUTES OF THE 5TH REGULAR SESSION\nMarch 5, 2026\n\n3. Reading and approval of the minutes of the 4th regular session', 'minutes')
+  ok('minutes: a mention of another session further down is ignored', m.number === 'MINUTES NO. 05 - 2026', m.number)
+
+  m = extractLegislativeMeta('Minutes of the Regular Session held on May 3, 2026', 'minutes')
+  ok('minutes: no number -> no title, but the type and date are still found',
+    m.number === null && m.sessionType === 'regular' && m.date === '2026-05-03', `${m.number}/${m.sessionType}/${m.date}`)
+
+  m = extractLegislativeMeta('nothing about a session here', 'minutes')
+  ok('minutes: nothing detectable -> all null', m.number === null && m.sessionType === null && m.date === null && m.venue === null)
+
   // ── year cross-check ─────────────────────────────────────────────────────
   const base = {
     number: 'Municipal Ordinance No. 1998-012', numberRaw: 'x', numberConfidence: 'high', numberYear: 1998,

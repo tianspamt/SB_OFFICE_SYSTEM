@@ -8,8 +8,9 @@ const Tesseract = require('tesseract.js')
 const supabase = require('../config/supabase')
 const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
+const { extractMetaHandler } = require('../helpers/documentMeta')
 const { logActivity } = require('../helpers/logger')
-const { escapeHtml, canEditLegislativeRecord } = require('../helpers/utils')
+const { escapeHtml, canEditLegislativeRecord, SESSION_VENUE } = require('../helpers/utils')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify')
 
@@ -87,7 +88,7 @@ router.post('/', verifyToken, canCreateDraft, async (req, res) => {
         session_number: session_number || null,
         session_date,
         session_type: session_type || 'regular',
-        venue: venue || null,
+        venue: venue || SESSION_VENUE,
         agenda: agenda || null,
         minutes_text: minutes_text || null,
         status: 'published',
@@ -114,6 +115,11 @@ router.post('/', verifyToken, canCreateDraft, async (req, res) => {
 
 // POST /api/session-minutes/upload — auto-detects file type
 // See POST / above.
+// POST /api/session-minutes/extract-meta — reads the chosen file and suggests the session's
+// title (number), type, date and venue for the upload form to prefill. Nothing
+// is saved. Same reader as ordinances/resolutions (Word, PDF text, OCR).
+router.post('/extract-meta', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, extractMetaHandler('minutes'))
+
 router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' })
   const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
@@ -163,7 +169,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         session_number: session_number || null,
         session_date,
         session_type: session_type || 'regular',
-        venue: venue || null,
+        venue: venue || SESSION_VENUE,
         agenda: agenda || null,
         minutes_text: extractedText || minutes_text || null,
         filename: req.file.originalname,
