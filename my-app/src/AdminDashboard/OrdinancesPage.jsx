@@ -39,6 +39,8 @@ import {
   fetchOfficialsList,
   authFetch,
   API,
+  downloadFile,
+  openPdfInTab,
 } from "./AdminContext";
 import {
   pendingStatusesForRole,
@@ -991,15 +993,20 @@ export default function OrdinancesPage({
               {/* ── File actions ── */}
               {viewTarget.filetype === "application/pdf" && (
                 <div className={lStyles.viewModalFileActions}>
-                  <a
-                    href={getFileUrl(viewTarget.filepath)}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
                     className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                    onClick={() => openPdfInTab(getFileUrl(viewTarget.filepath), viewTarget.title || viewTarget.ordinance_number)}
                   >
                     <FileText size={16} />
                     Open PDF Document
-                  </a>
+                  </button>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                    onClick={() => downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.title || viewTarget.ordinance_number)}
+                  >
+                    <Download size={16} />
+                    Download PDF
+                  </button>
                   <button
                     className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
                     onClick={() => setPresentTarget(viewTarget)}
@@ -1017,25 +1024,9 @@ export default function OrdinancesPage({
                 <div className={lStyles.viewModalFileActions}>
                   <button
                     className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
-                    onClick={async () => {
-                      try {
-                        const res = await fetch(
-                          getFileUrl(viewTarget.filepath)
-                        );
-                        const blob = await res.blob();
-                        const blobUrl = window.URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = blobUrl;
-                        const ext = viewTarget.filepath.split(".").pop();
-                        a.download = `${viewTarget.title}.${ext}`;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(blobUrl);
-                      } catch (err) {
-                        console.error("Download failed:", err);
-                      }
-                    }}
+                    onClick={() =>
+                      downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.title || viewTarget.ordinance_number)
+                    }
                   >
                     <Download size={16} />
                     Download Word Document

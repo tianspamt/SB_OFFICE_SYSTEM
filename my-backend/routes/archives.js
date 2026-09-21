@@ -25,6 +25,7 @@ const titleOf = (entityType, data) => {
   if (entityType === 'ordinance') return data.ordinance_number || data.title
   if (entityType === 'resolution') return data.resolution_number || data.title
   if (entityType === 'session_minutes') return data.session_number || data.session_date
+  if (entityType === 'session_agenda') return data.session_number || data.session_date
   return data.title || null
 }
 

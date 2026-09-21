@@ -10,9 +10,66 @@ const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/a
 const { upload, handleMulterError } = require('../middleware/multer')
 const { extractMetaHandler } = require('../helpers/documentMeta')
 const { logActivity } = require('../helpers/logger')
-const { escapeHtml, canEditLegislativeRecord, SESSION_VENUE } = require('../helpers/utils')
+const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
+const { readDocument } = require('../helpers/documentText')
+const { pdfBufferText } = require('../helpers/pdfText')
+const { escapeHtml, canEditLegislativeRecord, SESSION_VENUE, applyTokenSearch } = require('../helpers/utils')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
 const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify')
+
+const WORD_MIMES = [
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]
+
+// Text of a Word file (the upload used to read only images and PDFs, so a
+// Word upload ended up with no minutes text at all). null if it can't be read.
+const extractWordText = async (file) => {
+  if (!WORD_MIMES.includes(file.mimetype)) return null
+  try {
+    const doc = await readDocument(file)
+    return (doc.text || '').trim() || null
+  } catch (err) {
+    console.error('Word read error:', err.message)
+    return null
+  }
+}
+
+// Text of any accepted upload — an image (OCR), a PDF or a Word file.
+const extractTextFromFile = async (file) => {
+  const mime = file.mimetype
+  if (WORD_MIMES.includes(mime)) return extractWordText(file)
+  if (mime.startsWith('image/')) {
+    const tempPath = path.join(os.tmpdir(), `${Date.now()}-${file.originalname}`)
+    try {
+      fs.writeFileSync(tempPath, file.buffer)
+      const { data: { text } } = await Tesseract.recognize(tempPath, 'eng')
+      return text.trim() || null
+    } catch (err) {
+      console.error('OCR error:', err.message)
+      return null
+    } finally {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+    }
+  }
+  if (mime === 'application/pdf') return pdfBufferText(file.buffer)
+  return null
+}
+
+// An uploaded file is kept in storage (so the PDF can be opened and the Word
+// file downloaded later) in session_minutes.filepath — added by migration 029.
+// Until that migration has been run the column doesn't exist, so uploads fall
+// back to the old behaviour (text only, file not kept) instead of failing.
+// Only a positive answer is remembered, so running the migration takes effect
+// without restarting the server.
+let filepathColumnKnown = false
+const hasFilepathColumn = async () => {
+  if (filepathColumnKnown) return true
+  const { error } = await supabase.from('session_minutes').select('filepath').limit(1)
+  filepathColumnKnown = !error
+  if (error) console.warn('[session-minutes] filepath column check failed — files will not be kept:', error.message)
+  return filepathColumnKnown
+}
 
 
 // GET /api/session-minutes
@@ -31,16 +88,21 @@ const { notifyAllStaff, notificationEmailHtml } = require('../helpers/notify')
 // array; existing callers that don't paginate are unaffected.
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { year, search, type } = req.query
+    const { year, search, type, date } = req.query
     let query = supabase
       .from('session_minutes')
-      .select('id, session_number, session_date, session_type, venue, agenda, minutes_text, filename, filetype, created_at, status, revision_count, reviewed_by, reviewed_at', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('session_date', { ascending: false })
     if (type && type !== 'all') query = query.eq('session_type', type)
     if (year && /^\d{4}$/.test(year)) {
       query = query.gte('session_date', `${year}-01-01`).lt('session_date', `${Number(year) + 1}-01-01`)
     }
-    if (search) query = query.ilike('session_number', `%${search}%`)
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) query = query.eq('session_date', date)
+    // The box advertises session number, type and venue — search those, plus
+    // the minutes text itself, word by word.
+    if (search) {
+      query = applyTokenSearch(query, search, ['session_number', 'session_type', 'venue', 'minutes_text'])
+    }
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
@@ -131,6 +193,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
 
   let extractedText = null
   let tempPath = null
+  let storedPath = null
 
   try {
     if (isImage) {
@@ -142,26 +205,18 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
       extractedText = text.trim() || null
     }
 
-    if (isPDF) {
-      const PDFParser = require('pdf2json')
-      try {
-        extractedText = await new Promise((resolve) => {
-          const pdfParser = new PDFParser()
-          pdfParser.on('pdfParser_dataReady', (data) => {
-            const text = data.Pages
-              ?.flatMap(p => p.Texts)
-              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-              ?.join(' ')
-              ?.trim() || ''
-            resolve(text || null)
-          })
-          pdfParser.on('pdfParser_dataError', () => resolve(null))
-          pdfParser.parseBuffer(req.file.buffer)
-        })
-      } catch (pdfErr) {
-        console.error('PDF parse error:', pdfErr.message)
-      }
+    if (WORD_MIMES.includes(mime)) extractedText = await extractWordText(req.file)
+
+    if (isPDF) extractedText = await pdfBufferText(req.file.buffer)
+
+    // Keep the file itself so it can be opened/downloaded later.
+    if (await hasFilepathColumn()) {
+      storedPath = (await uploadToStorage(req.file, 'session-minutes')).fileName
     }
+    console.log('[session-minutes] upload:', {
+      file: req.file.originalname, mime, bytes: req.file.size,
+      textChars: (extractedText || '').length, stored: storedPath,
+    })
 
     const { data, error } = await supabase
       .from('session_minutes')
@@ -174,12 +229,16 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
         minutes_text: extractedText || minutes_text || null,
         filename: req.file.originalname,
         filetype: mime,
+        ...(storedPath && { filepath: storedPath }),
         status: 'published',
         created_by: req.user.id,
       })
       .select().single()
 
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) {
+      if (storedPath) await deleteFromStorage(storedPath)
+      return res.status(500).json({ error: error.message })
+    }
     await logActivity(req, 'UPLOAD', 'Sessions', `Uploaded session: ${session_number || session_date}`)
     notifyAllStaff({
       message: `New session minutes recorded: ${session_number || session_date}`,
@@ -193,17 +252,22 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     res.json({ success: true, id: data.id, data })
   } catch (err) {
     if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath)
+    if (storedPath) await deleteFromStorage(storedPath)
     res.status(500).json({ error: err.message })
   }
 })
 
 // PUT /api/session-minutes/:id
 // canEditLegislativeRecord: Secretary/Clerk only, in any bucket.
-router.put('/:id', verifyToken, async (req, res) => {
+// Also accepts a file (multipart): it replaces the record's file — the way to
+// attach the original document to a record that was saved without one. Its
+// text fills "minutes" if none was typed.
+router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
+  let newFilePath = null
   try {
     const { data: existing } = await supabase
-      .from('session_minutes').select('id, status').eq('id', id).single()
+      .from('session_minutes').select('*').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'Session minutes not found.' })
     if (!canEditLegislativeRecord(req.user.position))
       return res.status(403).json({ error: 'You are not allowed to edit this session record.' })
@@ -217,14 +281,32 @@ router.put('/:id', verifyToken, async (req, res) => {
       agenda: agenda || null,
       minutes_text: minutes_text || null
     }
+
+    if (req.file) {
+      updateData.filename = req.file.originalname
+      updateData.filetype = req.file.mimetype
+      // Text typed into the form wins; otherwise take it from the new file.
+      if (!updateData.minutes_text) updateData.minutes_text = await extractTextFromFile(req.file)
+      if (await hasFilepathColumn()) {
+        newFilePath = (await uploadToStorage(req.file, 'session-minutes')).fileName
+        updateData.filepath = newFilePath
+      }
+    }
+
     const { data, error } = await supabase
       .from('session_minutes')
       .update(updateData)
       .eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) {
+      if (newFilePath) await deleteFromStorage(newFilePath)
+      return res.status(500).json({ error: error.message })
+    }
+    // The record points at the new file now — remove the one it replaced.
+    if (newFilePath && existing.filepath) await deleteFromStorage(existing.filepath)
     await logActivity(req, 'UPDATE', 'Sessions', `Updated session ID: ${id}`)
     res.json({ success: true, data })
   } catch (err) {
+    if (newFilePath) await deleteFromStorage(newFilePath)
     res.status(500).json({ error: err.message })
   }
 })
@@ -235,7 +317,6 @@ router.get('/:id/print', verifyToken, async (req, res) => {
     const { data: s, error } = await supabase
       .from('session_minutes').select('*').eq('id', req.params.id).single()
     if (error || !s) return res.status(404).send('Not found')
-    const agendaItems = s.agenda ? s.agenda.split('\n').filter(Boolean) : []
     res.send(`<!DOCTYPE html><html lang="en"><head>
       <meta charset="UTF-8"/>
       <title>Session Minutes — ${escapeHtml(s.session_number || new Date(s.session_date).toLocaleDateString('en-PH'))}</title>
@@ -260,8 +341,6 @@ router.get('/:id/print', verifyToken, async (req, res) => {
         .meta-grid .label { font-weight:bold; color:#1a365d; }
         .section { margin:24px 0; }
         .section-title { font-size:12px; font-weight:bold; text-transform:uppercase; letter-spacing:2px; color:#1a365d; border-bottom:1.5px solid #1a365d; padding-bottom:5px; margin-bottom:14px; }
-        .agenda-list { padding-left:22px; }
-        .agenda-list li { font-size:13.5px; line-height:1.9; }
         .minutes-body { font-size:13.5px; line-height:1.9; white-space:pre-wrap; text-align:justify; }
         .footer { margin-top:60px; border-top:1px solid #cbd5e0; padding-top:16px; text-align:center; font-size:10.5px; color:#888; }
         .print-btn { position:fixed; top:20px; right:20px; padding:10px 22px; background:#1a365d; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px; }
@@ -280,7 +359,7 @@ router.get('/:id/print', verifyToken, async (req, res) => {
       </div>
       <div class="letterhead-rule"></div>
       <div class="doc-title-block">
-        <div class="doc-label">Session Minutes &amp; Agenda</div>
+        <div class="doc-label">Session Minutes</div>
         ${s.session_number ? `<div class="session-num">${escapeHtml(s.session_number)}</div>` : ''}
         <span class="type-badge ${s.session_type === 'special' ? 'type-special' : 'type-regular'}">
           ${s.session_type === 'special' ? 'Special Session' : 'Regular Session'}
@@ -292,12 +371,6 @@ router.get('/:id/print', verifyToken, async (req, res) => {
         ${s.venue ? `<div class="label">Venue:</div><div class="value">${escapeHtml(s.venue)}</div>` : ''}
         <div class="label">Date Recorded:</div>
         <div class="value">${new Date(s.created_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}</div>
-      </div>
-      <div class="section">
-        <div class="section-title">Agenda</div>
-        <ol class="agenda-list">
-          ${agendaItems.length ? agendaItems.map(a => `<li>${escapeHtml(a.trim())}</li>`).join('') : '<li><em>No agenda items listed.</em></li>'}
-        </ol>
       </div>
       <div class="section">
         <div class="section-title">Minutes of the Session</div>
@@ -335,24 +408,18 @@ router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), ha
         fs.unlinkSync(tempPath)
         extractedText = text.trim() || null
       } else if (mime === 'application/pdf') {
-        const PDFParser = require('pdf2json')
-        extractedText = await new Promise((resolve) => {
-          const pdfParser = new PDFParser()
-          pdfParser.on('pdfParser_dataReady', (data) => {
-            const text = data.Pages
-              ?.flatMap(p => p.Texts)
-              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-              ?.join(' ')
-              ?.trim() || ''
-            resolve(text || null)
-          })
-          pdfParser.on('pdfParser_dataError', () => resolve(null))
-          pdfParser.parseBuffer(req.file.buffer)
-        })
+        extractedText = await pdfBufferText(req.file.buffer)
+      } else if (WORD_MIMES.includes(mime)) {
+        extractedText = await extractWordText(req.file)
       }
       updateData.filename = req.file.originalname
       updateData.filetype = mime
       if (extractedText) updateData.minutes_text = extractedText
+      // Replace the stored file too (the old one is removed once the record
+      // points at the new one).
+      if (await hasFilepathColumn()) {
+        updateData.filepath = (await uploadToStorage(req.file, 'session-minutes')).fileName
+      }
     } else {
       const { session_number, session_date, session_type, venue, agenda, minutes_text } = req.body
       if (session_number !== undefined) updateData.session_number = session_number || null
@@ -364,7 +431,11 @@ router.put('/:id/revise', verifyToken, pendingEditors, upload.single('file'), ha
     }
     const { data, error } = await supabase
       .from('session_minutes').update(updateData).eq('id', id).select().single()
-    if (error) return res.status(500).json({ error: error.message })
+    if (error) {
+      if (updateData.filepath) await deleteFromStorage(updateData.filepath)
+      return res.status(500).json({ error: error.message })
+    }
+    if (updateData.filepath && existing.filepath) await deleteFromStorage(existing.filepath)
 
     await logActivity(req, 'REPLACE_FILE', 'Sessions', `Revised draft session: ${existing.session_number || id}`)
     res.json({ success: true, data })

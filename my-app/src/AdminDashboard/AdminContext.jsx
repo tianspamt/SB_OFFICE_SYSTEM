@@ -3,6 +3,62 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ─── API Base URL ──────────────────────────────────────────────────────────────
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// ─── Naming a stored file after its record ───────────────────────────────────
+// Files sit in storage under a timestamp name (1790012695202-31q5sm.pdf), which
+// is what a browser shows in the tab and offers when saving. These give them
+// the record's own title instead.
+
+// A title made safe to use as a file name: no characters Windows forbids, no
+// runs of spaces, capped in length. Falls back when nothing usable is left.
+export const safeFileName = (name, fallback = "Document") =>
+  String(name ?? "")
+    .split("")
+    .filter((ch) => ch.charCodeAt(0) >= 32)
+    .join("")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || fallback;
+
+// Downloads a stored file under "<name>.<original extension>".
+export const downloadFile = async (fileUrl, filepath, name) => {
+  try {
+    const res = await fetch(fileUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blobUrl = window.URL.createObjectURL(await res.blob());
+    const ext = String(filepath || "").split(".").pop();
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = `${safeFileName(name)}${ext ? `.${ext}` : ""}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("Download failed:", err);
+  }
+};
+
+// Opens a PDF in a new tab whose title is the record's name (a bare storage URL
+// would title the tab with the timestamp file name). The tab is opened straight
+// away, inside the click, so browsers don't treat it as a blocked popup.
+export const openPdfInTab = (fileUrl, title) => {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  win.document.open();
+  win.document.write(
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><title></title>" +
+      "<style>html,body{margin:0;height:100%;background:#525659}iframe{border:0;width:100%;height:100%}</style>" +
+      "</head><body></body></html>"
+  );
+  win.document.close();
+  win.document.title = safeFileName(title, "Document");
+  const frame = win.document.createElement("iframe");
+  frame.src = fileUrl;
+  frame.title = win.document.title;
+  win.document.body.appendChild(frame);
+};
+
 // ─── Text truncation ─────────────────────────────────────────────────────────
 // Character-count truncation (not the CSS max-width/ellipsis approach — see
 // .tdTruncate in AdminDashboard.module.css) for table cells that need a

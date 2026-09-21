@@ -30,7 +30,7 @@ import PendingRecordsWidget from "./PendingRecordsWidget";
 import { PresentOverlay } from "./LegislativeComponents";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
-import { useIsMobile, toIsoDate } from "./AdminContext";
+import { useIsMobile, toIsoDate, downloadFile, openPdfInTab } from "./AdminContext";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const getFileUrl = (filepath) =>
@@ -252,13 +252,6 @@ const SessionCard = ({ item, onView }) => (
         {item.venue}
       </span>
     )}
-    {item.agenda && (
-      <span className={styles.dashCardAuthor}>
-        <ClipboardList size={11} />
-        {item.agenda.split("\n").filter(Boolean).length} agenda item
-        {item.agenda.split("\n").filter(Boolean).length !== 1 ? "s" : ""}
-      </span>
-    )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
         <Calendar size={11} />
@@ -277,7 +270,7 @@ const AgendaCard = ({ item, onView }) => (
   <div className={styles.dashItemCard}>
     <div className={styles.dashCardTop}>
       <span className={styles.dashSessionBadge}>
-        {item.session_type === "special" ? "Special Session" : "Regular Session"}
+        {item.session_type === "special" ? "Special" : "Regular"}
       </span>
     </div>
     <h4 className={styles.dashCardTitle}>
@@ -516,7 +509,11 @@ const DashboardPage = ({
         <AgendaCard
           key={item.id}
           item={item}
-          onView={() => window.open(getFileUrl(item.filepath), "_blank", "noopener")}
+          onView={() =>
+            item.filetype === "application/pdf"
+              ? openPdfInTab(getFileUrl(item.filepath), item.session_number || item.filename)
+              : downloadFile(getFileUrl(item.filepath), item.filepath, item.session_number || item.filename)
+          }
         />
       ),
     },
@@ -912,12 +909,6 @@ const DashboardPage = ({
               {viewTarget.type === "session" ? (
                 <>
                   <div className={lStyles.viewModalCouncilTitle} style={{ marginBottom: 8 }}>
-                    Agenda
-                  </div>
-                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
-                    {viewTarget.item.agenda || "No agenda recorded."}
-                  </div>
-                  <div className={lStyles.viewModalCouncilTitle} style={{ margin: "16px 0 8px" }}>
                     Minutes
                   </div>
                   <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" }}>
@@ -928,15 +919,20 @@ const DashboardPage = ({
                 <>
                   {viewTarget.item.filetype === "application/pdf" && (
                     <div className={lStyles.viewModalFileActions}>
-                      <a
-                        href={getFileUrl(viewTarget.item.filepath)}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
                         className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                        onClick={() => openPdfInTab(getFileUrl(viewTarget.item.filepath), viewTarget.item.title || viewTarget.item.ordinance_number || viewTarget.item.resolution_number || viewTarget.item.session_number)}
                       >
                         <FileText size={16} />
                         Open PDF Document
-                      </a>
+                      </button>
+                      <button
+                        className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                        onClick={() => downloadFile(getFileUrl(viewTarget.item.filepath), viewTarget.item.filepath, viewTarget.item.title || viewTarget.item.ordinance_number || viewTarget.item.resolution_number || viewTarget.item.session_number)}
+                      >
+                        <Download size={16} />
+                        Download PDF
+                      </button>
                       <button
                         className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
                         onClick={() => setPresentTarget(viewTarget.item)}
@@ -950,14 +946,13 @@ const DashboardPage = ({
                     viewTarget.item.filetype ===
                       "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
                     <div className={lStyles.viewModalFileActions}>
-                      <a
-                        href={getFileUrl(viewTarget.item.filepath)}
-                        download={viewTarget.item.filename}
+                      <button
                         className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                        onClick={() => downloadFile(getFileUrl(viewTarget.item.filepath), viewTarget.item.filepath, viewTarget.item.title || viewTarget.item.ordinance_number || viewTarget.item.resolution_number || viewTarget.item.session_number)}
                       >
                         <Download size={16} />
                         Download Word Document
-                      </a>
+                      </button>
                       <button
                         className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
                         onClick={() => setPresentTarget(viewTarget.item)}

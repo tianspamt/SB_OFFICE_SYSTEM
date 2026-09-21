@@ -9,7 +9,9 @@
 
 import { useState, useEffect } from "react";
 import {
-  Printer,
+  FileText,
+  Download,
+  Image,
   Eye,
   Pencil,
   Archive,
@@ -20,7 +22,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { API, MONTHS, authFetch } from "./AdminContext";
+import { MONTHS, downloadFile, openPdfInTab } from "./AdminContext";
 import { useLegislativePublished, useResetOnChange } from "./useLegislativeReview";
 import {
   SearchBar,
@@ -33,24 +35,9 @@ import {
 
 const PAGE_SIZE = 20;
 
-// The print view requires auth (see backend lockdown of GET .../print), so a
-// plain <a href> can't carry it — the browser's own navigation has no way to
-// attach an Authorization header. Open the tab synchronously (before the
-// await) so browsers don't treat it as an unrequested popup, then fill it in
-// once the authenticated fetch resolves.
-const handlePrintSession = async (id) => {
-  const win = window.open("", "_blank");
-  try {
-    const res = await authFetch(`${API}/api/session-minutes/${id}/print`);
-    const html = await res.text();
-    if (!win) return;
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-  } catch {
-    win?.close();
-  }
-};
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const getFileUrl = (filepath) =>
+  `${SUPABASE_URL}/storage/v1/object/public/assets/${filepath}`;
 
 // ─── SESSION CARD ──────────────────────────────────────────────────────────────
 
@@ -58,9 +45,6 @@ function SessionCard({ session, onEdit, onDelete, onView, MONTHS, readOnly }) {
   const date = session.session_date
     ? new Date(session.session_date + "T00:00:00")
     : null;
-  const agendaPreview = session.agenda
-    ? session.agenda.split("\n").filter(Boolean).slice(0, 3)
-    : [];
 
   return (
     <div className={lStyles.recordCard}>
@@ -146,21 +130,8 @@ function SessionCard({ session, onEdit, onDelete, onView, MONTHS, readOnly }) {
             <CalendarDays size={12} /> {session.venue}
           </div>
         )}
-        {agendaPreview.length > 0 && (
-          <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
-            <span style={{ fontWeight: 500 }}>Agenda: </span>
-            {agendaPreview[0]}
-            {agendaPreview.length > 1 && ` +${agendaPreview.length - 1} more`}
-          </div>
-        )}
       </div>
       <div className={lStyles.recordActions}>
-        <button
-          className={`${lStyles.btn} ${lStyles.btnSm}`}
-          onClick={() => handlePrintSession(session.id)}
-        >
-          <Printer size={13} /> Print
-        </button>
         <button
           className={`${lStyles.btn} ${lStyles.btnSm} ${lStyles.btnInfo}`}
           onClick={() => onView(session)}
@@ -206,7 +177,11 @@ export default function SessionsPage({
   const [search, setSearch] = useState("");
   const [minutesTypeFilter, setMinutesTypeFilter] = useState("all");
   const [minutesYearFilter, setMinutesYearFilter] = useState("all");
+  const [minutesDateFilter, setMinutesDateFilter] = useState("");
   const [presentTarget, setPresentTarget] = useState(null);
+  // A record with a stored file (PDF/Word/image) is presented from the file;
+  // presentTarget above is the typed-text version for records without one.
+  const [presentRecord, setPresentRecord] = useState(null);
   const [viewTarget, setViewTarget] = useState(null);
 
   const [page, setPage] = useState(1);
@@ -215,7 +190,7 @@ export default function SessionsPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  useResetOnChange([debouncedSearch, minutesTypeFilter, minutesYearFilter], setPage, 1);
+  useResetOnChange([debouncedSearch, minutesTypeFilter, minutesYearFilter, minutesDateFilter], setPage, 1);
 
   const params = {
     page: String(page),
@@ -223,6 +198,7 @@ export default function SessionsPage({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(minutesYearFilter !== "all" ? { year: minutesYearFilter } : {}),
     ...(minutesTypeFilter !== "all" ? { type: minutesTypeFilter } : {}),
+    ...(minutesDateFilter ? { date: minutesDateFilter } : {}),
   };
   const {
     publishedList: list,
@@ -243,10 +219,9 @@ export default function SessionsPage({
     ),
   ].sort((a, b) => b - a);
 
-  // Session minutes never keep the originally uploaded file (see
-  // routes/sessionMinutes.js — an upload only ever extracts text, it's
-  // never persisted to storage), so "Present" here always shows the typed
-  // agenda/minutes text in a big-font view rather than an embedded file.
+  // For a record with no stored file (typed in, or recorded before files were
+  // kept — see migration 029), "Present" shows the typed minutes text in a
+  // big-font view instead of an embedded file.
   const handleOpenPresent = (session) => {
     setPresentTarget({
       eyebrow: session.session_type === "special" ? "Special Session" : "Regular Session",
@@ -271,7 +246,6 @@ export default function SessionsPage({
       ]
         .filter(Boolean)
         .join(" • "),
-      agenda: session.agenda ? session.agenda.split("\n").filter(Boolean) : [],
       minutes: session.minutes_text || "",
     });
   };
@@ -279,6 +253,7 @@ export default function SessionsPage({
   const resetFilters = () => {
     setSearch("");
     setMinutesTypeFilter("all");
+    setMinutesDateFilter("");
     setMinutesYearFilter("all");
   };
 
@@ -294,15 +269,20 @@ export default function SessionsPage({
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder="Search by session number, venue, or agenda..."
+            placeholder="Search by session number, type, venue, or minutes..."
           />
         </div>
         <FilterPanel
-          categoryValue={minutesTypeFilter === "all" ? "All" : minutesTypeFilter}
-          onCategoryChange={(v) => setMinutesTypeFilter(v === "All" ? "all" : v)}
-          categories={["All", "regular", "special"]}
-          dateValue=""
-          onDateChange={() => {}}
+          categoryLabel="Type"
+          categoryValue={
+            minutesTypeFilter === "all"
+              ? "All"
+              : minutesTypeFilter.charAt(0).toUpperCase() + minutesTypeFilter.slice(1)
+          }
+          onCategoryChange={(v) => setMinutesTypeFilter(v === "All" ? "all" : v.toLowerCase())}
+          categories={["All", "Regular", "Special"]}
+          dateValue={minutesDateFilter}
+          onDateChange={setMinutesDateFilter}
           yearValue={minutesYearFilter}
           onYearChange={setMinutesYearFilter}
           years={minutesYears}
@@ -323,7 +303,7 @@ export default function SessionsPage({
             <EmptyState
               title="No session records match your search"
               text={
-                !search && minutesTypeFilter === "all" && minutesYearFilter === "all"
+                !search && minutesTypeFilter === "all" && minutesYearFilter === "all" && !minutesDateFilter
                   ? "No session minutes recorded yet."
                   : "Try adjusting your filters."
               }
@@ -441,49 +421,118 @@ export default function SessionsPage({
 
               <div className={lStyles.viewModalDivider} />
 
-              <div className={lStyles.viewModalFileActions}>
-                <button
-                  className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
-                  onClick={() => handleOpenPresent(viewTarget)}
-                >
-                  <Presentation size={16} />
-                  Present
-                </button>
-              </div>
+              {/* ── File actions — same as the other legislative records:
+                  a PDF opens, a Word file downloads, an image previews ── */}
+              {viewTarget.filepath && viewTarget.filetype === "application/pdf" && (
+                <div className={lStyles.viewModalFileActions}>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                    onClick={() => openPdfInTab(getFileUrl(viewTarget.filepath), viewTarget.session_number || "Session Minutes")}
+                  >
+                    <FileText size={16} />
+                    Open PDF Document
+                  </button>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                    onClick={() => downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.session_number || "Session Minutes")}
+                  >
+                    <Download size={16} />
+                    Download PDF
+                  </button>
+                  <button
+                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                    onClick={() => setPresentRecord(viewTarget)}
+                  >
+                    <Presentation size={16} />
+                    Present
+                  </button>
+                </div>
+              )}
 
-              <div className={lStyles.viewModalDivider} />
+              {viewTarget.filepath &&
+                (viewTarget.filetype === "application/msword" ||
+                  viewTarget.filetype ===
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document") && (
+                  <div className={lStyles.viewModalFileActions}>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                      onClick={() => downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.session_number || "Session Minutes")}
+                    >
+                      <Download size={16} />
+                      Download Word Document
+                    </button>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                      onClick={() => setPresentRecord(viewTarget)}
+                    >
+                      <Presentation size={16} />
+                      Present
+                    </button>
+                  </div>
+                )}
 
-              <div
-                className={lStyles.viewModalCouncilTitle}
-                style={{ marginBottom: 8 }}
-              >
-                Agenda
-              </div>
-              <div
-                style={{
-                  fontSize: 13,
-                  whiteSpace: "pre-wrap",
-                  color: "var(--color-text-secondary)",
-                }}
-              >
-                {viewTarget.agenda || "No agenda recorded."}
-              </div>
+              {viewTarget.filepath && viewTarget.filetype?.startsWith("image/") && (
+                <div className={lStyles.viewModalOcrSection}>
+                  <img
+                    src={getFileUrl(viewTarget.filepath)}
+                    alt={viewTarget.session_number || "Session minutes"}
+                    className={lStyles.viewModalImagePreview}
+                  />
+                  <div className={lStyles.viewModalFileActions}>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                      onClick={() => setPresentRecord(viewTarget)}
+                    >
+                      <Presentation size={16} />
+                      Present
+                    </button>
+                  </div>
+                  <div className={lStyles.viewModalOcrLabel}>
+                    <Image size={14} />
+                    Extracted Text (OCR)
+                  </div>
+                  <textarea
+                    className={lStyles.viewModalOcrText}
+                    readOnly
+                    rows={6}
+                    value={viewTarget.minutes_text || "No text could be extracted from this image."}
+                  />
+                </div>
+              )}
 
-              <div
-                className={lStyles.viewModalCouncilTitle}
-                style={{ margin: "16px 0 8px" }}
-              >
-                Minutes
-              </div>
-              <div
-                style={{
-                  fontSize: 13,
-                  whiteSpace: "pre-wrap",
-                  color: "var(--color-text-secondary)",
-                }}
-              >
-                {viewTarget.minutes_text || "No minutes recorded."}
-              </div>
+              {/* Records with no stored file (typed in, or recorded before
+                  files were kept) show their text instead. */}
+              {!viewTarget.filepath && (
+                <>
+                  <div className={lStyles.viewModalFileActions}>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                      onClick={() => handleOpenPresent(viewTarget)}
+                    >
+                      <Presentation size={16} />
+                      Present
+                    </button>
+                  </div>
+
+                  <div className={lStyles.viewModalDivider} />
+
+                  <div
+                    className={lStyles.viewModalCouncilTitle}
+                    style={{ marginBottom: 8 }}
+                  >
+                    Minutes
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      whiteSpace: "pre-wrap",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    {viewTarget.minutes_text || "No minutes recorded."}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -491,6 +540,9 @@ export default function SessionsPage({
 
       {presentTarget && (
         <PresentOverlay textContent={presentTarget} onClose={() => setPresentTarget(null)} />
+      )}
+      {presentRecord && (
+        <PresentOverlay record={presentRecord} onClose={() => setPresentRecord(null)} />
       )}
     </>
   );

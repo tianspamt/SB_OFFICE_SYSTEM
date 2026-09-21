@@ -83,7 +83,6 @@ function announcementsToFeedPosts(announcements, totalActiveUsers = 0) {
       priority: a.priority,
       pinned: !!a.pinned,
       createdAt: a.created_at,
-      expiresAt: a.expires_at,
       reactions: reactionsMapFor(a.announcement_reactions),
       readBy,
       possibleReaders: Math.max(0, totalActiveUsers - (authorId ? 1 : 0)),
@@ -477,7 +476,6 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const cfg = priorityConfig[post.priority] || priorityConfig.normal;
-  const isExpired = post.expiresAt && new Date(post.expiresAt) < new Date();
   const totalReactions = REACTIONS_LIST.reduce((sum, e) => sum + (post.reactions[e] || []).length, 0);
   // Secretary/Clerk (role "Admin") manage any post; everyone else only the
   // ones they posted themselves — the backend enforces the same rule.
@@ -494,11 +492,10 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
   return (
     <div style={{
       background: post.pinned ? "#fffdf5" : "#fff", borderRadius: 14,
-      border: `1px solid ${isExpired ? "#fed7d7" : "#e2e8f0"}`,
+      border: "1px solid #e2e8f0",
       borderLeft: post.pinned ? "4px solid #d69e2e" : undefined,
       boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
       padding: "18px 20px",
-      opacity: isExpired ? 0.75 : 1,
       transition: "box-shadow 0.2s, transform 0.15s",
     }}
       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(9, 4, 70,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
@@ -531,22 +528,10 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
                 {cfg.label}
               </span>
             )}
-            {isExpired && (
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: "0.7px",
-                padding: "2px 9px", borderRadius: 20,
-                background: "#fff5f5", color: "#c53030", border: "1px solid #fed7d7",
-              }}>Expired</span>
-            )}
           </div>
           <div style={{ fontSize: 11, color: "#a0aec0", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
             <CalendarDays size={10} strokeWidth={1.5} />
             {timeAgo(post.createdAt)}
-            {post.expiresAt && (
-              <span style={{ color: isExpired ? "#c53030" : "#718096", marginLeft: 4 }}>
-                · {isExpired ? "⚠ Expired" : "⏱ Expires"}: {new Date(post.expiresAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}
-              </span>
-            )}
           </div>
         </div>
 

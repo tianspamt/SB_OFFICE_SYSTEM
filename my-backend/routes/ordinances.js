@@ -4,7 +4,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const Tesseract = require('tesseract.js')
-const PDFParser = require('pdf2json')
+const { pdfBufferText } = require('../helpers/pdfText')
 
 const supabase = require('../config/supabase')
 const { verifyToken, canCreateDraft, pendingEditors, secretaryOnly } = require('../middleware/auth')
@@ -211,19 +211,7 @@ router.get('/:id/print', verifyToken, async (req, res) => {
         const response = await fetch(fileUrl)
         if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.status}`)
         const buffer = Buffer.from(await response.arrayBuffer())
-        extractedText = await new Promise((resolve) => {
-          const pdfParser = new PDFParser()
-          pdfParser.on('pdfParser_dataReady', (data) => {
-            const text = data.Pages
-              ?.flatMap(p => p.Texts)
-              ?.map(t => decodeURIComponent(t.R?.[0]?.T || ''))
-              ?.join(' ')
-              ?.trim() || ''
-            resolve(text)
-          })
-          pdfParser.on('pdfParser_dataError', () => resolve(''))
-          pdfParser.parseBuffer(buffer)
-        })
+        extractedText = (await pdfBufferText(buffer)) || ''
         if (extractedText) {
           await supabase.from('ordinances')
             .update({ extracted_text: extractedText })

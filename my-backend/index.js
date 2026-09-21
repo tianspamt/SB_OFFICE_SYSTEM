@@ -76,6 +76,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error.' })
 })
 
+// ---- LAST-RESORT SAFETY NET ----
+// An error thrown inside a library's own callback (e.g. a PDF reader hitting a
+// character it can't decode) can't be caught by a route's try/catch, and Node's
+// default is to kill the whole process — taking the office's system offline for
+// everyone over one bad upload. Log it and keep serving instead; the request
+// that triggered it fails on its own, the others carry on.
+process.on('uncaughtException', (err) => console.error('Uncaught exception (server kept running):', err))
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection (server kept running):', reason))
+
 // ---- START SERVER ----
 const PORT = process.env.PORT || 5000
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`))

@@ -101,6 +101,9 @@ export function SearchBar({ value, onChange, placeholder }) {
 
 export function FilterPanel({
   categories,
+  // Label for the category dropdown — "Sector" for ordinances/resolutions,
+  // "Type" for session minutes / order of business.
+  categoryLabel = "Sector",
   categoryValue,
   onCategoryChange,
   dateValue,
@@ -123,7 +126,7 @@ export function FilterPanel({
 
       {categories && (
         <div className={styles.filterField}>
-          <span className={styles.filterLabel}>Sector:</span>
+          <span className={styles.filterLabel}>{categoryLabel}:</span>
           <SectorSelect
             variant="filter"
             value={categoryValue}
@@ -618,9 +621,25 @@ export function PresentOverlay({ record, textContent, onClose }) {
   // the same gesture window in every browser tested; if a browser ever
   // rejects it, the catch below just leaves the overlay maximized-but-not-
   // truly-fullscreen instead of throwing.
+  // Asked for once only, and only while the click that opened this still counts
+  // as a user gesture. A browser allows one fullscreen request per click, and in
+  // development React runs mount effects twice — the second request would be
+  // refused with "API can only be initiated by a user gesture". Skipping it (and
+  // swallowing any refusal) leaves the overlay covering the window instead.
+  const askedFullscreen = useRef(false);
   useEffect(() => {
     const el = containerRef.current;
-    el?.requestFullscreen?.().catch(() => {});
+    if (!askedFullscreen.current) {
+      askedFullscreen.current = true;
+      const hasGesture = navigator.userActivation ? navigator.userActivation.isActive : true;
+      if (hasGesture) {
+        try {
+          el?.requestFullscreen?.()?.catch(() => {});
+        } catch {
+          // Refused synchronously (older browsers) — same fallback as above.
+        }
+      }
+    }
     const handleFsChange = () => {
       if (!document.fullscreenElement) onClose();
     };
@@ -739,18 +758,6 @@ export function PresentOverlay({ record, textContent, onClose }) {
               {textContent.meta}
             </div>
           )}
-          {textContent.agenda?.length > 0 && (
-            <>
-              <h2 style={{ fontSize: 24, color: "#1a365d", borderBottom: "2px solid #1a365d", paddingBottom: 8, marginBottom: 22 }}>
-                Agenda
-              </h2>
-              <ol style={{ fontSize: 24, lineHeight: 2, paddingLeft: 32, marginBottom: 44 }}>
-                {textContent.agenda.map((item, i) => (
-                  <li key={i}>{item}</li>
-                ))}
-              </ol>
-            </>
-          )}
           {textContent.minutes && (
             <>
               <h2 style={{ fontSize: 24, color: "#1a365d", borderBottom: "2px solid #1a365d", paddingBottom: 8, marginBottom: 22 }}>
@@ -759,7 +766,7 @@ export function PresentOverlay({ record, textContent, onClose }) {
               <div style={{ fontSize: 20, lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{textContent.minutes}</div>
             </>
           )}
-          {!textContent.agenda?.length && !textContent.minutes && (
+          {!textContent.minutes && (
             <div style={{ fontSize: 18, color: "#94a3b8" }}>Nothing recorded yet for this session.</div>
           )}
         </div>

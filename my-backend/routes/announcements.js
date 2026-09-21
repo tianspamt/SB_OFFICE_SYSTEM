@@ -158,7 +158,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // POST /api/announcements
 router.post('/', verifyToken, canPostAnnouncement, async (req, res) => {
   try {
-    const { title, body, priority, expires_at, pinned } = req.body
+    const { title, body, priority, pinned } = req.body
     if (!title || !body)
       return res.status(400).json({ error: 'Title and body are required.' })
     if (pinned) {
@@ -173,7 +173,7 @@ router.post('/', verifyToken, canPostAnnouncement, async (req, res) => {
       .from('announcements')
       .insert({
         title, body, priority: safePriority, pinned: !!pinned,
-        expires_at: expires_at || null, created_by: req.user.id,
+        created_by: req.user.id,
       })
       .select(AUTHOR_SELECT).single()
     if (error) return res.status(500).json({ error: error.message })
@@ -214,7 +214,7 @@ router.put('/:id', verifyToken, canPostAnnouncement, async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Announcement not found.' })
     if (!canManageAnnouncement(req.user, existing))
       return res.status(403).json({ error: 'You can only edit announcements you posted.' })
-    const { title, body, priority, expires_at, pinned } = req.body
+    const { title, body, priority, pinned } = req.body
     if (!title || !body)
       return res.status(400).json({ error: 'Title and body are required.' })
     if (pinned && !existing.pinned) {
@@ -227,7 +227,7 @@ router.put('/:id', verifyToken, canPostAnnouncement, async (req, res) => {
     const safePriority = normalizePriority(priority)
     const { data, error } = await supabase
       .from('announcements')
-      .update({ title, body, priority: safePriority, pinned: !!pinned, expires_at: expires_at || null })
+      .update({ title, body, priority: safePriority, pinned: !!pinned })
       .eq('id', req.params.id).select(AUTHOR_SELECT).single()
     if (error) return res.status(500).json({ error: error.message })
     await logActivity(req, 'UPDATE', 'Announcements', `Updated announcement: ${title}`)

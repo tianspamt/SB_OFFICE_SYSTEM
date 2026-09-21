@@ -94,7 +94,12 @@ const ARCHIVABLE_TYPES = [
   "resolution",
   "official",
   "session",
+  "session_agenda",
 ];
+
+// The confirm dialog names the record type; session_agenda's raw key isn't
+// readable, so it gets its own wording.
+const DELETE_TYPE_LABELS = { session_agenda: "order of business" };
 
 export default function AdminDashboard() {
   // ── core ──
@@ -400,6 +405,9 @@ export default function AdminDashboard() {
   const [sessionFile, setSessionFile] = useState(null);
   const [sessionOcrTarget, setSessionOcrTarget] = useState("minutes");
   const [editingSession, setEditingSession] = useState(null);
+  // A file picked in the Edit Session form — attaches the original document to
+  // the record (or replaces its current one).
+  const [editSessionFile, setEditSessionFile] = useState(null);
   const [editSessionForm, setEditSessionForm] = useState({
     session_number: "",
     session_date: "",
@@ -438,14 +446,12 @@ export default function AdminDashboard() {
     body: "",
     priority: "normal",
     pinned: false,
-    expires_at: "",
   });
   const [editAnnouncementForm, setEditAnnouncementForm] = useState({
     title: "",
     body: "",
     priority: "normal",
     pinned: false,
-    expires_at: "",
   });
 
   // calendar
@@ -1587,6 +1593,7 @@ export default function AdminDashboard() {
       agenda: s.agenda || "",
       minutes_text: s.minutes_text || "",
     });
+    setEditSessionFile(null);
     setModalMessage("");
     setShowEditSessionModal(true);
   };
@@ -1611,9 +1618,17 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     try {
+      // With a file picked the request is multipart (fields + file); without
+      // one it stays plain JSON, exactly as before.
+      let body = JSON.stringify(editSessionForm);
+      if (editSessionFile) {
+        body = new FormData();
+        Object.entries(editSessionForm).forEach(([k, v]) => body.append(k, v ?? ""));
+        body.append("file", editSessionFile);
+      }
       const res = await authFetch(
         `${API}/api/session-minutes/${editingSession.id}`,
-        { method: "PUT", body: JSON.stringify(editSessionForm) }
+        { method: "PUT", body }
       );
       const data = await res.json();
       if (res.ok && data.success) {
@@ -1660,7 +1675,7 @@ export default function AdminDashboard() {
   };
   const handleAddAgenda = async () => {
     if (!agendaForm.session_date) {
-      showModalMsg("Session date is required!", "error");
+      showModalMsg("Date is required!", "error");
       return;
     }
     if (!agendaFile) {
@@ -1678,7 +1693,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showSuccessModal("Session agenda posted!");
+        showSuccessModal("Order of business posted!");
         resetAgendaForm();
         setShowAgendaModal(false);
         fetchSessionAgendas();
@@ -1703,7 +1718,7 @@ export default function AdminDashboard() {
   };
   const handleUpdateAgenda = async () => {
     if (!editAgendaForm.session_date) {
-      showModalMsg("Session date is required!", "error");
+      showModalMsg("Date is required!", "error");
       return;
     }
     setSubmitting(true);
@@ -1717,7 +1732,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showSuccessModal("Session agenda updated!");
+        showSuccessModal("Order of business updated!");
         setShowEditAgendaModal(false);
         setEditingAgenda(null);
         fetchSessionAgendas();
@@ -1735,7 +1750,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showSuccessModal("Session agenda deleted!");
+        showSuccessModal("Order of business archived!");
         fetchSessionAgendas();
       } else showMsg(data.error || "Error!", "error");
     } catch {
@@ -1750,7 +1765,6 @@ export default function AdminDashboard() {
       body: "",
       priority: "normal",
       pinned: false,
-      expires_at: "",
     });
   const handleAddAnnouncement = async () => {
     if (!announcementForm.title || !announcementForm.body) {
@@ -1783,7 +1797,6 @@ export default function AdminDashboard() {
       body: a.body || "",
       priority: a.priority || "normal",
       pinned: a.pinned || false,
-      expires_at: a.expires_at ? a.expires_at.split("T")[0] : "",
     });
     setModalMessage("");
     setShowEditAnnouncementModal(true);
@@ -4631,6 +4644,7 @@ export default function AdminDashboard() {
                       style={{ display: "none" }}
                       onChange={(e) => {
                         const file = e.target.files[0];
+                        e.target.value = "";
                         setSessionFile(file);
                         detectSessionMeta("minutes", file);
                       }}
@@ -4819,24 +4833,6 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <label className={styles.fieldLabel}>
-                Agenda Items{" "}
-                <span className={styles.fieldHint}>(one item per line)</span>
-              </label>
-              <textarea
-                className={styles.textArea}
-                value={editSessionForm.agenda}
-                onChange={(e) =>
-                  setEditSessionForm({
-                    ...editSessionForm,
-                    agenda: e.target.value,
-                  })
-                }
-                rows={5}
-              />
-              <label
-                className={styles.fieldLabel}
-                style={{ marginTop: "10px" }}
-              >
                 Minutes of the Session
               </label>
               <textarea
@@ -4850,6 +4846,45 @@ export default function AdminDashboard() {
                 }
                 rows={8}
               />
+
+              <label className={styles.fieldLabel} style={{ marginTop: 10 }}>
+                Document{" "}
+                <span className={styles.fieldHint}>
+                  (attach or replace the original PDF, Word or image)
+                </span>
+              </label>
+              <div className={styles.fileUploadBox}>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,image/*"
+                  id="editSessionFileInput"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files[0] || null;
+                    e.target.value = "";
+                    setEditSessionFile(file);
+                  }}
+                />
+                <label htmlFor="editSessionFileInput" className={styles.fileLabel}>
+                  {editSessionFile ? (
+                    <>
+                      <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                      {editSessionFile.name}
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={14} strokeWidth={1.5} /> Click to choose file
+                    </>
+                  )}
+                </label>
+                <p className={styles.fileHint}>
+                  {editingSession.filepath
+                    ? `Current file: ${editingSession.filename}`
+                    : editingSession.filename
+                      ? `Recorded from ${editingSession.filename} — its file wasn't kept. Attach it again to open or download it from the View window.`
+                      : "No file attached."}
+                </p>
+              </div>
             </div>
 
             {/* ── Sticky footer ── */}
@@ -4952,7 +4987,7 @@ export default function AdminDashboard() {
             >
               <div className={styles.sessionFormGrid}>
                 <div className={styles.sessionFormCol}>
-                  <label className={styles.fieldLabel}>Session Number</label>
+                  <label className={styles.fieldLabel}>Number</label>
                   <input
                     className={styles.input}
                     placeholder="e.g. AGENDA NO. 01 - 2025"
@@ -4967,7 +5002,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className={styles.sessionFormCol}>
                   <label className={styles.fieldLabel}>
-                    Session Date <span style={{ color: "#e53e3e" }}>*</span>
+                    Date <span style={{ color: "#e53e3e" }}>*</span>
                   </label>
                   <input
                     className={styles.input}
@@ -4982,7 +5017,7 @@ export default function AdminDashboard() {
                   />
                 </div>
                 <div className={styles.sessionFormCol}>
-                  <label className={styles.fieldLabel}>Session Type</label>
+                  <label className={styles.fieldLabel}>Type</label>
                   <select
                     className={styles.input}
                     value={agendaForm.session_type}
@@ -4993,15 +5028,15 @@ export default function AdminDashboard() {
                       })
                     }
                   >
-                    <option value="regular">Regular Session</option>
-                    <option value="special">Special Session</option>
+                    <option value="regular">Regular</option>
+                    <option value="special">Special</option>
                   </select>
                 </div>
                 <div className={styles.sessionFormCol}>
                   <label className={styles.fieldLabel}>Venue</label>
                   <input
                     className={styles.input}
-                    placeholder="e.g. Session Hall"
+                    placeholder="Venue"
                     value={agendaForm.venue}
                     onChange={(e) =>
                       setAgendaForm({ ...agendaForm, venue: e.target.value })
@@ -5017,6 +5052,7 @@ export default function AdminDashboard() {
                   style={{ display: "none" }}
                   onChange={(e) => {
                     const file = e.target.files[0];
+                    e.target.value = "";
                     setAgendaFile(file);
                     detectSessionMeta("agenda", file);
                   }}
@@ -5207,7 +5243,11 @@ export default function AdminDashboard() {
                   accept=".pdf,.doc,.docx"
                   id="editAgendaFileInput"
                   style={{ display: "none" }}
-                  onChange={(e) => setEditAgendaFile(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    e.target.value = "";
+                    setEditAgendaFile(file);
+                  }}
                 />
                 <label
                   htmlFor="editAgendaFileInput"
@@ -5421,23 +5461,6 @@ export default function AdminDashboard() {
                 rows={7}
                 style={{ height: "auto" }}
               />
-              <label className={styles.fieldLabel}>
-                Expiry Date{" "}
-                <span className={styles.fieldHint}>
-                  (optional — leave blank for no expiry)
-                </span>
-              </label>
-              <input
-                className={styles.input}
-                type="date"
-                value={announcementForm.expires_at}
-                onChange={(e) =>
-                  setAnnouncementForm({
-                    ...announcementForm,
-                    expires_at: e.target.value,
-                  })
-                }
-              />
             </div>
             <div
               style={{
@@ -5626,20 +5649,6 @@ export default function AdminDashboard() {
                 }
                 rows={7}
                 style={{ height: "auto" }}
-              />
-              <label className={styles.fieldLabel}>
-                Expiry Date <span className={styles.fieldHint}>(optional)</span>
-              </label>
-              <input
-                className={styles.input}
-                type="date"
-                value={editAnnouncementForm.expires_at}
-                onChange={(e) =>
-                  setEditAnnouncementForm({
-                    ...editAnnouncementForm,
-                    expires_at: e.target.value,
-                  })
-                }
               />
             </div>
             <div
@@ -5869,7 +5878,7 @@ export default function AdminDashboard() {
           }
           title={
             ARCHIVABLE_TYPES.includes(deleteTarget.type)
-              ? `Archive this ${deleteTarget.type}?`
+              ? `Archive this ${DELETE_TYPE_LABELS[deleteTarget.type] || deleteTarget.type}?`
               : `Delete this ${deleteTarget.type}?`
           }
           message={

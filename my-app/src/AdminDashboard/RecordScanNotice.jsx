@@ -87,7 +87,7 @@ export default function RecordScanNotice({ scan, variant = "record" }) {
       return (
         <div style={{ ...BOX, ...TONES.muted }}>
           <FileSearch size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-          <span>Couldn't find a session title or date in this file. Enter them manually.</span>
+          <span>Couldn't find a title or date in this file. Enter them manually.</span>
         </div>
       );
     }

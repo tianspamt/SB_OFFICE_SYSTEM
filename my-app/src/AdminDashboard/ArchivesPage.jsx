@@ -6,6 +6,7 @@ import {
   FileText,
   Gavel,
   BookOpen,
+  ClipboardList,
   Users,
   Landmark,
   Search,
@@ -27,6 +28,7 @@ const MODULE_OPTIONS = [
   { value: "ordinance", label: "Ordinances" },
   { value: "resolution", label: "Resolutions" },
   { value: "session_minutes", label: "Session Minutes" },
+  { value: "session_agenda", label: "Order of Business" },
   { value: "user", label: "Users" },
   { value: "official", label: "Officials" },
 ];
@@ -35,6 +37,7 @@ const ENTITY_LABELS = {
   ordinance: "Ordinance",
   resolution: "Resolution",
   session_minutes: "Session Minutes",
+  session_agenda: "Order of Business",
   user: "User",
   official: "Official",
 };
@@ -43,6 +46,7 @@ const ENTITY_ICONS = {
   ordinance: FileText,
   resolution: Gavel,
   session_minutes: BookOpen,
+  session_agenda: ClipboardList,
   user: Users,
   official: Landmark,
 };

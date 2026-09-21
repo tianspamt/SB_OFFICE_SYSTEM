@@ -47,6 +47,32 @@ const orIlikeClause = (column, value) => {
   return `${column}.ilike."%${escaped}%"`
 }
 
+// Words that say what kind of record it is rather than which one — typing
+// "regular session minutes" shouldn't require "session"/"minutes" to appear in
+// the record's own text.
+const SEARCH_FILLER_WORDS = new Set([
+  'session', 'sessions', 'minutes', 'agenda', 'order', 'of', 'business', 'no', 'no.', 'number', 'the',
+])
+
+// A search box's text as separate words: punctuation-only pieces ("-", "&")
+// and filler words are dropped, so "MINUTES NO. 03 - 2026" is just "03" + "2026".
+const searchTokens = (search) =>
+  String(search ?? '')
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => /[\p{L}\p{N}]/u.test(t) && !SEARCH_FILLER_WORDS.has(t.toLowerCase()))
+
+// Adds a "every word must appear in at least one of these columns" filter to a
+// Supabase query — word order and spacing don't matter, and a number written
+// "03-2026" or "03 - 2026" is found either way. Each word is one .or() call;
+// PostgREST ANDs separate .or() filters together.
+const applyTokenSearch = (query, search, columns) => {
+  for (const token of searchTokens(search)) {
+    query = query.or(columns.map((c) => orIlikeClause(c, token)).join(','))
+  }
+  return query
+}
+
 // Validates+parses a submitted "year" form field (ordinances/resolutions
 // upload and edit). A bare `year ? parseInt(year) : null` silently turns
 // garbage input ("abc", "12/2024") into NaN and stores that as-is instead
@@ -124,6 +150,8 @@ const sortByRecordNumber = (rows, numberField) =>
 const SESSION_VENUE = 'Governor Lino I. Chatto Memorial Session Hall'
 
 module.exports = {
+  searchTokens,
+  applyTokenSearch,
   SESSION_VENUE,
   recordNumberKey,
   sortByRecordNumber,

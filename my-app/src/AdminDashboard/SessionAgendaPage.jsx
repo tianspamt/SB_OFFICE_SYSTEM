@@ -4,14 +4,14 @@
  * Minutes, there is no pending/review workflow here: an upload is
  * immediately visible, so this page has no tabs, no comment thread, and no
  * accept/vm-approve/publish actions — just a searchable, paginated list plus
- * Edit/Delete for whoever's allowed to manage it.
+ * Edit/Archive for whoever's allowed to manage it.
  */
 
 import { useState, useEffect } from "react";
 import {
   Eye,
   Pencil,
-  Trash2,
+  Archive,
   CalendarDays,
   FileText,
   FileType,
@@ -22,7 +22,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import lStyles from "./LegislativeModule.module.css";
-import { MONTHS } from "./AdminContext";
+import { MONTHS, downloadFile, openPdfInTab } from "./AdminContext";
 import { useLegislativePublished, useResetOnChange } from "./useLegislativeReview";
 import {
   SearchBar,
@@ -49,6 +49,7 @@ export default function SessionAgendaPage({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [yearFilter, setYearFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
   const [presentTarget, setPresentTarget] = useState(null);
   const [viewTarget, setViewTarget] = useState(null);
 
@@ -58,7 +59,7 @@ export default function SessionAgendaPage({
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
-  useResetOnChange([debouncedSearch, typeFilter, yearFilter], setPage, 1);
+  useResetOnChange([debouncedSearch, typeFilter, yearFilter, dateFilter], setPage, 1);
 
   const params = {
     page: String(page),
@@ -66,6 +67,7 @@ export default function SessionAgendaPage({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
     ...(yearFilter !== "all" ? { year: yearFilter } : {}),
     ...(typeFilter !== "all" ? { type: typeFilter } : {}),
+    ...(dateFilter ? { date: dateFilter } : {}),
   };
   const {
     publishedList: list,
@@ -85,6 +87,7 @@ export default function SessionAgendaPage({
   const resetFilters = () => {
     setSearch("");
     setTypeFilter("all");
+    setDateFilter("");
     setYearFilter("all");
   };
 
@@ -100,15 +103,20 @@ export default function SessionAgendaPage({
           <SearchBar
             value={search}
             onChange={setSearch}
-            placeholder="Search by session number or venue..."
+            placeholder="Search by number, type, or venue..."
           />
         </div>
         <FilterPanel
-          categoryValue={typeFilter === "all" ? "All" : typeFilter}
-          onCategoryChange={(v) => setTypeFilter(v === "All" ? "all" : v)}
-          categories={["All", "regular", "special"]}
-          dateValue=""
-          onDateChange={() => {}}
+          categoryLabel="Type"
+          categoryValue={
+            typeFilter === "all"
+              ? "All"
+              : typeFilter.charAt(0).toUpperCase() + typeFilter.slice(1)
+          }
+          onCategoryChange={(v) => setTypeFilter(v === "All" ? "all" : v.toLowerCase())}
+          categories={["All", "Regular", "Special"]}
+          dateValue={dateFilter}
+          onDateChange={setDateFilter}
           yearValue={yearFilter}
           onYearChange={setYearFilter}
           years={availableYears}
@@ -129,7 +137,7 @@ export default function SessionAgendaPage({
             <EmptyState
               title="No orders of business match your search"
               text={
-                !search && typeFilter === "all" && yearFilter === "all"
+                !search && typeFilter === "all" && yearFilter === "all" && !dateFilter
                   ? "No orders of business have been posted yet."
                   : "Try adjusting your filters."
               }
@@ -177,7 +185,7 @@ export default function SessionAgendaPage({
                           border: "0.5px solid rgba(0,0,0,0.08)",
                         }}
                       >
-                        {a.session_type === "special" ? "Special Session" : "Regular Session"}
+                        {a.session_type === "special" ? "Special" : "Regular"}
                       </span>
                       {a.session_number && (
                         <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
@@ -235,7 +243,7 @@ export default function SessionAgendaPage({
                             })
                           }
                         >
-                          <Trash2 size={13} /> Delete
+                          <Archive size={13} /> Archive
                         </button>
                       </>
                     )}
@@ -282,7 +290,7 @@ export default function SessionAgendaPage({
                     </div>
                   )}
                   <h2 className={lStyles.viewModalTitle}>
-                    {viewTarget.session_type === "special" ? "Special Session" : "Regular Session"}
+                    {viewTarget.session_type === "special" ? "Special" : "Regular"}
                   </h2>
                 </div>
                 <button
@@ -342,24 +350,30 @@ export default function SessionAgendaPage({
 
               <div className={lStyles.viewModalFileActions}>
                 {viewTarget.filekind === "word" ? (
-                  <a
-                    href={getFileUrl(viewTarget.filepath)}
-                    download={viewTarget.filename}
+                  <button
                     className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                    onClick={() => downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.session_number || viewTarget.filename)}
                   >
                     <Download size={16} />
                     Download Word Document
-                  </a>
+                  </button>
                 ) : (
-                  <a
-                    href={getFileUrl(viewTarget.filepath)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
-                  >
-                    <FileText size={16} />
-                    Open PDF Document
-                  </a>
+                  <>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnPrimary}`}
+                      onClick={() => openPdfInTab(getFileUrl(viewTarget.filepath), viewTarget.session_number || viewTarget.filename)}
+                    >
+                      <FileText size={16} />
+                      Open PDF Document
+                    </button>
+                    <button
+                      className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
+                      onClick={() => downloadFile(getFileUrl(viewTarget.filepath), viewTarget.filepath, viewTarget.session_number || viewTarget.filename)}
+                    >
+                      <Download size={16} />
+                      Download PDF
+                    </button>
+                  </>
                 )}
                 <button
                   className={`${lStyles.viewModalFileBtn} ${lStyles.viewModalFileBtnSecondary}`}
