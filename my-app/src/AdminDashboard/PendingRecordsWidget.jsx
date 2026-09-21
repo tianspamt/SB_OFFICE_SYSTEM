@@ -756,7 +756,7 @@ function ReviewModal({
     {showPublishModal && (
       <PublishNumberModal
         label={`${cfg.label} Number`}
-        placeholder={`e.g. ${cfg.label} No. 2026-014`}
+        placeholder={`e.g. ${item.record_type === "ordinance" ? "Municipal " : ""}${cfg.label} No. 2026-014`}
         value={publishNumberValue}
         onChange={(v) => {
           setPublishNumberValue(v);

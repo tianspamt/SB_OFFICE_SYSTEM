@@ -1411,7 +1411,7 @@ export default function OrdinancesPage({
       {showPublishModal && (
         <PublishNumberModal
           label="Ordinance Number"
-          placeholder="e.g. Ordinance No. 2026-014"
+          placeholder="e.g. Municipal Ordinance No. 2026-014"
           value={publishNumberValue}
           onChange={(v) => {
             setPublishNumberValue(v);

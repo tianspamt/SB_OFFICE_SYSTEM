@@ -422,11 +422,13 @@ const nextSequenceForYear = (records, numberField, yearField, year) => {
 };
 
 // Suggests the next ordinance number for the given year, following the
-// office's "Ordinance No. {year}-{sequence}" convention.
+// office's "Municipal Ordinance No. {year}-{sequence}" convention. Sequencing
+// only reads the trailing digits (see extractSequence), so older records
+// numbered "Ordinance No. 2026-007" still count toward the next suggestion.
 export const suggestOrdinanceNumber = (ordinances = [], year) => {
   const y = String(year || getCurrentYear());
   const next = nextSequenceForYear(ordinances, "ordinance_number", "year", y);
-  return `Ordinance No. ${y}-${String(next).padStart(3, "0")}`;
+  return `Municipal Ordinance No. ${y}-${String(next).padStart(3, "0")}`;
 };
 
 // Suggests the next resolution number for the given year, following the
