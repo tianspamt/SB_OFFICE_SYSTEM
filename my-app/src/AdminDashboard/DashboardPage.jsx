@@ -169,15 +169,13 @@ const OrdinanceCard = ({ item, onView }) => (
     {(item.officials?.length > 0) && (
       <span className={styles.dashCardAuthor}>
         <User size={11} />
-        {item.officials.length === 1
-          ? item.officials[0].full_name
-          : `${item.officials.length} council members`}
+        {item.officials.map((a) => a.full_name).join(", ")}
       </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
         <Calendar size={11} />
-        {formatTimestamp(item.uploaded_at)}
+        {formatTimestamp(item.approved_on || item.uploaded_at)}
       </span>
       <button className={styles.dashCardBtn} onClick={onView}>
         View <ChevronRight size={12} />
@@ -208,15 +206,13 @@ const ResolutionCard = ({ item, onView }) => (
     {(item.officials?.length > 0) && (
       <span className={styles.dashCardAuthor}>
         <User size={11} />
-        {item.officials.length === 1
-          ? item.officials[0].full_name
-          : `${item.officials.length} council members`}
+        {item.officials.map((a) => a.full_name).join(", ")}
       </span>
     )}
     <div className={styles.dashCardFooter}>
       <span className={styles.dashCardDate}>
         <Calendar size={11} />
-        {formatTimestamp(item.uploaded_at)}
+        {formatTimestamp(item.approved_on || item.uploaded_at)}
       </span>
       <button className={styles.dashCardBtn} onClick={onView}>
         View <ChevronRight size={12} />
@@ -807,9 +803,11 @@ const DashboardPage = ({
                         <CalendarDays size={16} />
                       </div>
                       <div>
-                        <div className={lStyles.viewModalMetaLabel}>Uploaded</div>
+                        <div className={lStyles.viewModalMetaLabel}>
+                          {viewTarget.item.approved_on ? "Approved" : "Uploaded"}
+                        </div>
                         <div className={lStyles.viewModalMetaValue}>
-                          {formatTimestamp(viewTarget.item.uploaded_at)}
+                          {formatTimestamp(viewTarget.item.approved_on || viewTarget.item.uploaded_at)}
                         </div>
                       </div>
                     </div>

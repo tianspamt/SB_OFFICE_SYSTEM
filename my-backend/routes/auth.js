@@ -229,7 +229,7 @@ try {
 // "not found" and "expired" identically.
 const findValidResetToken = async (token) => {
   const { data: user } = await supabase
-    .from('users').select('id, password, reset_token_expires').eq('reset_token', token).single()
+    .from('users').select('id, reset_token_expires').eq('reset_token', token).single()
   if (!user || !user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
     return null
   }
@@ -250,14 +250,10 @@ router.get('/reset-password/:token', async (req, res) => {
 })
 
 // POST /api/reset-password/:token
-// Also requires the account's current password, on top of the emailed
-// token — an extra check for the case where the link itself leaks (a
-// shared inbox, an accidentally forwarded email) without the current
-// password leaking alongside it. This does mean someone who has genuinely
-// forgotten their password can't use this link to recover the account on
-// their own; that's the deliberate tradeoff the office asked for.
+// The emailed token alone authorizes the change — it does not ask for the
+// current password, so an account whose owner has forgotten it can still
+// recover through the link. The token is single-use and expires after an hour.
 router.post('/reset-password/:token', loginLimiter, [
-  body('currentPassword').notEmpty().withMessage('Current password is required.'),
   body('newPassword')
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
     .matches(/[A-Z]/).withMessage('Password must contain at least 1 uppercase letter.')
@@ -266,9 +262,6 @@ router.post('/reset-password/:token', loginLimiter, [
   try {
     const user = await findValidResetToken(req.params.token)
     if (!user) return res.status(400).json({ error: 'This reset link is invalid or has expired.' })
-
-    const isMatch = await bcrypt.compare(req.body.currentPassword, user.password)
-    if (!isMatch) return res.status(400).json({ error: 'Current password is incorrect.' })
 
     const hashedPassword = await bcrypt.hash(req.body.newPassword, SALT_ROUNDS)
     const { error } = await supabase

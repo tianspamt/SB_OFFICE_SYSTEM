@@ -8,6 +8,7 @@ const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity, autoEndTerms } = require('../helpers/logger')
 const {
   resolveCouncilId,
+  shouldAutoMarkReelected,
   SINGULAR_POSITIONS,
   COUNCILOR_SEAT_CAP,
   findSingularPositionConflict,
@@ -146,6 +147,13 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
     if (memberErr) return res.status(500).json({ error: memberErr.message })
 
     if (term_period && term_start) {
+      // Flagged re-elected automatically when this person sat in the council
+      // right before this one, even if the admin didn't tick the box. The
+      // member row was just inserted above, so its own (new) term doesn't
+      // exist yet and can't match itself.
+      const reelected =
+        is_reelected === 'true' || is_reelected === true ||
+        (await shouldAutoMarkReelected({ fullName: full_name, term_period, term_start }))
       const { error: termErr } = await supabase
         .from('sb_council_member_terms')
         .insert({
@@ -156,7 +164,7 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
           term_start,
           term_end: term_end || null,
           status: 'active',
-          is_reelected: is_reelected === 'true' || is_reelected === true,
+          is_reelected: reelected,
           notes: notes || null,
         })
       if (termErr) console.error('Term insert error:', termErr.message)
@@ -328,6 +336,13 @@ router.post('/:id/terms', verifyToken, adminOnly, secretaryOrClerk, async (req, 
       }
     }
 
+    // Flagged re-elected automatically when this person (matched by name, so a
+    // fresh member row for the same person counts too) sat in the council
+    // right before this one, even if the admin forgot to tick the box.
+    const reelected =
+      is_reelected === true || is_reelected === 'true' ||
+      (await shouldAutoMarkReelected({ fullName: member.full_name, term_period, term_start }))
+
     const { data, error } = await supabase
       .from('sb_council_member_terms')
       .insert({
@@ -338,7 +353,7 @@ router.post('/:id/terms', verifyToken, adminOnly, secretaryOrClerk, async (req, 
         term_start,
         term_end: term_end || null,
         status: resolvedStatus,
-        is_reelected: is_reelected === true || is_reelected === 'true',
+        is_reelected: reelected,
         notes: notes || null,
       })
       .select().single()

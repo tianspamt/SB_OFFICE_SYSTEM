@@ -37,6 +37,7 @@ import {
 import ConfirmModal from "./ConfirmModal";
 import LoadingModal from "./LoadingModal";
 import ConnectionErrorModal from "./ConnectionErrorModal";
+import RecordScanNotice from "./RecordScanNotice";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
 import {
@@ -47,6 +48,7 @@ import {
   toIsoDate,
   toLocalIso,
   formatDate,
+  recordDate,
   priorityConfig,
   tabTitles,
   getCurrentYear,
@@ -233,6 +235,7 @@ export default function AdminDashboard() {
   const [ordinanceTitle, setOrdinanceTitle] = useState("");
   const [ordinanceDate, setOrdinanceDate] = useState("");
   const [ordinanceFile, setOrdinanceFile] = useState(null);
+  const [ordinanceNumber, setOrdinanceNumber] = useState("");
   const [ordinanceCategory, setOrdinanceCategory] = useState("");
   const [uploadType, setUploadType] = useState("");
   const [selectedOfficials, setSelectedOfficials] = useState([]);
@@ -250,6 +253,16 @@ export default function AdminDashboard() {
   const [resolutionTitle, setResolutionTitle] = useState("");
   const [resolutionDate, setResolutionDate] = useState("");
   const [resolutionFile, setResolutionFile] = useState(null);
+  const [resolutionNumber, setResolutionNumber] = useState("");
+  // Result of "detect number & date from the chosen file" per upload form —
+  // see detectRecordMeta below.
+  const [recordScan, setRecordScan] = useState({ ordinance: null, resolution: null });
+  const recordScanSeq = useRef({ ordinance: 0, resolution: 0 });
+  const recordScanAuto = useRef({
+    ordinance: { number: "", date: "" },
+    resolution: { number: "", date: "" },
+  });
+  const latestRecordForm = useRef({});
   const [resolutionCategory, setResolutionCategory] = useState("");
   const [selectedResolutionOfficials, setSelectedResolutionOfficials] =
     useState([]);
@@ -836,6 +849,73 @@ export default function AdminDashboard() {
     }
   };
 
+  // ─── Detect number & date from the chosen file ───────────────────────────────
+  // Asks the backend to read the file (text layer, Word, or OCR for scans) and
+  // suggest the record's number and date, then prefills those form fields.
+  // Suggestion only: it fills a field just when it's still untouched — the
+  // number if empty, the date if it's still the default of today (or the last
+  // thing this detection filled in itself) — so it never overwrites something
+  // the user typed, and nothing is saved until they submit the form.
+  useEffect(() => {
+    latestRecordForm.current = { ordinanceNumber, ordinanceDate, resolutionNumber, resolutionDate };
+  });
+  const RECORD_SCAN = {
+    ordinance: { route: "ordinances", setNumber: setOrdinanceNumber, setDate: setOrdinanceDate },
+    resolution: { route: "resolutions", setNumber: setResolutionNumber, setDate: setResolutionDate },
+  };
+  const clearRecordScan = (kind) => {
+    recordScanSeq.current[kind]++;
+    recordScanAuto.current[kind] = { number: "", date: "" };
+    setRecordScan((s) => ({ ...s, [kind]: null }));
+  };
+  const detectRecordMeta = async (kind, file) => {
+    const { route, setNumber, setDate } = RECORD_SCAN[kind];
+    // A newer file choice (or closing the form) invalidates this request.
+    const seq = ++recordScanSeq.current[kind];
+    const isCurrent = () => recordScanSeq.current[kind] === seq;
+    const show = (value) => {
+      if (isCurrent()) setRecordScan((s) => ({ ...s, [kind]: value }));
+    };
+
+    if (!file) {
+      show(null);
+      return;
+    }
+    show({ status: "reading" });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await authFetch(`${API}/api/${route}/extract-meta`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!isCurrent()) return;
+      if (!res.ok || !data.success) {
+        show({ status: "error", message: data.error });
+        return;
+      }
+
+      const found = data.data;
+      const form = latestRecordForm.current;
+      const currentNumber = (kind === "ordinance" ? form.ordinanceNumber : form.resolutionNumber) || "";
+      const currentDate = (kind === "ordinance" ? form.ordinanceDate : form.resolutionDate) || "";
+      const auto = recordScanAuto.current[kind];
+      const applied = {
+        number: Boolean(found.number) && (!currentNumber.trim() || currentNumber === auto.number),
+        date:
+          Boolean(found.date) &&
+          (!currentDate || currentDate === toIsoDate(new Date()) || currentDate === auto.date),
+      };
+      if (applied.number) setNumber(found.number);
+      if (applied.date) setDate(found.date);
+      recordScanAuto.current[kind] = {
+        number: applied.number ? found.number : auto.number,
+        date: applied.date ? found.date : auto.date,
+      };
+      show({ status: "done", data: found, applied });
+    } catch {
+      show({ status: "error", message: "Couldn't read this file automatically." });
+    }
+  };
+
   // ─── Ordinances ──────────────────────────────────────────────────────────────
   const handleUploadOrdinance = async () => {
     const missing = missingFieldsMsg([
@@ -855,6 +935,7 @@ export default function AdminDashboard() {
     fd.append("date", ordinanceDate);
     fd.append("year", ordinanceDate.split("-")[0]);
     fd.append("category", ordinanceCategory);
+    if (ordinanceNumber.trim()) fd.append("ordinance_number", ordinanceNumber.trim());
     fd.append("file", ordinanceFile);
     fd.append("officials", JSON.stringify(selectedOfficials));
     try {
@@ -871,6 +952,8 @@ export default function AdminDashboard() {
         }
         setOrdinanceTitle("");
         setOrdinanceDate("");
+        setOrdinanceNumber("");
+        clearRecordScan("ordinance");
         setOrdinanceFile(null);
         setOrdinanceCategory("");
         setSelectedOfficials([]);
@@ -989,6 +1072,7 @@ export default function AdminDashboard() {
     fd.append("date", resolutionDate);
     fd.append("year", resolutionDate.split("-")[0]);
     fd.append("category", resolutionCategory);
+    if (resolutionNumber.trim()) fd.append("resolution_number", resolutionNumber.trim());
     fd.append("file", resolutionFile);
     fd.append("officials", JSON.stringify(selectedResolutionOfficials));
     try {
@@ -1001,6 +1085,8 @@ export default function AdminDashboard() {
         showSuccessModal("Resolution uploaded!");
         setResolutionTitle("");
         setResolutionDate("");
+        setResolutionNumber("");
+        clearRecordScan("resolution");
         setResolutionFile(null);
         setResolutionCategory("");
         setSelectedResolutionOfficials([]);
@@ -1866,6 +1952,8 @@ export default function AdminDashboard() {
   const openOrdinanceModal = () => {
     setModalMessage("");
     setOrdinanceDate(toIsoDate(new Date()));
+    setOrdinanceNumber("");
+    clearRecordScan("ordinance");
     setShowOrdinanceModal(true);
   };
   const openResolutionModal = () => {
@@ -1873,6 +1961,8 @@ export default function AdminDashboard() {
     setResolutionTitle("");
     setResolutionDate(toIsoDate(new Date()));
     setResolutionFile(null);
+    setResolutionNumber("");
+    clearRecordScan("resolution");
     setSelectedResolutionOfficials([]);
     setShowResolutionModal(true);
   };
@@ -2425,7 +2515,8 @@ export default function AdminDashboard() {
             setDeleteTarget={setDeleteTarget}
             onEdit={handleOpenEditAnnouncement}
             onOpenComposer={openAnnouncementModal}
-            onRefresh={fetchAnnouncements}
+            onRefresh={() => fetchAnnouncements({ silent: true })}
+            onAnnouncementsChange={setAnnouncements}
             readOnly={false}
             currentUser={{
               id: admin?.id,
@@ -3146,7 +3237,7 @@ export default function AdminDashboard() {
                           <div className={styles.officialRecordMeta}>
                             {o.filetype === "application/pdf" ? "PDF" : "OCR"}
                             {" · "}
-                            {new Date(o.uploaded_at).toLocaleDateString(
+                            {new Date(recordDate(o)).toLocaleDateString(
                               "en-PH",
                               { year: "numeric", month: "long", day: "numeric" }
                             )}
@@ -3184,7 +3275,7 @@ export default function AdminDashboard() {
                           <div className={styles.officialRecordMeta}>
                             {r.filetype === "application/pdf" ? "PDF" : "OCR"}
                             {" · "}
-                            {new Date(r.uploaded_at).toLocaleDateString(
+                            {new Date(recordDate(r)).toLocaleDateString(
                               "en-PH",
                               { year: "numeric", month: "long", day: "numeric" }
                             )}
@@ -3474,6 +3565,8 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowOrdinanceModal(false);
             setOrdinanceFile(null);
+            setOrdinanceNumber("");
+            clearRecordScan("ordinance");
             setOrdinanceTitle("");
             setOrdinanceDate("");
             setSelectedOfficials([]);
@@ -3513,6 +3606,8 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowOrdinanceModal(false);
                   setOrdinanceFile(null);
+                  setOrdinanceNumber("");
+                  clearRecordScan("ordinance");
                   setOrdinanceTitle("");
                   setOrdinanceDate("");
                   setSelectedOfficials([]);
@@ -3561,12 +3656,19 @@ export default function AdminDashboard() {
                 value={ordinanceDate}
                 onChange={(e) => setOrdinanceDate(e.target.value)}
               />
+              <label className={styles.fieldLabel}>Ordinance Number</label>
+              <input
+                className={styles.input}
+                placeholder="e.g. Municipal Ordinance No. 2026-011"
+                value={ordinanceNumber}
+                onChange={(e) => setOrdinanceNumber(e.target.value)}
+              />
               <p
                 className={styles.fileHint}
                 style={{ marginTop: -6, marginBottom: 10 }}
               >
-                The official ordinance number isn't assigned here — the
-                Secretary will be asked for it when this record is published.
+                Optional — detected from the file when possible. The Secretary
+                confirms the final number when this record is published.
               </p>
               <label className={styles.fieldLabel}>Sector</label>
               <select
@@ -3585,7 +3687,11 @@ export default function AdminDashboard() {
                   accept=".pdf,.doc,.docx,image/*"
                   id="fileInput"
                   style={{ display: "none" }}
-                  onChange={(e) => setOrdinanceFile(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    setOrdinanceFile(file);
+                    detectRecordMeta("ordinance", file);
+                  }}
                 />
                 <label htmlFor="fileInput" className={styles.fileLabel}>
                   {ordinanceFile ? (
@@ -3604,6 +3710,7 @@ export default function AdminDashboard() {
                   Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
                 </p>
               </div>
+              <RecordScanNotice scan={recordScan.ordinance} />
 
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>
@@ -3823,6 +3930,8 @@ export default function AdminDashboard() {
           onClick={() => {
             setShowResolutionModal(false);
             setResolutionFile(null);
+            setResolutionNumber("");
+            clearRecordScan("resolution");
             setResolutionTitle("");
             setResolutionDate("");
             setResolutionCategory("");
@@ -3862,6 +3971,8 @@ export default function AdminDashboard() {
                 onClick={() => {
                   setShowResolutionModal(false);
                   setResolutionFile(null);
+                  setResolutionNumber("");
+                  clearRecordScan("resolution");
                   setResolutionTitle("");
                   setResolutionDate("");
                   setResolutionCategory("");
@@ -3910,12 +4021,19 @@ export default function AdminDashboard() {
                 value={resolutionDate}
                 onChange={(e) => setResolutionDate(e.target.value)}
               />
+              <label className={styles.fieldLabel}>Resolution Number</label>
+              <input
+                className={styles.input}
+                placeholder="e.g. Resolution No. 2026-045"
+                value={resolutionNumber}
+                onChange={(e) => setResolutionNumber(e.target.value)}
+              />
               <p
                 className={styles.fileHint}
                 style={{ marginTop: -6, marginBottom: 10 }}
               >
-                The official resolution number isn't assigned here — the
-                Secretary will be asked for it when this record is published.
+                Optional — detected from the file when possible. The Secretary
+                confirms the final number when this record is published.
               </p>
               <label className={styles.fieldLabel}>Sector</label>
               <select
@@ -3934,7 +4052,11 @@ export default function AdminDashboard() {
                   accept=".pdf,.doc,.docx,image/*"
                   id="resFileInput"
                   style={{ display: "none" }}
-                  onChange={(e) => setResolutionFile(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    setResolutionFile(file);
+                    detectRecordMeta("resolution", file);
+                  }}
                 />
                 <label htmlFor="resFileInput" className={styles.fileLabel}>
                   {resolutionFile ? (
@@ -3953,6 +4075,7 @@ export default function AdminDashboard() {
                   Accepted: PDF, Word (.doc/.docx), or Image (JPG, PNG)
                 </p>
               </div>
+              <RecordScanNotice scan={recordScan.resolution} />
 
               <div className={styles.officialsSelectSection}>
                 <p className={styles.officialsSelectLabel}>

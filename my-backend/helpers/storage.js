@@ -30,4 +30,12 @@ const deleteFromStorage = async (filePath) => {
   if (error) console.error('Storage delete error:', error.message)
 }
 
-module.exports = { uploadToStorage, deleteFromStorage }
+// Reads a stored file back (e.g. so its number/date can be detected at
+// publish time — see helpers/documentMeta.js).
+const downloadFromStorage = async (filePath) => {
+  const { data, error } = await supabase.storage.from('assets').download(filePath)
+  if (error) throw new Error(error.message)
+  return Buffer.from(await data.arrayBuffer())
+}
+
+module.exports = { uploadToStorage, deleteFromStorage, downloadFromStorage }

@@ -72,7 +72,14 @@ const dayBoundsUTC = (dateStr) => {
   return { start, end: end.toISOString() }
 }
 
+// Calendar year of a timestamp as observed in the Philippines (UTC+8) — a
+// plain getUTCFullYear() would call an approval at 6am on 1 January "the
+// previous year", since that moment is still 31 December in UTC.
+const yearInManila = (value) =>
+  Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric' }).format(new Date(value)))
+
 module.exports = {
+  yearInManila,
   isValidEmail, getIP, safeParseJSON, escapeHtml,
   canEditLegislativeRecord, canArchiveLegislativeRecord, orIlikeClause, dayBoundsUTC,
   parseYearField,

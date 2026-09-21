@@ -170,13 +170,27 @@ function RoleBadge({ role }) {
 function ReactionBar({ post, currentUserId, onReact }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef(null);
+  // Resting the cursor on the React button for HOVER_OPEN_MS opens the picker
+  // by itself; one opened that way closes again shortly after the cursor
+  // leaves (the short delay lets it cross the gap between button and picker).
+  const HOVER_OPEN_MS = 200;
+  const hoverTimer = useRef(null);
+  const openedByHover = useRef(false);
+
+  const clearHoverTimer = () => {
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  };
 
   useEffect(() => {
     function handleClick(e) {
       if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false);
     }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      clearTimeout(hoverTimer.current);
+    };
   }, []);
 
   const activeEmoji = REACTIONS_LIST.find(
@@ -214,9 +228,35 @@ function ReactionBar({ post, currentUserId, onReact }) {
       })}
 
       {/* Add reaction button */}
-      <div style={{ position: "relative" }} ref={pickerRef}>
+      <div
+        style={{ position: "relative" }}
+        ref={pickerRef}
+        onMouseEnter={() => { if (openedByHover.current) clearHoverTimer(); }}
+        onMouseLeave={() => {
+          clearHoverTimer();
+          if (openedByHover.current) {
+            hoverTimer.current = setTimeout(() => {
+              setPickerOpen(false);
+              openedByHover.current = false;
+            }, 300);
+          }
+        }}
+      >
         <button
-          onClick={() => setPickerOpen((p) => !p)}
+          onMouseEnter={() => {
+            if (pickerOpen) return;
+            clearHoverTimer();
+            hoverTimer.current = setTimeout(() => {
+              openedByHover.current = true;
+              setPickerOpen(true);
+            }, HOVER_OPEN_MS);
+          }}
+          onMouseLeave={() => { if (!openedByHover.current) clearHoverTimer(); }}
+          onClick={() => {
+            clearHoverTimer();
+            openedByHover.current = false;
+            setPickerOpen((p) => !p);
+          }}
           title="Add reaction"
           style={{
             display: "inline-flex", alignItems: "center", gap: 4,
@@ -242,7 +282,7 @@ function ReactionBar({ post, currentUserId, onReact }) {
               return (
                 <button
                   key={emoji}
-                  onClick={() => { onReact(post.id, emoji); setPickerOpen(false); }}
+                  onClick={() => { onReact(post.id, emoji); setPickerOpen(false); openedByHover.current = false; }}
                   style={{
                     fontSize: 20, background: isMine ? "#eef2ff" : "transparent",
                     border: "none", cursor: "pointer", padding: "4px 6px",
@@ -439,7 +479,9 @@ function FeedPostCard({ post, currentUser, onReact, onExpandComments, onAddComme
   const cfg = priorityConfig[post.priority] || priorityConfig.normal;
   const isExpired = post.expiresAt && new Date(post.expiresAt) < new Date();
   const totalReactions = REACTIONS_LIST.reduce((sum, e) => sum + (post.reactions[e] || []).length, 0);
-  const isAdmin = !readOnly;
+  // Secretary/Clerk (role "Admin") manage any post; everyone else only the
+  // ones they posted themselves — the backend enforces the same rule.
+  const isAdmin = !readOnly && (currentUser?.role === "Admin" || (post.authorId != null && post.authorId === currentUser?.id));
 
   useEffect(() => {
     function handleClick(e) {
@@ -666,7 +708,7 @@ function CreateAnnouncementBox({ currentUser, onOpenComposer }) {
 /* ─────────────────────────────────────────────
    MAIN PAGE COMPONENT
 ───────────────────────────────────────────── */
-export default function AnnouncementsPage({ announcements, totalActiveUsers = 0, setDeleteTarget, onEdit, onOpenComposer, onRefresh, readOnly = false, currentUser: currentUserProp }) {
+export default function AnnouncementsPage({ announcements, totalActiveUsers = 0, setDeleteTarget, onEdit, onOpenComposer, onRefresh, onAnnouncementsChange, readOnly = false, currentUser: currentUserProp }) {
   // Falls back to the mock identity only if no logged-in admin was passed in.
   const currentUser = currentUserProp?.id ? currentUserProp : MOCK_USER;
 
@@ -702,16 +744,32 @@ export default function AnnouncementsPage({ announcements, totalActiveUsers = 0,
   // join), so a toggle re-fetches the whole list via onRefresh rather than
   // patching local state — same "mutate then refetch" convention the rest of
   // the app uses, and simple given how few announcements this office posts.
+  // The toggle is applied to the list straight away (so the reaction shows
+  // up instantly and nothing reloads), and the list is only re-fetched if the
+  // server rejects it, to put the real state back.
   async function handleReact(postId, emoji) {
+    const me = currentUser.id;
+    onAnnouncementsChange?.((list) =>
+      list.map((a) => {
+        if (a.id !== postId) return a;
+        const rows = a.announcement_reactions || [];
+        const mine = rows.some((r) => r.emoji === emoji && r.user_id === me);
+        return {
+          ...a,
+          announcement_reactions: mine
+            ? rows.filter((r) => !(r.emoji === emoji && r.user_id === me))
+            : [...rows, { emoji, user_id: me }],
+        };
+      })
+    );
     try {
-      await authFetch(`${API}/api/announcements/${postId}/reactions`, {
+      const res = await authFetch(`${API}/api/announcements/${postId}/reactions`, {
         method: "POST",
         body: JSON.stringify({ emoji }),
       });
-      onRefresh?.();
+      if (!res.ok) onRefresh?.();
     } catch {
-      // Non-critical, low-stakes interaction — a failed toggle just leaves
-      // the reaction bar unchanged; nothing to surface to the user.
+      onRefresh?.();
     }
   }
 

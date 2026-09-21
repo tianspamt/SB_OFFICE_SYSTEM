@@ -265,6 +265,14 @@ export const OFFICIAL_POSITIONS = [
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+// Which date a legislative record shows: once the Vice-Mayor has approved it,
+// the approval date (approved_on, stamped by PUT /:id/vm-approve — see
+// migration 026); until then, when it was uploaded. `uploaded_at` alone made
+// a finished record keep showing its upload date, which for an old record is
+// just the day it was scanned in.
+export const recordDate = (record) => record?.approved_on || record?.uploaded_at;
+export const recordDateLabel = (record) => (record?.approved_on ? "Approved" : "Uploaded");
+
 export const toIsoDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate()

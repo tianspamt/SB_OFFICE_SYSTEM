@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@supabase/supabase-js": "^2.99.3",
     "bcrypt": "^6.0.0",
     "body-parser": "^2.2.2",
@@ -21,11 +22,14 @@
     "express-validator": "^7.3.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
+    "mammoth": "^1.12.3",
     "multer": "^2.1.1",
     "node-cron": "^4.6.0",
     "nodemailer": "^8.0.5",
     "pdf2json": "^4.0.3",
+    "pdfjs-dist": "^4.10.38",
     "sib-api-v3-sdk": "^8.5.0",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "word-extractor": "^1.0.4"
   }
 }

@@ -3,7 +3,7 @@
 // carry near-identical copies of this code — a behavior change had to be
 // hand-applied in each one, which is exactly how the Pending tab's loading
 // flag went dead in three of the four without anyone noticing.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { API, authFetch, publishedQueryKey, fetchPublishedList, useModalError } from "./AdminContext";
 
@@ -87,6 +87,46 @@ export const REJECTED_STATUS = "rejected";
 // signal this tab gets that an edit made outside its own review workflow
 // (e.g. via the Dashboard's Edit modal) might have changed the current
 // page's contents.
+// Suggests the official number in the Publish dialog by reading the record's
+// stored file (POST /api/{route}/:id/detect-meta — the same detection the
+// upload form uses, so drafts uploaded without a number still get one).
+// `detect(id, onFound)` starts a read and calls `onFound(data)` if it turns
+// up a number or an approved date; `reset()` drops any read still in flight, so a slow scan
+// finishing after the dialog moved on to another record can't touch it.
+// `detected` is null | { status: "reading" } | { status: "error", message }
+// | { status: "done", data }.
+export function usePublishNumberDetection(route) {
+  const [detected, setDetected] = useState(null);
+  const seq = useRef(0);
+
+  const reset = () => {
+    seq.current++;
+    setDetected(null);
+  };
+
+  const detect = async (id, onFound) => {
+    const mine = ++seq.current;
+    setDetected({ status: "reading" });
+    try {
+      const res = await authFetch(`${API}/api/${route}/${id}/detect-meta`, { method: "POST" });
+      const data = await res.json();
+      if (mine !== seq.current) return;
+      if (!res.ok || !data.success) {
+        setDetected({ status: "error", message: data.error });
+        return;
+      }
+      setDetected({ status: "done", data: data.data });
+      if (data.data.number || data.data.date) onFound?.(data.data);
+    } catch {
+      if (mine === seq.current) {
+        setDetected({ status: "error", message: "Couldn't read the document automatically." });
+      }
+    }
+  };
+
+  return { detected, detect, reset };
+}
+
 export function useLegislativePublished(route, params, resyncOn) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({

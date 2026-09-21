@@ -107,7 +107,55 @@ const autoUpdateCouncilStatuses = async () => {
     .neq('status', 'active')
 }
 
+// ── Automatic "Re-elected" ───────────────────────────────────────────────────
+// A term is flagged re-elected when the same person held a seat in the council
+// immediately before it — i.e. the previous term ended in the year the new one
+// starts ("2022-2025" followed by "2025-2028"). Anything with a gap is a
+// comeback, not a re-election, so it isn't flagged. This only ever turns the
+// flag ON for a newly created term, so an admin who ticks it by hand keeps it.
+
+const normalizePersonName = (name) =>
+  (name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+
+const labelYears = (label) => (label || '').match(/\d{4}/g)?.map(Number) ?? []
+const yearOfDate = (d) => (d ? Number(String(d).slice(0, 4)) || null : null)
+
+// First year of a term: the label's first year, else its start date's.
+const termStartYear = ({ term_period, term_start }) => labelYears(term_period)[0] ?? yearOfDate(term_start)
+// Last year of a term: the label's last year, else its end date's.
+const termEndYear = ({ term_period, term_end }) => {
+  const years = labelYears(term_period)
+  return years.length ? years[years.length - 1] : yearOfDate(term_end)
+}
+
+// `previousTerms` are rows for the same person (any council). Pure — no DB.
+const isConsecutiveReelection = (newTerm, previousTerms) => {
+  const startYear = termStartYear(newTerm)
+  if (startYear == null) return false
+  const newLabel = normalizeTermLabel(newTerm.term_period)
+  return (previousTerms || []).some((t) => {
+    if (normalizeTermLabel(t.term_period) === newLabel) return false
+    return termEndYear(t) === startYear
+  })
+}
+
+// Looks up every term held by someone with this name (the same person is often
+// entered again as a fresh member row each council, so matching is by name,
+// not member id) and applies isConsecutiveReelection.
+const shouldAutoMarkReelected = async ({ fullName, term_period, term_start }) => {
+  const wanted = normalizePersonName(fullName)
+  if (!wanted) return false
+  const { data, error } = await supabase
+    .from('sb_council_member_terms')
+    .select('term_period, term_start, term_end, sb_council_members!inner(full_name)')
+  if (error) throw new Error(error.message)
+  const theirs = (data || []).filter((t) => normalizePersonName(t.sb_council_members?.full_name) === wanted)
+  return isConsecutiveReelection({ term_period, term_start }, theirs)
+}
+
 module.exports = {
+  isConsecutiveReelection,
+  shouldAutoMarkReelected,
   resolveCouncilId,
   normalizeTermLabel,
   SINGULAR_POSITIONS,

@@ -7,13 +7,14 @@ const Tesseract = require('tesseract.js')
 const PDFParser = require('pdf2json')
 
 const supabase = require('../config/supabase')
-const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
+const { verifyToken, canCreateDraft, pendingEditors, secretaryOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC, yearInManila } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { extractMetaHandler, storedMetaHandler } = require('../helpers/documentMeta')
 const { createOfficialRoleRoutes } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
@@ -111,6 +112,13 @@ router.get('/', verifyToken, async (req, res) => {
       searchAuthorIds = await findRecordIdsByAuthorName('ordinance_officials', 'ordinance_id', search)
     }
 
+    // Published records are dated by when they were approved (approved_on),
+    // everything else — drafts, pending review, ... — by when it was uploaded.
+    const requestedStatuses =
+      req.query.status === 'all' ? null : (req.query.status ? req.query.status.split(',') : ['published'])
+    const publishedOnly = requestedStatuses?.length === 1 && requestedStatuses[0] === 'published'
+    const dateColumn = publishedOnly ? 'approved_on' : 'uploaded_at'
+
     let query = supabase
       .from('ordinances')
       .select(`*, ordinance_officials (
@@ -118,7 +126,7 @@ router.get('/', verifyToken, async (req, res) => {
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
       )`, { count: 'exact' })
-      .order('uploaded_at', { ascending: false })
+      .order(dateColumn, { ascending: false, nullsFirst: false })
     if (year) query = query.eq('year', year)
     if (search) {
       const orParts = [
@@ -133,7 +141,7 @@ router.get('/', verifyToken, async (req, res) => {
     if (authorOrdinanceIds) query = query.in('id', authorOrdinanceIds)
     if (date) {
       const { start, end } = dayBoundsUTC(date)
-      query = query.gte('uploaded_at', start).lt('uploaded_at', end)
+      query = query.gte(dateColumn, start).lt(dateColumn, end)
     }
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
@@ -227,7 +235,7 @@ router.get('/:id/print', verifyToken, async (req, res) => {
       <button class="print-btn" onclick="window.print()">🖨 Print</button>
       ${o.ordinance_number ? `<h2>${escapeHtml(o.ordinance_number)}</h2>` : ''}
       <h1>${escapeHtml(o.title)}</h1>
-      <div class="meta">${o.year ? `Year: ${escapeHtml(o.year)} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+      <div class="meta">${o.year ? `Year: ${escapeHtml(o.year)} &nbsp;|&nbsp;` : ''}Date: ${new Date(o.approved_on || o.uploaded_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
       ${isWord
         ? `<div style="text-align:center"><p>This ordinance is stored as a Word document.</p><a href="${encodeURI(fileUrl)}" class="download-btn" download>⬇ Download Word File</a></div>`
         : `<div class="content">${escapeHtml(extractedText) || 'No extracted text available.'}</div>`
@@ -263,6 +271,19 @@ router.get('/:id', verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+// ─── POST /api/ordinances/extract-meta ────────────────────────────────────────
+// Reads an uploaded file (image, PDF incl. scans, Word) and suggests its
+// official number and date so the upload form can prefill them. Nothing is
+// saved — the user confirms the values before actually uploading. See
+// helpers/documentMeta.js.
+router.post('/extract-meta', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, extractMetaHandler('ordinance'))
+
+// ─── POST /api/ordinances/:id/detect-meta ─────────────────────────────────────
+// Same detection on the record's stored file, for the Publish dialog to
+// suggest the official number from the document itself. Secretary only —
+// publishing is Secretary's step. Read-only: nothing is saved.
+router.post('/:id/detect-meta', verifyToken, secretaryOnly, storedMetaHandler({ table: 'ordinances', kind: 'ordinance' }))
 
 // ─── POST /api/ordinances/upload ─────────────────────────────────────────────
 // Any of the four legislative positions can originate a draft — Secretary
@@ -352,7 +373,10 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     const updateData = {
       ordinance_number: ordinance_number || null,
       title,
-      year: parsedYear,
+      // Once approved, the record's year is the year it was approved (see
+      // helpers/legislativeReviewRoutes.js) — editing the form's date can't
+      // move it back to the upload/document year.
+      year: existing.approved_on ? yearInManila(existing.approved_on) : parsedYear,
       category: category || null,
     }
     // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
@@ -467,6 +491,7 @@ router.use('/', createLegislativeReviewRoutes({
   labelOf: (r) => r.title,
   numberField: 'ordinance_number',
   numberLabel: 'Ordinance number',
+  approvedDateField: 'approved_on',
   hasReadings: true,
 }))
 

@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 
 const supabase = require('../config/supabase')
-const { verifyToken, adminOnly } = require('../middleware/auth')
+const { verifyToken } = require('../middleware/auth')
 const { logActivity } = require('../helpers/logger')
 const { sendEmail } = require('../helpers/email')
 const { emailShell, BRAND_PRIMARY_DARK } = require('../helpers/notify')
@@ -13,6 +13,21 @@ const AUTHOR_SELECT = '*, author:users!created_by(name, photo, position, role), 
 // priority is a 2-state field now (normal/urgent) — anything else collapses
 // to "normal" rather than being rejected, so stray/legacy values never 400.
 const normalizePriority = (p) => (p === 'urgent' ? 'urgent' : 'normal')
+
+// Who may post: Secretary/Clerk plus the Sangguniang members (Councilor,
+// Vice-Mayor, Liga ng mga Barangay, SK Federated). Secretary/Clerk may edit or
+// delete any announcement; the members only the ones they posted themselves.
+const ANNOUNCEMENT_MANAGERS = ['secretary', 'clerk']
+const ANNOUNCEMENT_POSTERS = [...ANNOUNCEMENT_MANAGERS, 'councilor', 'vice_mayor', 'liga_ng_mga_barangay', 'sk_federated']
+
+const canPostAnnouncement = (req, res, next) => {
+  if (!ANNOUNCEMENT_POSTERS.includes(req.user?.position))
+    return res.status(403).json({ error: 'You are not allowed to post announcements.' })
+  next()
+}
+
+const canManageAnnouncement = (user, announcement) =>
+  ANNOUNCEMENT_MANAGERS.includes(user?.position) || announcement.created_by === user?.id
 
 // Caps pin-inflation — past this, "pinned" stops meaning anything.
 const PIN_LIMIT = 3
@@ -141,7 +156,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 })
 
 // POST /api/announcements
-router.post('/', verifyToken, adminOnly, async (req, res) => {
+router.post('/', verifyToken, canPostAnnouncement, async (req, res) => {
   try {
     const { title, body, priority, expires_at, pinned } = req.body
     if (!title || !body)
@@ -192,11 +207,13 @@ router.post('/mark-all-read', verifyToken, async (req, res) => {
 })
 
 // PUT /api/announcements/:id
-router.put('/:id', verifyToken, adminOnly, async (req, res) => {
+router.put('/:id', verifyToken, canPostAnnouncement, async (req, res) => {
   try {
     const { data: existing } = await supabase
-      .from('announcements').select('id, priority, pinned').eq('id', req.params.id).single()
+      .from('announcements').select('id, priority, pinned, created_by').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Announcement not found.' })
+    if (!canManageAnnouncement(req.user, existing))
+      return res.status(403).json({ error: 'You can only edit announcements you posted.' })
     const { title, body, priority, expires_at, pinned } = req.body
     if (!title || !body)
       return res.status(400).json({ error: 'Title and body are required.' })
@@ -226,11 +243,13 @@ router.put('/:id', verifyToken, adminOnly, async (req, res) => {
 })
 
 // DELETE /api/announcements/:id
-router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
+router.delete('/:id', verifyToken, canPostAnnouncement, async (req, res) => {
   try {
     const { data: existing } = await supabase
-      .from('announcements').select('title').eq('id', req.params.id).single()
+      .from('announcements').select('title, created_by').eq('id', req.params.id).single()
     if (!existing) return res.status(404).json({ error: 'Announcement not found.' })
+    if (!canManageAnnouncement(req.user, existing))
+      return res.status(403).json({ error: 'You can only delete announcements you posted.' })
     const { error } = await supabase
       .from('announcements').delete().eq('id', req.params.id)
     if (error) return res.status(500).json({ error: error.message })

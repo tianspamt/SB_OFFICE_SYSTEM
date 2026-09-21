@@ -1,7 +1,7 @@
 const express = require('express')
 const supabase = require('../config/supabase')
 const { verifyToken, secretaryOnly, viceMayorOnly } = require('../middleware/auth')
-const { canArchiveLegislativeRecord, escapeHtml } = require('./utils')
+const { canArchiveLegislativeRecord, escapeHtml, yearInManila } = require('./utils')
 const { logActivity } = require('./logger')
 const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = require('./notify')
 
@@ -57,6 +57,7 @@ function createLegislativeReviewRoutes({
   labelOf,
   numberField,
   numberLabel,
+  approvedDateField,
   hasReadings,
 }) {
   const router = express.Router()
@@ -162,11 +163,8 @@ function createLegislativeReviewRoutes({
   // automatically) as a record of what was turned down, but there's no path
   // back into the pipeline for it.
   //
-  // A comment explaining the rejection is required once the record is past
-  // its first reading — by second/third reading there's been real
-  // discussion and scrutiny already, so a reason matters for the record.
-  // Rejecting straight out of first_reading (fresh off Accept, before any
-  // of that) doesn't require one, though one can still be left voluntarily.
+  // A comment explaining the rejection is optional at every reading stage —
+  // if one is given it's saved to the record and included in the email.
   if (hasReadings) {
     router.put('/:id/reject', verifyToken, secretaryOnly, async (req, res) => {
       const { id } = req.params
@@ -175,10 +173,6 @@ function createLegislativeReviewRoutes({
       if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
       if (!READING_STATUSES.includes(existing.status)) {
         return res.status(400).json({ error: `${singularLabel} is not currently in a reading stage.` })
-      }
-      const commentRequired = existing.status !== 'first_reading'
-      if (commentRequired && !comment?.trim()) {
-        return res.status(400).json({ error: 'A comment is required when rejecting past the first reading.' })
       }
       try {
         if (comment?.trim()) {
@@ -264,8 +258,13 @@ function createLegislativeReviewRoutes({
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not ready for Vice-Mayor approval.` })
     try {
+      const approvedAt = new Date().toISOString()
       const { data, conflict, error } = await atomicUpdate(id, 'ready_to_publish', {
-        status: 'approved', reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+        status: 'approved', reviewed_by: req.user.id, reviewed_at: approvedAt,
+        // The date a finished record carries — see migrations/026. Its `year`
+        // follows the approval, not the upload: a draft entered in one year and
+        // approved in the next belongs to the year it was approved.
+        ...(approvedDateField && { [approvedDateField]: approvedAt, year: yearInManila(approvedAt) }),
       })
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
@@ -293,6 +292,21 @@ function createLegislativeReviewRoutes({
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not approved for publishing.` })
 
     const patch = { status: 'published' }
+    // The Secretary can set the record's approved date here (the dialog
+    // pre-fills it from the document). Stored at noon UTC so it reads as the
+    // same calendar day in any timezone the office might view it from.
+    if (approvedDateField && typeof req.body[approvedDateField] === 'string' && req.body[approvedDateField].trim()) {
+      const day = req.body[approvedDateField].trim()
+      const parsed = new Date(`${day}T12:00:00.000Z`)
+      const valid =
+        /^\d{4}-\d{2}-\d{2}$/.test(day) &&
+        !Number.isNaN(parsed.getTime()) &&
+        parsed.toISOString().slice(0, 10) === day &&
+        parsed.getUTCFullYear() >= 1900 && parsed.getUTCFullYear() <= 2100
+      if (!valid) return res.status(400).json({ error: 'Approved date must be a valid date (YYYY-MM-DD).' })
+      patch[approvedDateField] = parsed.toISOString()
+      patch.year = parsed.getUTCFullYear()
+    }
     if (numberField) {
       const number = typeof req.body[numberField] === 'string' ? req.body[numberField].trim() : ''
       if (!number) return res.status(400).json({ error: `${numberLabel} is required to publish.` })

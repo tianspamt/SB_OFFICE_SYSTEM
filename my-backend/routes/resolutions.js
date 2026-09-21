@@ -6,13 +6,14 @@ const os = require('os')
 const Tesseract = require('tesseract.js')
 
 const supabase = require('../config/supabase')
-const { verifyToken, canCreateDraft, pendingEditors } = require('../middleware/auth')
+const { verifyToken, canCreateDraft, pendingEditors, secretaryOnly } = require('../middleware/auth')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC } = require('../helpers/utils')
+const { safeParseJSON, escapeHtml, canEditLegislativeRecord, orIlikeClause, parseYearField, dayBoundsUTC, yearInManila } = require('../helpers/utils')
 const { resolveCurrentTermId, findRecordIdsByAuthorName } = require('../helpers/officials')
 const { createLegislativeReviewRoutes } = require('../helpers/legislativeReviewRoutes')
+const { extractMetaHandler, storedMetaHandler } = require('../helpers/documentMeta')
 const { createOfficialRoleRoutes } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 
@@ -108,6 +109,13 @@ router.get('/', verifyToken, async (req, res) => {
       searchAuthorIds = await findRecordIdsByAuthorName('resolution_officials', 'resolution_id', search)
     }
 
+    // Published records are dated by when they were approved (approved_on),
+    // everything else — drafts, pending review, ... — by when it was uploaded.
+    const requestedStatuses =
+      req.query.status === 'all' ? null : (req.query.status ? req.query.status.split(',') : ['published'])
+    const publishedOnly = requestedStatuses?.length === 1 && requestedStatuses[0] === 'published'
+    const dateColumn = publishedOnly ? 'approved_on' : 'uploaded_at'
+
     let query = supabase
       .from('resolutions')
       .select(`*, resolution_officials (
@@ -115,7 +123,7 @@ router.get('/', verifyToken, async (req, res) => {
         sb_council_members ( id, full_name, photo ),
         term:sb_council_member_terms ( id, position, term_period )
       )`, { count: 'exact' })
-      .order('uploaded_at', { ascending: false })
+      .order(dateColumn, { ascending: false, nullsFirst: false })
     if (year) query = query.eq('year', year)
     if (search) {
       const orParts = [
@@ -130,7 +138,7 @@ router.get('/', verifyToken, async (req, res) => {
     if (authorResolutionIds) query = query.in('id', authorResolutionIds)
     if (date) {
       const { start, end } = dayBoundsUTC(date)
-      query = query.gte('uploaded_at', start).lt('uploaded_at', end)
+      query = query.gte(dateColumn, start).lt(dateColumn, end)
     }
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
@@ -188,6 +196,19 @@ router.get('/:id', verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+// ─── POST /api/resolutions/extract-meta ────────────────────────────────────────
+// Reads an uploaded file (image, PDF incl. scans, Word) and suggests its
+// official number and date so the upload form can prefill them. Nothing is
+// saved — the user confirms the values before actually uploading. See
+// helpers/documentMeta.js.
+router.post('/extract-meta', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, extractMetaHandler('resolution'))
+
+// ─── POST /api/resolutions/:id/detect-meta ─────────────────────────────────────
+// Same detection on the record's stored file, for the Publish dialog to
+// suggest the official number from the document itself. Secretary only —
+// publishing is Secretary's step. Read-only: nothing is saved.
+router.post('/:id/detect-meta', verifyToken, secretaryOnly, storedMetaHandler({ table: 'resolutions', kind: 'resolution' }))
 
 // POST /api/resolutions/upload
 // Any of the four legislative positions can originate a draft — Secretary
@@ -274,7 +295,10 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     const updateData = {
       resolution_number: resolution_number || null,
       title,
-      year: parsedYear,
+      // Once approved, the record's year is the year it was approved (see
+      // helpers/legislativeReviewRoutes.js) — editing the form's date can't
+      // move it back to the upload/document year.
+      year: existing.approved_on ? yearInManila(existing.approved_on) : parsedYear,
       category: category || null,
     }
     // A Clerk/Councilor edit on a rejected draft doubles as the resubmit —
@@ -366,7 +390,7 @@ router.get('/:id/print', verifyToken, async (req, res) => {
       </div>
       <div class="meta">
         ${r.year ? `Year: ${escapeHtml(r.year)} &nbsp;|&nbsp;` : ''}
-        Date: ${new Date(r.uploaded_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}
+        Date: ${new Date(r.approved_on || r.uploaded_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' })}
       </div>
       <div class="content">${escapeHtml(r.extracted_text) || 'No extracted text available for this resolution.'}</div>
       <div class="footer">Sangguniang Bayan of Balilihan, Bohol &nbsp;•&nbsp; Official Public Record</div>
@@ -431,6 +455,7 @@ router.use('/', createLegislativeReviewRoutes({
   labelOf: (r) => r.title,
   numberField: 'resolution_number',
   numberLabel: 'Resolution number',
+  approvedDateField: 'approved_on',
   hasReadings: true,
 }))
 

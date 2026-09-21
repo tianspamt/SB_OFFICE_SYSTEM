@@ -453,7 +453,6 @@ export default function OfficialsPage({
     const existingCouncilIds = new Set(
       grouped.filter((g) => g.councilId != null).map((g) => g.councilId)
     );
-    const getYear = (s) => parseInt((s.match(/\d{4}/) || ["0"])[0]);
     const emptyOnes = councils
       .filter((c) => !existingCouncilIds.has(c.id))
       .map((c) => ({
@@ -461,9 +460,22 @@ export default function OfficialsPage({
         councilId: c.id,
         termPeriod: c.term_label,
         entries: [],
-      }))
-      .sort((a, b) => getYear(b.termPeriod) - getYear(a.termPeriod));
-    return [...emptyOnes, ...grouped];
+      }));
+    // One newest-first sort over empty and populated councils together —
+    // otherwise an empty council (e.g. a freshly added 1990 one) would always
+    // sit above every populated council regardless of its year. The
+    // "Unknown" bucket for members with no terms stays last.
+    const sortKey = (g) => {
+      const [start = 0, end = start] = (g.termPeriod || "").match(/\d{4}/g)?.map(Number) ?? [];
+      return [start, end];
+    };
+    return [...emptyOnes, ...grouped].sort((a, b) => {
+      if (a.key === "unknown") return 1;
+      if (b.key === "unknown") return -1;
+      const [aStart, aEnd] = sortKey(a);
+      const [bStart, bEnd] = sortKey(b);
+      return bStart - aStart || bEnd - aEnd;
+    });
   }, [grouped, councils]);
 
   const toggleGroup = (key) =>

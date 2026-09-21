@@ -20,11 +20,17 @@ import {
 } from "lucide-react";
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
-import { API, authFetch, pendingQueryKey, fetchPendingList, useModalError } from "./AdminContext";
+import { API, authFetch, pendingQueryKey, fetchPendingList, useModalError, toIsoDate } from "./AdminContext";
 import { StatusBadge, PublishNumberModal, nextReadingActionLabel } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
 import LoadingModal from "./LoadingModal";
-import { actionableStatusesForRole, isLockedStatus, READING_STATUSES, useCommentThread } from "./useLegislativeReview";
+import {
+  actionableStatusesForRole,
+  isLockedStatus,
+  READING_STATUSES,
+  useCommentThread,
+  usePublishNumberDetection,
+} from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
 // Keeps this widget generic across the legislative record types that still
@@ -337,6 +343,8 @@ function ReviewModal({
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishNumberValue, setPublishNumberValue] = useState("");
   const [publishNumberError, setPublishNumberError] = useState("");
+  const [publishDateValue, setPublishDateValue] = useState("");
+  const publishDetect = usePublishNumberDetection(cfg.route);
 
   useEffect(() => {
     fetchComments(cfg.entityType, item.id);
@@ -418,13 +426,8 @@ function ReviewModal({
   // Terminal, unlike Request Changes — there's no resubmission path back to
   // pending. Secretary-only, shown while item.status is one of
   // READING_STATUSES (see helpers/legislativeReviewRoutes.js's /:id/reject).
-  // A reason is only required past first_reading — that endpoint enforces
-  // the same rule authoritatively, this is just matching the message.
+  // A reason is optional at every reading stage.
   const handleReject = () => {
-    if (item.status !== "first_reading" && !commentText.trim()) {
-      showError("Add a comment above explaining the rejection.");
-      return;
-    }
     runAction(
       `/api/${cfg.route}/${item.id}/reject`,
       { method: "PUT", body: JSON.stringify({ comment: commentText.trim() }) },
@@ -448,9 +451,20 @@ function ReviewModal({
       );
       return;
     }
-    setPublishNumberValue(item[cfg.numberField] || "");
+    const initial = item[cfg.numberField] || "";
+    // The approved date starts as the day the Vice-Mayor approved it.
+    const initialDate = item.approved_on ? toIsoDate(new Date(item.approved_on)) : "";
+    setPublishNumberValue(initial);
+    setPublishDateValue(initialDate);
     setPublishNumberError("");
     setShowPublishModal(true);
+    // The document is read for a number and an approved date, written straight
+    // into the fields — only into one still holding its untouched starting
+    // value, and never over a number the record already carries.
+    publishDetect.detect(item.id, (d) => {
+      if (d.number && !initial) setPublishNumberValue((cur) => (cur === initial ? d.number : cur));
+      if (d.date) setPublishDateValue((cur) => (cur === initialDate ? d.date : cur));
+    });
   };
 
   const confirmPublish = async () => {
@@ -464,7 +478,13 @@ function ReviewModal({
     // nothing further to show here — just leave the modal open to retry.
     const ok = await runAction(
       `/api/${cfg.route}/${item.id}/publish`,
-      { method: "PUT", body: JSON.stringify({ [cfg.numberField]: number }) },
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          [cfg.numberField]: number,
+          ...(publishDateValue && { approved_on: publishDateValue }),
+        }),
+      },
       `${cfg.label} published!`
     );
     if (ok) setShowPublishModal(false);
@@ -685,15 +705,7 @@ function ReviewModal({
               <div className={lStyles.pendingActionsRow}>
                 <button
                   className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
-                  disabled={
-                    submitting ||
-                    (item.status !== "first_reading" && !commentText.trim())
-                  }
-                  title={
-                    item.status !== "first_reading" && !commentText.trim()
-                      ? "Enter a comment above explaining the rejection"
-                      : ""
-                  }
+                  disabled={submitting}
                   onClick={handleReject}
                 >
                   <X size={16} /> Reject
@@ -756,14 +768,20 @@ function ReviewModal({
     {showPublishModal && (
       <PublishNumberModal
         label={`${cfg.label} Number`}
-        placeholder={`e.g. ${item.record_type === "ordinance" ? "Municipal " : ""}${cfg.label} No. 2026-014`}
         value={publishNumberValue}
         onChange={(v) => {
           setPublishNumberValue(v);
           setPublishNumberError("");
         }}
         onConfirm={confirmPublish}
-        onCancel={() => setShowPublishModal(false)}
+        onCancel={() => {
+          setShowPublishModal(false);
+          publishDetect.reset();
+        }}
+        detection={publishDetect.detected}
+        onSkipDetection={publishDetect.reset}
+        dateValue={publishDateValue}
+        onDateChange={setPublishDateValue}
         submitting={submitting}
         error={publishNumberError}
       />

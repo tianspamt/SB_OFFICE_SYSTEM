@@ -29,7 +29,9 @@ import {
   fetchPendingList,
   RESOLUTION_CATEGORIES,
   isDuplicateRecordNumber,
-  suggestResolutionNumber,
+  recordDate,
+  recordDateLabel,
+  toIsoDate,
   OFFICIALS_QUERY_KEY,
   fetchOfficialsList,
   authFetch,
@@ -45,6 +47,7 @@ import {
   useLegislativePublished,
   useResetOnChange,
   useDeepLinkedTab,
+  usePublishNumberDetection,
 } from "./useLegislativeReview";
 
 import {
@@ -191,6 +194,8 @@ export default function ResolutionsPage({
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishNumberValue, setPublishNumberValue] = useState("");
   const [publishNumberError, setPublishNumberError] = useState("");
+  const [publishDateValue, setPublishDateValue] = useState("");
+  const publishDetect = usePublishNumberDetection("resolutions");
   const {
     comments: reviewComments, loadingComments, commentSubmitting,
     fetchComments: fetchCommentsForId, sendComment,
@@ -305,7 +310,6 @@ export default function ResolutionsPage({
   // matching check in helpers/legislativeReviewRoutes.js.
   const handleReject = async () => {
     if (!viewTarget) return;
-    if (viewTarget.status !== "first_reading" && !reviewCommentText.trim()) return;
     const ok = await runReviewAction(
       `/api/resolutions/${viewTarget.id}/reject`,
       {
@@ -425,20 +429,41 @@ export default function ResolutionsPage({
       "Resolution approved!"
     );
 
-  const handlePublish = (id, resolutionNumber) =>
+  const handlePublish = (id, resolutionNumber, approvedOn) =>
     runReviewAction(
       `/api/resolutions/${id}/publish`,
-      { method: "PUT", body: JSON.stringify({ resolution_number: resolutionNumber }) },
-      (d) => ({ status: d.status, resolution_number: d.resolution_number })
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          resolution_number: resolutionNumber,
+          ...(approvedOn && { approved_on: approvedOn }),
+        }),
+      },
+      (d) => ({
+        status: d.status,
+        resolution_number: d.resolution_number,
+        approved_on: d.approved_on,
+      })
     );
 
   const openPublishModal = () => {
-    setPublishNumberValue(
-      viewTarget.resolution_number ||
-        suggestResolutionNumber(resolutions, viewTarget.year)
-    );
+    const initial = viewTarget.resolution_number || "";
+    // The approved date starts as the day the Vice-Mayor approved it.
+    const initialDate = viewTarget.approved_on ? toIsoDate(new Date(viewTarget.approved_on)) : "";
+    setPublishNumberValue(initial);
+    setPublishDateValue(initialDate);
     setPublishNumberError("");
     setShowPublishModal(true);
+    // The document is read for a number and an approved date, and whatever it
+    // finds goes straight into the fields — but only into a field still
+    // holding its untouched starting value, and never over a number the
+    // record already carries.
+    publishDetect.detect(viewTarget.id, (d) => {
+      if (d.number && !viewTarget.resolution_number) {
+        setPublishNumberValue((cur) => (cur === initial ? d.number : cur));
+      }
+      if (d.date) setPublishDateValue((cur) => (cur === initialDate ? d.date : cur));
+    });
   };
 
   const confirmPublish = async () => {
@@ -453,7 +478,7 @@ export default function ResolutionsPage({
       );
       return;
     }
-    const ok = await handlePublish(viewTarget.id, number);
+    const ok = await handlePublish(viewTarget.id, number, publishDateValue);
     if (ok) setShowPublishModal(false);
   };
 
@@ -648,13 +673,13 @@ export default function ResolutionsPage({
                       <StatusBadge status={r.status} />
                       {r.officials?.length > 0 && (
                         <span
+                          title="Author"
                           style={{
                             fontSize: 11,
                             color: "var(--color-text-secondary)",
                           }}
                         >
-                          {r.officials.length} council member
-                          {r.officials.length !== 1 ? "s" : ""}
+                          {r.officials.map((a) => a.full_name).join(", ")}
                         </span>
                       )}
                     </div>
@@ -922,9 +947,11 @@ export default function ResolutionsPage({
                     <CalendarDays size={16} />
                   </div>
                   <div>
-                    <div className={lStyles.viewModalMetaLabel}>Uploaded</div>
+                    <div className={lStyles.viewModalMetaLabel}>
+                      {recordDateLabel(viewTarget)}
+                    </div>
                     <div className={lStyles.viewModalMetaValue}>
-                      {new Date(viewTarget.uploaded_at).toLocaleDateString(
+                      {new Date(recordDate(viewTarget)).toLocaleDateString(
                         "en-PH",
                         {
                           year: "numeric",
@@ -1306,17 +1333,7 @@ export default function ResolutionsPage({
                       <div className={lStyles.pendingActionsRow}>
                         <button
                           className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
-                          disabled={
-                            reviewSubmitting ||
-                            (viewTarget.status !== "first_reading" &&
-                              !reviewCommentText.trim())
-                          }
-                          title={
-                            viewTarget.status !== "first_reading" &&
-                            !reviewCommentText.trim()
-                              ? "Enter a comment above explaining the rejection"
-                              : ""
-                          }
+                          disabled={reviewSubmitting}
                           onClick={handleReject}
                         >
                           <X size={16} /> Reject
@@ -1378,14 +1395,20 @@ export default function ResolutionsPage({
       {showPublishModal && (
         <PublishNumberModal
           label="Resolution Number"
-          placeholder="e.g. Resolution No. 2026-014"
           value={publishNumberValue}
           onChange={(v) => {
             setPublishNumberValue(v);
             setPublishNumberError("");
           }}
           onConfirm={confirmPublish}
-          onCancel={() => setShowPublishModal(false)}
+          onCancel={() => {
+            setShowPublishModal(false);
+            publishDetect.reset();
+          }}
+          detection={publishDetect.detected}
+          onSkipDetection={publishDetect.reset}
+          dateValue={publishDateValue}
+          onDateChange={setPublishDateValue}
           submitting={reviewSubmitting}
           error={publishNumberError}
         />

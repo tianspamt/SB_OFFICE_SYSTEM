@@ -34,6 +34,13 @@ Each file is also runnable on its own, e.g. `node tests/auth.test.js`.
   withdraw a not-yet-published record they themselves created. Resolutions
   and session-minutes share the identical code shape, so this isn't
   repeated three ways.
+- `legislative-meta.test.js` — the "detect number & date from the uploaded
+  file" rules (`helpers/legislativeMeta.js`): number/date patterns, OCR
+  digit/month-typo tolerance, ignoring references to other ordinances, the
+  year cross-check in `helpers/documentMeta.js`, and reading a real text-layer
+  PDF. Pure logic — unlike the rest it needs neither the server nor the DB.
+  OCR itself (scanned PDFs/images) isn't asserted here: it's slow and its
+  output depends on scan quality.
 
 This is a first pass, not full coverage — CRUD validation, the announcements/
 content-posts modules, and file-upload edge cases (bad mimetypes, the new

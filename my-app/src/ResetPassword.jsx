@@ -17,10 +17,8 @@ export default function ResetPassword() {
 
   // 'checking' | 'valid' | 'invalid' | 'done'
   const [status, setStatus] = useState('checking')
-  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [showCurrent, setShowCurrent] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState('')
@@ -61,7 +59,7 @@ export default function ResetPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (!currentPassword || !newPassword || !confirmPassword) { setError('All fields are required.'); return }
+    if (!newPassword || !confirmPassword) { setError('Both fields are required.'); return }
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return }
     if (metCount < rules.length) { setError('Password does not meet all requirements.'); return }
 
@@ -70,7 +68,7 @@ export default function ResetPassword() {
       const res = await fetch(`${API}/api/reset-password/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword }),
+        body: JSON.stringify({ newPassword }),
       })
       const data = await res.json()
       if (res.ok && data.success) {
@@ -240,24 +238,6 @@ export default function ResetPassword() {
 
             <div className="rp-field">
               <div className="rp-label-row">
-                <span className="rp-label">Current Password <span className="rp-required">*</span></span>
-              </div>
-              <div className="rp-input-box">
-                <input
-                  type={showCurrent ? 'text' : 'password'}
-                  placeholder="Enter current password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  autoFocus
-                />
-                <button type="button" className="rp-eye-btn" onClick={() => setShowCurrent((v) => !v)} tabIndex={-1}>
-                  {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="rp-field">
-              <div className="rp-label-row">
                 <span className="rp-label">New Password <span className="rp-required">*</span></span>
               </div>
               <div className="rp-input-box">
@@ -266,6 +246,7 @@ export default function ResetPassword() {
                   placeholder="Enter new password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
+                  autoFocus
                 />
                 <button type="button" className="rp-eye-btn" onClick={() => setShowNew((v) => !v)} tabIndex={-1}>
                   {showNew ? <EyeOff size={16} /> : <Eye size={16} />}

@@ -289,7 +289,27 @@ export function PublishNumberModal({
   onCancel,
   submitting = false,
   error,
+  // Optional second field — the record's approved date. Rendered only when
+  // `onDateChange` is given.
+  dateValue = "",
+  onDateChange,
+  // null | { status: "reading" | "done" | "error" } from
+  // usePublishNumberDetection. Detected values are written straight into the
+  // fields by the caller; this only drives the "reading…" placeholder while a
+  // scanned document is still being read.
+  detection = null,
+  // Lets the user stop waiting on a slow scan and type the values themselves.
+  onSkipDetection,
 }) {
+  const reading = detection?.status === "reading";
+  const found = detection?.status === "done" && (detection.data?.number || detection.data?.date);
+  const notFound = detection && !reading && !found;
+  // The fields are disabled while reading, which drops autoFocus — put the
+  // cursor back in the number field once they're usable again.
+  const numberRef = useRef(null);
+  useEffect(() => {
+    if (!reading) numberRef.current?.focus();
+  }, [reading]);
   useEffect(() => {
     const handler = (e) => {
       if (e.key === "Escape" && !submitting) onCancel();
@@ -326,6 +346,10 @@ export function PublishNumberModal({
         }
         .pnm-title { font-size: 18px; font-weight: 700; color: #1a1a2e; margin: 0 0 8px; }
         .pnm-message { font-size: 13.5px; color: #6b7280; margin: 0 0 16px; line-height: 1.5; }
+        .pnm-label {
+          display: block; font-size: 12px; font-weight: 600; color: #4b5563;
+          margin: 10px 0 5px;
+        }
         .pnm-input {
           width: 100%; box-sizing: border-box;
           padding: 11px 12px; border: 1px solid #d1d5db; border-radius: 8px;
@@ -334,6 +358,33 @@ export function PublishNumberModal({
         .pnm-input:focus { outline: none; border-color: #22c55e; }
         .pnm-input:disabled { background: #f9fafb; cursor: not-allowed; }
         .pnm-error { color: #ef4444; font-size: 12.5px; margin: 0 0 12px; }
+        .pnm-status {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 12.5px; line-height: 1.4; margin: 0 0 4px;
+          padding: 9px 11px; border-radius: 8px;
+        }
+        .pnm-status-reading { background: #eff6ff; color: #1d4ed8; }
+        .pnm-status-found { background: #f0fdf4; color: #15803d; }
+        .pnm-status-none { background: #f9fafb; color: #6b7280; }
+        .pnm-spinner {
+          flex: none; width: 14px; height: 14px; border-radius: 50%;
+          border: 2px solid #bfdbfe; border-top-color: #2563eb;
+          animation: pnmSpin 0.7s linear infinite;
+        }
+        @keyframes pnmSpin { to { transform: rotate(360deg) } }
+        .pnm-skip {
+          margin-left: auto; flex: none; background: none; border: none;
+          color: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+          text-decoration: underline; padding: 0;
+        }
+        .pnm-input-reading {
+          color: transparent; border-color: #e5e7eb;
+          background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+          background-size: 200% 100%; animation: pnmShimmer 1.2s ease-in-out infinite;
+        }
+        .pnm-input-reading::-webkit-datetime-edit { color: transparent; }
+        .pnm-input-reading::-webkit-calendar-picker-indicator { opacity: 0; }
+        @keyframes pnmShimmer { from { background-position: 200% 0 } to { background-position: -200% 0 } }
         .pnm-actions { display: flex; gap: 10px; margin-top: 16px; }
         .pnm-btn {
           flex: 1; padding: 12px; border: none; border-radius: 10px;
@@ -354,16 +405,51 @@ export function PublishNumberModal({
         <div className="pnm-card">
           <p className="pnm-title">Publish {label}</p>
           <p className="pnm-message">
-            Enter the official {label.toLowerCase()} for this record.
+            Enter the official {label.toLowerCase()}
+            {onDateChange ? " and approved date" : ""} for this record.
           </p>
+          {reading && (
+            <div className="pnm-status pnm-status-reading" role="status" aria-live="polite">
+              <span className="pnm-spinner" aria-hidden="true" />
+              <span>Reading the document to detect the number and date…</span>
+              {onSkipDetection && (
+                <button type="button" className="pnm-skip" onClick={onSkipDetection}>
+                  Skip
+                </button>
+              )}
+            </div>
+          )}
+          {found && (
+            <div className="pnm-status pnm-status-found" role="status">
+              Detected from the document. Please check before publishing.
+            </div>
+          )}
+          {notFound && (
+            <div className="pnm-status pnm-status-none" role="status">
+              Couldn't detect a number or date in the document. Please enter them.
+            </div>
+          )}
+          <label className="pnm-label">{label}</label>
           <input
-            className="pnm-input"
-            autoFocus
+            className={`pnm-input${reading ? " pnm-input-reading" : ""}`}
+            ref={numberRef}
             placeholder={placeholder}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || reading}
           />
+          {onDateChange && (
+            <>
+              <label className="pnm-label">Approved date</label>
+              <input
+                className={`pnm-input${reading ? " pnm-input-reading" : ""}`}
+                type="date"
+                value={dateValue}
+                onChange={(e) => onDateChange(e.target.value)}
+                disabled={submitting || reading}
+              />
+            </>
+          )}
           {error && <p className="pnm-error">{error}</p>}
           <div className="pnm-actions">
             <button
@@ -376,7 +462,7 @@ export function PublishNumberModal({
             <button
               className="pnm-btn pnm-btn-confirm"
               onClick={onConfirm}
-              disabled={submitting}
+              disabled={submitting || reading}
             >
               {submitting ? "Publishing..." : "Publish"}
             </button>
