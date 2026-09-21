@@ -383,7 +383,6 @@ export default function AdminDashboard() {
 
   // sessions
   const [sessionMinutes, setSessionMinutes] = useState([]);
-  const [sessionInputMode, setSessionInputMode] = useState("text");
   const [sessionForm, setSessionForm] = useState({
     session_number: "",
     session_date: "",
@@ -1454,7 +1453,6 @@ export default function AdminDashboard() {
       minutes_text: "",
     });
     setSessionFile(null);
-    setSessionInputMode("text");
   };
   const handleAddSession = async () => {
     if (!sessionForm.session_date) {
@@ -1476,39 +1474,26 @@ export default function AdminDashboard() {
     }
     setSubmitting(true);
     try {
-      if (sessionInputMode === "file") {
-        if (!sessionFile) {
-          showModalMsg("Please upload a file!", "error");
-          setSubmitting(false);
-          return;
-        }
-        const fd = new FormData();
-        Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
-        fd.append("file", sessionFile);
-        const res = await authFetch(`${API}/api/session-minutes/upload`, {
-          method: "POST",
-          body: fd,
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          showSuccessModal("Session added!");
-          resetSessionForm();
-          setShowSessionModal(false);
-          fetchSessionMinutes();
-        } else showModalMsg(data.error || "Upload failed!", "error");
-      } else {
-        const res = await authFetch(`${API}/api/session-minutes`, {
-          method: "POST",
-          body: JSON.stringify(sessionForm),
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-          showSuccessModal("Session minutes saved!");
-          resetSessionForm();
-          setShowSessionModal(false);
-          fetchSessionMinutes();
-        } else showModalMsg(data.error || "Save failed!", "error");
+      // Session minutes are added by uploading the file (PDF, Word or image).
+      if (!sessionFile) {
+        showModalMsg("Please upload a file!", "error");
+        setSubmitting(false);
+        return;
       }
+      const fd = new FormData();
+      Object.entries(sessionForm).forEach(([k, v]) => fd.append(k, v));
+      fd.append("file", sessionFile);
+      const res = await authFetch(`${API}/api/session-minutes/upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showSuccessModal("Session added!");
+        resetSessionForm();
+        setShowSessionModal(false);
+        fetchSessionMinutes();
+      } else showModalMsg(data.error || "Upload failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
     } finally {
@@ -4425,7 +4410,6 @@ export default function AdminDashboard() {
                 style={{ margin: 0, fontSize: 18 }}
               >
                 <BookOpen size={18} strokeWidth={1.5} /> Add Session Minutes
-                &amp; Agenda
               </h2>
               <button
                 onClick={() => {
@@ -4462,34 +4446,6 @@ export default function AdminDashboard() {
                 overscrollBehavior: "contain",
               }}
             >
-              <div className={styles.uploadTypeRow}>
-                <button
-                  className={`${styles.uploadTypeBtn} ${
-                    sessionInputMode === "text"
-                      ? styles.uploadTypeBtnActive
-                      : ""
-                  }`}
-                  onClick={() => setSessionInputMode("text")}
-                >
-                  <FileEdit size={16} strokeWidth={1.5} /> Direct Input
-                  <span className={styles.uploadTypeDesc}>
-                    Type or paste session minutes directly
-                  </span>
-                </button>
-                <button
-                  className={`${styles.uploadTypeBtn} ${
-                    sessionInputMode === "file"
-                      ? styles.uploadTypeBtnActive
-                      : ""
-                  }`}
-                  onClick={() => setSessionInputMode("file")}
-                >
-                  <Upload size={16} strokeWidth={1.5} /> Upload File
-                  <span className={styles.uploadTypeDesc}>
-                    PDF, Word, or Image — system auto-detects
-                  </span>
-                </button>
-              </div>
               <div className={styles.sessionFormGrid}>
                 <div className={styles.sessionFormCol}>
                   <label className={styles.fieldLabel}>Session Number</label>
@@ -4586,46 +4542,7 @@ export default function AdminDashboard() {
                   />
                 </div>
               </div>
-              {sessionInputMode === "text" ? (
-                <>
-                  <label className={styles.fieldLabel}>
-                    Agenda Items{" "}
-                    <span className={styles.fieldHint}>
-                      (one item per line)
-                    </span>
-                  </label>
-                  <textarea
-                    className={styles.textArea}
-                    placeholder={
-                      "1. Call to order\n2. Roll call\n3. Reading of minutes\n..."
-                    }
-                    value={sessionForm.agenda}
-                    onChange={(e) =>
-                      setSessionForm({ ...sessionForm, agenda: e.target.value })
-                    }
-                    rows={5}
-                  />
-                  <label
-                    className={styles.fieldLabel}
-                    style={{ marginTop: "10px" }}
-                  >
-                    Minutes of the Session
-                  </label>
-                  <textarea
-                    className={styles.textArea}
-                    placeholder="Type the full session minutes here..."
-                    value={sessionForm.minutes_text}
-                    onChange={(e) =>
-                      setSessionForm({
-                        ...sessionForm,
-                        minutes_text: e.target.value,
-                      })
-                    }
-                    rows={8}
-                  />
-                </>
-              ) : (
-                <>
+              <>
                   <div className={styles.fileUploadBox}>
                     <input
                       type="file"
@@ -4655,7 +4572,6 @@ export default function AdminDashboard() {
                     </p>
                   </div>
                 </>
-              )}
             </div>
 
             {/* ── Sticky footer ── */}

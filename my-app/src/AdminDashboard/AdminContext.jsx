@@ -525,7 +525,7 @@ export const tabTitles = {
   admins: "Manage Admins",
   calendar: "Calendar & Schedule",
   announcements: "Announcements",
-  sessions: "Session Minutes & Agenda",
+  sessions: "Session Minutes",
   session_agendas: "Order of Business",
   ordinances: "Ordinances",
   resolutions: "Resolutions",
