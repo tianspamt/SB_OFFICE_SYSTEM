@@ -192,10 +192,6 @@ function ReactionBar({ post, currentUserId, onReact }) {
     };
   }, []);
 
-  const activeEmoji = REACTIONS_LIST.find(
-    (e) => (post.reactions[e] || []).includes(currentUserId)
-  );
-
   const hasAnyReaction = REACTIONS_LIST.some((e) => (post.reactions[e] || []).length > 0);
 
   return (

@@ -46,8 +46,18 @@ const authHeaders = (token) => ({ Authorization: `Bearer ${token}` })
 // position: 'secretary' }) instead of creating one — these tests only ever
 // create/delete disposable *content* rows (ordinances etc.), never user
 // accounts, so there's nothing account-related to clean up afterward.
+//
+// Excludes archived accounts by default: a query with no explicit order can
+// return rows in any order, and leftover archived accounts from past e2e
+// runs (their usernames start with "e2e") otherwise get picked ahead of the
+// real seeded one — server correctly rejects that account as "This account
+// has been archived.", but the test then reads as a false failure. A caller
+// that explicitly wants an archived one (auth.test.js's own archived-account
+// check) still can — its own `is_archived: true` overrides this default
+// rather than being contradicted by it.
 async function findUser(where) {
   let q = supabase.from('users').select('*')
+  if (!('is_archived' in where)) q = q.eq('is_archived', false)
   for (const [k, v] of Object.entries(where)) q = q.eq(k, v)
   const { data } = await q.limit(1)
   return data?.[0] || null

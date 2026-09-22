@@ -403,7 +403,6 @@ export default function AdminDashboard() {
     minutes_text: "",
   });
   const [sessionFile, setSessionFile] = useState(null);
-  const [sessionOcrTarget, setSessionOcrTarget] = useState("minutes");
   const [editingSession, setEditingSession] = useState(null);
   // A file picked in the Edit Session form — attaches the original document to
   // the record (or replaces its current one).
@@ -456,10 +455,8 @@ export default function AdminDashboard() {
 
   // calendar
   const [localEvents, setLocalEvents] = useState([]);
-  const [fetchingCalendar, setFetchingCalendar] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [savingLocalEvent, setSavingLocalEvent] = useState(false);
-  const [pendingEventDate, setPendingEventDate] = useState("");
 
   const emptyEventForm = {
     title: "",
@@ -677,6 +674,7 @@ export default function AdminDashboard() {
       fetchAnnouncements({ silent: true });
     }
   };
+  const [fetchingCalendar, setFetchingCalendar] = useState(false);
   const fetchLocalEvents = async () => {
     setFetchingCalendar(true);
     try {
@@ -708,7 +706,9 @@ export default function AdminDashboard() {
         await authFetch(`${API}/api/activity-logs/stats`)
       ).json();
       setLogStats(d);
-    } catch {}
+    } catch {
+      // Non-critical — the stats cards just keep showing whatever they last had.
+    }
   };
   // ─── Users / Admins ───────────────────────────────────────────────────────────
   const handleAddAdmin = async () => {
@@ -2648,10 +2648,6 @@ export default function AdminDashboard() {
             setLogModuleFilter={setLogModuleFilter}
             logActionFilter={logActionFilter}
             setLogActionFilter={setLogActionFilter}
-            onRefresh={() => {
-              fetchLogs();
-              fetchLogStats();
-            }}
           />
         )}
         {activeTab === "content" && (

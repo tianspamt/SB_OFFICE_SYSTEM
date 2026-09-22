@@ -237,7 +237,7 @@ router.post('/:id/detect-meta', verifyToken, secretaryOnly, storedMetaHandler({ 
 // approving what Clerk/Councilor submit.
 router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handleMulterError, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'A file is required.' })
-  const { resolution_number, title, year, category, officials, approved_on, co_authors, sponsors } = req.body
+  const { resolution_number, title, year, category, officials } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const { year: parsedYear, error: yearError } = parseYearField(year)
   if (yearError) return res.status(400).json({ error: yearError })
@@ -311,7 +311,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
 // canEditLegislativeRecord: Secretary/Clerk only, in any bucket.
 router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async (req, res) => {
   const { id } = req.params
-  const { resolution_number, title, year, category, officials } = req.body
+  const { resolution_number, title, year, category, officials, approved_on, co_authors, sponsors } = req.body
   if (!title) return res.status(400).json({ error: 'Title is required.' })
   const { year: parsedYear, error: yearError } = parseYearField(year)
   if (yearError) return res.status(400).json({ error: yearError })

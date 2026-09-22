@@ -15,7 +15,7 @@ const STAT_DEFS = [
   { label: "Failed", key: "failed", color: "#c53030" },
 ];
 
-export default function LogsPage({ logs, logStats, fetchingLogs, logModuleFilter, setLogModuleFilter, logActionFilter, setLogActionFilter, onRefresh }) {
+export default function LogsPage({ logs, logStats, fetchingLogs, logModuleFilter, setLogModuleFilter, logActionFilter, setLogActionFilter }) {
   const isMobile = useIsMobile();
   // Which log entry's mobile "more details" menu (role/module/description/
   // IP/status) is open — the row list only has room for the action + user +

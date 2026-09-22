@@ -23,7 +23,13 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // varsIgnorePattern covers `const Foo = ...`; argsIgnorePattern is the
+      // same convention for a destructured function parameter, e.g.
+      // `({ icon: Icon }) => <Icon />` — core no-unused-vars doesn't treat a
+      // JSX tag as a use of the identifier (that needs eslint-plugin-react's
+      // jsx-uses-vars, which this config doesn't pull in), so every
+      // icon-as-a-prop component was a false positive without this.
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]' }],
     },
   },
 ])

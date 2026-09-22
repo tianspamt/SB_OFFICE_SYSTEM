@@ -147,7 +147,9 @@ router.put('/:id', verifyToken, secretaryOrClerk, upload.single('file'), handleM
       session_number: session_number || null,
       session_date,
       session_type: session_type || 'regular',
-      venue: venue || null,
+      // Same default as upload — an empty Venue on edit shouldn't lose the
+      // hall's name, since the Edit form always starts pre-filled with it.
+      venue: venue || SESSION_VENUE,
     }
 
     if (req.file) {

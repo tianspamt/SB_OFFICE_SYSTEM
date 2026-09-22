@@ -26,7 +26,16 @@ export const downloadFile = async (fileUrl, filepath, name) => {
     const res = await fetch(fileUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blobUrl = window.URL.createObjectURL(await res.blob());
-    const ext = String(filepath || "").split(".").pop();
+    // The last segment after a dot, e.g. "docx" from ".../file.docx" — but
+    // only when that segment is actually a plausible extension. A path with
+    // no dot at all would otherwise make .split(".").pop() return the whole
+    // path (folder and slash included) as the "extension".
+    const lastSegment = String(filepath || "").split("/").pop();
+    const dotIndex = lastSegment.lastIndexOf(".");
+    const ext =
+      dotIndex > 0 && lastSegment.length - dotIndex <= 6
+        ? lastSegment.slice(dotIndex + 1)
+        : "";
     const a = document.createElement("a");
     a.href = blobUrl;
     a.download = `${safeFileName(name)}${ext ? `.${ext}` : ""}`;
