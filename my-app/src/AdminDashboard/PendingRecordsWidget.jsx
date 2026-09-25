@@ -30,6 +30,7 @@ import {
   READING_STATUSES,
   useCommentThread,
   usePublishNumberDetection,
+  nextNumberMismatch,
 } from "./useLegislativeReview";
 
 // ─── Per-record-type wiring ───────────────────────────────────────────────
@@ -473,6 +474,12 @@ function ReviewModal({
       setPublishNumberError(`${cfg.label} number is required.`);
       return;
     }
+    // Latest published + 1 only — see nextNumberMismatch / helpers/recordNumbers.js.
+    const sequenceError = nextNumberMismatch(number, publishDetect.next, cfg.label.toLowerCase());
+    if (sequenceError) {
+      setPublishNumberError(sequenceError);
+      return;
+    }
     // On failure, runAction's own showError already surfaces the message via
     // the ModalAlert toast above (z-index above this modal), so there's
     // nothing further to show here — just leave the modal open to retry.
@@ -778,11 +785,16 @@ function ReviewModal({
           setShowPublishModal(false);
           publishDetect.reset();
         }}
+        nextNumber={publishDetect.next}
+        onYearChange={(year) => publishDetect.refreshNext(item.id, null, year)}
         detection={publishDetect.detected}
         onSkipDetection={publishDetect.reset}
         uppercase={item.record_type === "resolution"}
         dateValue={publishDateValue}
-        onDateChange={setPublishDateValue}
+        onDateChange={(date) => {
+            setPublishDateValue(date);
+            publishDetect.refreshNext(item.id, date);
+          }}
         submitting={submitting}
         error={publishNumberError}
       />

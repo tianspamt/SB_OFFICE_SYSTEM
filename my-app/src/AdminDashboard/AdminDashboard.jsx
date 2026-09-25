@@ -33,6 +33,7 @@ import {
   CalendarDays,
   Archive,
   XCircle,
+  Lock,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import LoadingModal from "./LoadingModal";
@@ -87,6 +88,18 @@ import DashboardPage from "./DashboardPage";
 import ContentManagementPage from "./ContentManagementPage";
 import ArchivesPage from "./ArchivesPage";
 import { TabNavigation, PresentOverlay } from "./LegislativeComponents";
+import { CreateAccountFields, LoginAccountField, SuggestMatchesModal } from "./AccountLinking";
+import MyProfileRecords, { NotLinkedNotice } from "./MyProfileRecords";
+import MyAccountTab from "./MyAccountTab";
+import {
+  appendAccountFields,
+  accountFieldsError,
+  accountLinkMessage,
+  MY_RECORDS_QUERY_KEY,
+  fetchMyRecords,
+  myRecordTabs,
+  myRecordStats,
+} from "./authorWorkflow";
 
 const ARCHIVABLE_TYPES = [
   "user",
@@ -101,11 +114,31 @@ const ARCHIVABLE_TYPES = [
 // readable, so it gets its own wording.
 const DELETE_TYPE_LABELS = { session_agenda: "order of business" };
 
+// Every sidebar module key — the only values ?tab= may restore.
+const MODULE_TABS = [
+  "dashboard", "users", "admins", "ordinances", "resolutions", "officials", "sessions",
+  "session_agendas", "announcements", "calendar", "logs", "content", "archives",
+];
+
 export default function AdminDashboard() {
   // ── core ──
   const [users, setUsers] = useState([]);
   const [admin, setAdmin] = useState(null);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  // The open module lives in the address (/dashboard?tab=ordinances), so a
+  // page refresh reopens the same module instead of falling back to the
+  // Dashboard. Unknown values fall back to "dashboard"; tabs the account
+  // isn't allowed to see are sent back there once the account is known
+  // (see the ADMIN_ONLY_TABS effect below).
+  const [activeTab, setActiveTab] = useState(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    return MODULE_TABS.includes(fromUrl) ? fromUrl : "dashboard";
+  });
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (activeTab === "dashboard") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", activeTab);
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, "", url);
+  }, [activeTab]);
   // Floating success/error toasts for routine action confirmations (save,
   // delete, publish, etc.) — non-blocking, unlike modalMessage below which
   // stays anchored inside an open modal for validation feedback.
@@ -374,7 +407,20 @@ export default function AdminDashboard() {
     notes: "",
   });
   const [officialPhoto, setOfficialPhoto] = useState(null);
+  const [showSuggestMatches, setShowSuggestMatches] = useState(false);
   const [selectedOfficialProfile, setSelectedOfficialProfile] = useState(null);
+
+  // ── "My Profile" — the logged-in user's own profile, opened by clicking
+  // their own avatar in the sidebar. Separate from selectedOfficialProfile
+  // above (which is Officials Management viewing/editing SOMEONE ELSE) so
+  // self-service editing can never leak into that admin-only flow.
+  const [showMyProfile, setShowMyProfile] = useState(false);
+  const [myProfileTab, setMyProfileTab] = useState("account");
+  const [myProfileName, setMyProfileName] = useState("");
+  // Email address the last "Email Me a Reset Link" went to, shown under the
+  // button so the user knows where to look.
+  const [myResetLinkSentTo, setMyResetLinkSentTo] = useState("");
+  const [myProfileSubmitting, setMyProfileSubmitting] = useState(false);
 
   // ── edit official states ──
   const [editingOfficial, setEditingOfficial] = useState(null);
@@ -779,7 +825,11 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showSuccessModal("User added!");
+        showSuccessModal(
+          ["councilor", "vice_mayor", "liga_ng_mga_barangay", "sk_federated"].includes(newUser.position || "councilor")
+            ? accountLinkMessage(data, "User added!")
+            : "User added!"
+        );
         setNewUser({ name: "", username: "", email: "", password: "", position: "councilor" });
         setNewUserPhoto(null);
         setShowAddUserModal(false);
@@ -1298,9 +1348,15 @@ export default function AdminDashboard() {
       showModalMsg(missing, "error");
       return;
     }
+    const accountError = accountFieldsError(newOfficial);
+    if (accountError) {
+      showModalMsg(accountError, "error");
+      return;
+    }
     setSubmitting(true);
     const fd = new FormData();
     fd.append("full_name", newOfficial.full_name);
+    appendAccountFields(fd, newOfficial);
     if (newOfficial.term_period)
       fd.append("term_period", newOfficial.term_period);
     if (newOfficial.term_start) fd.append("term_start", newOfficial.term_start);
@@ -1316,7 +1372,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showSuccessModal("Council member added!");
+        showSuccessModal(accountLinkMessage(data, "Council member added!"));
         setNewOfficial({
           full_name: "",
           position: "",
@@ -1416,7 +1472,6 @@ export default function AdminDashboard() {
         r.officials &&
         r.officials.some((x) => x.id === id)
     );
-
   // ─── Terms ────────────────────────────────────────────────────────────────────
   const handleOpenAddTerm = (memberId) => {
     setTermTarget({ memberId });
@@ -2003,6 +2058,79 @@ export default function AdminDashboard() {
   const canManageSessionAgenda = isSecretary || isClerk;
   const canManageOfficials = isSecretary || isClerk;
 
+  // ── "My Profile" ──────────────────────────────────────────────────────────────
+  // The logged-in account's own council member and records come from
+  // GET /api/users/me/records, which follows the account link
+  // (sb_council_members.user_id) — the old name match broke whenever either
+  // name was edited. Secretary/Clerk have no member record, so they only see
+  // the Account tab. Loaded only while the modal is open.
+  const {
+    data: myRecords,
+    isLoading: fetchingMyRecords,
+    refetch: refetchMyRecords,
+  } = useQuery({
+    queryKey: MY_RECORDS_QUERY_KEY,
+    queryFn: fetchMyRecords,
+    enabled: showMyProfile,
+    staleTime: 15000,
+  });
+
+  const openMyProfile = () => {
+    setMyProfileName(admin?.name || "");
+    setMyResetLinkSentTo("");
+    setModalMessage("");
+    setMyProfileTab("account");
+    setShowMyProfile(true);
+  };
+
+  // Updates the account's own name — the one piece of their account a
+  // non-admin user may edit themselves (see PUT /:id/name in routes/users.js).
+  const handleUpdateMyName = async () => {
+    const name = myProfileName.trim();
+    if (!name) {
+      showModalMsg("Name is required.", "error");
+      return;
+    }
+    setMyProfileSubmitting(true);
+    try {
+      const res = await authFetch(`${API}/api/users/${admin.id}/name`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const updated = { ...admin, name: data.name };
+        setAdmin(updated);
+        localStorage.setItem("user", JSON.stringify(updated));
+        showSuccessModal("Name updated!");
+      } else showModalMsg(data.error || data.errors?.[0]?.msg || "Update failed!", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setMyProfileSubmitting(false);
+    }
+  };
+
+  // Emails the signed-in account a reset link to its own address (POST
+  // /api/users/me/reset-password) — the same single-use, 1-hour link the
+  // Secretary's Reset Password sends. The password itself is then set on the
+  // Reset Password page the link opens, not in this modal.
+  const handleSendMyResetLink = async () => {
+    setMyProfileSubmitting(true);
+    try {
+      const res = await authFetch(`${API}/api/users/me/reset-password`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMyResetLinkSentTo(data.email);
+        showSuccessModal(`A password reset link was sent to ${data.email}. It expires in 1 hour.`);
+      } else showModalMsg(data.error || "Couldn't send the reset link.", "error");
+    } catch {
+      showModalMsg("Server error!", "error");
+    } finally {
+      setMyProfileSubmitting(false);
+    }
+  };
+
   // "users"/"admins"/"archives" are gated for every position; "logs" is the
   // only one that ever varies — excluded solely for clerks (canManageUsers
   // but not canViewLogs), included for everyone else (secretaries via
@@ -2010,6 +2138,15 @@ export default function AdminDashboard() {
   const ADMIN_ONLY_TABS = isClerk
     ? ["users", "admins", "archives"]
     : ["users", "admins", "logs", "archives"];
+  // A refresh (or a pasted link) can land on a module this account may not
+  // open — handleTabChange's check never ran for it, so apply it here once
+  // the account is loaded.
+  useEffect(() => {
+    if (admin && !isAdmin && ADMIN_ONLY_TABS.includes(activeTab)) setActiveTab("dashboard");
+    if (admin && activeTab === "logs" && !canViewLogs && isAdmin) setActiveTab("dashboard");
+    if (admin && activeTab === "archives" && !canViewArchives) setActiveTab("dashboard");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, activeTab]);
   const pageLoading =
     fetchingUsers ||
     fetchingOrdinances ||
@@ -2352,7 +2489,13 @@ export default function AdminDashboard() {
           )}
         </nav>
         <div className={styles.sidebarFooter}>
-          <div className={styles.adminInfo}>
+          <button
+            type="button"
+            className={styles.adminInfo}
+            onClick={openMyProfile}
+            title="My Profile"
+            style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+          >
             <UserAvatar name={admin?.name} photo={admin?.photo} size={34} fallbackBg="#c09a3c" />
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
@@ -2374,7 +2517,7 @@ export default function AdminDashboard() {
                   : "User"}
               </div>
             </div>
-          </div>
+          </button>
           <button className={styles.logoutBtn} onClick={handleLogout}>
             <LogOut size={15} strokeWidth={1.5} />
             <span className={styles.logoutLabel}>Logout</span>
@@ -2578,7 +2721,14 @@ export default function AdminDashboard() {
               setModalMessage("");
               setShowOfficialModal(true);
             }}
+            onSuggestMatches={() => setShowSuggestMatches(true)}
             readOnly={!canManageOfficials}
+          />
+        )}
+        {showSuggestMatches && (
+          <SuggestMatchesModal
+            onClose={() => setShowSuggestMatches(false)}
+            onLinked={fetchOfficials}
           />
         )}
 
@@ -2898,6 +3048,11 @@ export default function AdminDashboard() {
                 />
               </div>
 
+              <CreateAccountFields
+                form={newOfficial}
+                setForm={setNewOfficial}
+                styles={styles}
+              />
             </div>
 
             {/* ── Sticky footer ── */}
@@ -3036,6 +3191,14 @@ export default function AdminDashboard() {
                   <p className={styles.fileHint}>Current photo on file</p>
                 )}
               </div>
+              <LoginAccountField
+                member={editingOfficial}
+                styles={styles}
+                onChanged={(updated) => {
+                  setEditingOfficial((prev) => (prev ? { ...prev, user_id: updated.user_id } : prev));
+                  fetchOfficials();
+                }}
+              />
             </div>
             <div
               style={{
@@ -3450,6 +3613,123 @@ export default function AdminDashboard() {
           record={officialRecordPreview}
           onClose={() => setOfficialRecordPreview(null)}
         />
+      )}
+
+      {/* My Profile — opened by clicking your own avatar in the sidebar.
+          Account tab (name + password) is always shown; the record tabs
+          (Needs My Approval / Authored / Co-Authored / Rejected, see
+          MyProfileRecords.jsx) only appear when this account is linked to a
+          council member — Secretary/Clerk have none, so they only ever see
+          the Account tab. */}
+      {showMyProfile && admin && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setShowMyProfile(false)}
+        >
+          <div
+            className={styles.officialModal}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.officialHero}>
+              <button
+                className={styles.officialModalCloseBtn}
+                onClick={() => setShowMyProfile(false)}
+                aria-label="Close modal"
+              >
+                <X size={16} />
+              </button>
+              <div className={styles.officialHeroTop}>
+                <div className={styles.officialAvatarWrap}>
+                  {admin.photo ? (
+                    <img
+                      src={admin.photo}
+                      alt={admin.name}
+                      className={styles.officialAvatarPhoto}
+                    />
+                  ) : (
+                    <div className={styles.officialAvatarFallback}>
+                      {(admin.name || "?").charAt(0)}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div className={styles.officialHeroName}>{admin.name}</div>
+                  <div>
+                    <span className={styles.officialHeroPosition}>
+                      {position === "secretary"
+                        ? "Secretary"
+                        : position === "clerk"
+                        ? "Clerk"
+                        : position === "vice_mayor"
+                        ? "Vice Mayor"
+                        : position === "councilor"
+                        ? "Councilor"
+                        : position === "liga_ng_mga_barangay"
+                        ? "Liga ng mga Barangay"
+                        : position === "sk_federated"
+                        ? "SK Federated"
+                        : isAdmin
+                        ? "Administrator"
+                        : "User"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {myRecordStats(myRecords).length > 0 && (
+                <div className={styles.officialStatsRow}>
+                  {myRecordStats(myRecords).map((stat) => (
+                    <div key={stat.label} className={styles.officialStatChip}>
+                      <div className={styles.officialStatValue}>{stat.value}</div>
+                      <div className={styles.officialStatLabel}>{stat.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.officialTabsWrap}>
+              <TabNavigation
+                tabs={[
+                  { id: "account", label: "Account" },
+                  ...myRecordTabs(myRecords),
+                ]}
+                activeTab={myProfileTab}
+                onTabChange={setMyProfileTab}
+              />
+            </div>
+
+            <div className={styles.officialModalBody}>
+              {myProfileTab === "account" && (
+                <MyAccountTab
+                  admin={admin}
+                  name={myProfileName}
+                  onNameChange={setMyProfileName}
+                  onSaveName={handleUpdateMyName}
+                  onSendResetLink={handleSendMyResetLink}
+                  submitting={myProfileSubmitting}
+                  resetSentTo={myResetLinkSentTo}
+                  notice={<NotLinkedNotice data={myRecords} />}
+                />
+              )}
+
+              {myProfileTab !== "account" && (
+                <MyProfileRecords
+                  tab={myProfileTab}
+                  data={myRecords}
+                  loading={fetchingMyRecords}
+                  styles={styles}
+                  onPreview={setOfficialRecordPreview}
+                  onChanged={() => {
+                    refetchMyRecords();
+                    fetchOrdinances();
+                    fetchResolutions();
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Term */}

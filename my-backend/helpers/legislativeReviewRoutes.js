@@ -5,6 +5,9 @@ const { canArchiveLegislativeRecord, escapeHtml, yearInManila, parseApprovedDay 
 const { logActivity } = require('./logger')
 const { findDuplicateRecord } = require('./duplicates')
 const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = require('./notify')
+const { STAGE_LABELS, stageForStatus, authorOf, approvalFor } = require('./authorApprovals')
+const { memberForUser, userForMember } = require('./accountLinks')
+const { nextNumberFor, sequentialNumberError } = require('./recordNumbers')
 
 // Builds the shared review-workflow routes — accept / request-changes /
 // vm-approve / publish / archive (plus advance-reading for ordinances/
@@ -49,6 +52,14 @@ const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = requ
 // direct pending → ready_to_publish jump on Accept (see `hasReadings` below).
 const READING_STATUSES = ['first_reading', 'second_reading', 'third_reading']
 
+// Author approval (panel recommendation, Author_Approval_Workflow_v2.docx):
+// for hasReadings types, the record's Author must approve each completed
+// reading before /advance-reading moves it on, and give a final approval
+// before /publish. Tracked in `author_approvals` (migrations/031), one row per
+// (record, stage), rather than as extra `status` values — the state machine
+// above stays exactly as it was. Only records accepted after this shipped
+// carry author_approval_required = true; older ones finish under the old rules.
+
 function createLegislativeReviewRoutes({
   table,
   entityType,
@@ -62,6 +73,9 @@ function createLegislativeReviewRoutes({
   uppercaseNumber = false,
   approvedDateField,
   hasReadings,
+  // (year, seq) => number in this type's usual wording, used for the next
+  // number when no published record exists yet to copy the format from.
+  defaultNumberFormat,
 }) {
   const router = express.Router()
   const lower = singularLabel.toLowerCase()
@@ -95,6 +109,23 @@ function createLegislativeReviewRoutes({
   const conflictResponse = (res) =>
     res.status(409).json({ error: `${singularLabel} was just updated by someone else — please refresh.` })
 
+  // null when no author approval is needed right now; otherwise a 409 body
+  // explaining what's still missing. Used as the gate in /advance-reading and
+  // /publish.
+  async function missingAuthorApproval(existing) {
+    if (!hasReadings || !existing.author_approval_required) return null
+    const stage = stageForStatus(existing.status)
+    if (!stage) return null
+    const approval = await approvalFor(entityType, existing.id, stage)
+    if (approval?.decision === 'approved') return null
+    const what = STAGE_LABELS[stage]
+    if (approval?.decision === 'declined')
+      return { error: `The author declined the ${what}. Request their approval again, or request changes / reject.`, authorApproval: 'declined' }
+    if (approval?.decision === 'pending')
+      return { error: `Waiting for the author's approval of the ${what}.`, authorApproval: 'pending' }
+    return { error: `The author's approval of the ${what} is required first. Use "Request Author Approval".`, authorApproval: 'missing' }
+  }
+
   const notifyVmReadyForApproval = (existing, id) => notifyByPosition('vice_mayor', {
     message: `${singularLabel} ready for your approval: ${labelOf(existing)}`,
     entityType, entityId: id,
@@ -117,6 +148,7 @@ function createLegislativeReviewRoutes({
     try {
       const { data, conflict, error } = await atomicUpdate(id, 'pending', {
         status: targetStatus, reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+        ...(hasReadings && { author_approval_required: true }),
       })
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
@@ -144,6 +176,8 @@ function createLegislativeReviewRoutes({
       const isFinalReading = currentIndex === READING_STATUSES.length - 1
       const nextStatus = isFinalReading ? 'ready_to_publish' : READING_STATUSES[currentIndex + 1]
       try {
+        const missing = await missingAuthorApproval(existing)
+        if (missing) return res.status(409).json(missing)
         const { data, conflict, error } = await atomicUpdate(id, existing.status, { status: nextStatus })
         if (conflict) return conflictResponse(res)
         if (error) return res.status(500).json({ error: error.message })
@@ -287,12 +321,46 @@ function createLegislativeReviewRoutes({
     }
   })
 
+  // GET /:id/next-number?year=YYYY | ?date=YYYY-MM-DD — Secretary. The only
+  // number this record may be published with for that year (latest published
+  // + 1), in the office's usual format, so the Publish dialog can pre-fill it.
+  // `year` is the numbering year the Secretary picked (any year — old records
+  // included); else the year of `date` (the approved date in the dialog); else
+  // the Vice-Mayor's approval date, else today.
+  if (numberField) {
+    router.get('/:id/next-number', verifyToken, secretaryOnly, async (req, res) => {
+      const { id } = req.params
+      try {
+        const { data: existing } = await supabase.from(table).select('*').eq('id', id).single()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        const askedYear = Number(req.query.year)
+        const parsed = typeof req.query.date === 'string' && req.query.date ? parseApprovedDay(req.query.date) : null
+        const year = Number.isInteger(askedYear) && askedYear >= 1900 && askedYear <= 2100
+          ? askedYear
+          : parsed
+          ? parsed.getUTCFullYear()
+          : yearInManila(existing[approvedDateField] || new Date())
+        const next = await nextNumberFor({ table, numberField, entityType, year, excludeId: id, defaultFormat: defaultNumberFormat })
+        res.json({ success: true, data: { ...next, number: uppercaseNumber ? next.number.toUpperCase() : next.number } })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+  }
+
   // PUT /:id/publish — Secretary, approved → published
   router.put('/:id/publish', verifyToken, secretaryOnly, async (req, res) => {
     const { id } = req.params
     const { notFound, wrongStatus, data: existing } = await loadInStatus(id, 'approved')
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not approved for publishing.` })
+
+    try {
+      const missing = await missingAuthorApproval(existing)
+      if (missing) return res.status(409).json(missing)
+    } catch (err) {
+      return res.status(500).json({ error: err.message })
+    }
 
     const patch = { status: 'published' }
     // The Secretary can set the record's approved date here (the dialog
@@ -308,6 +376,20 @@ function createLegislativeReviewRoutes({
       let number = typeof req.body[numberField] === 'string' ? req.body[numberField].trim() : ''
       if (uppercaseNumber) number = number.toUpperCase()
       if (!number) return res.status(400).json({ error: `${numberLabel} is required to publish.` })
+
+      // Numbers are sequential per year: if the latest published for the
+      // year written in the number is 13, this one must be 14 (see
+      // helpers/recordNumbers.js). Any year is allowed, so old records from
+      // past years can be encoded — only the sequence is enforced.
+      const fallbackYear = patch.year ?? yearInManila(existing[approvedDateField] || new Date())
+      try {
+        const seqError = await sequentialNumberError({
+          table, numberField, entityType, excludeId: id, number, fallbackYear, lower, defaultFormat: defaultNumberFormat,
+        })
+        if (seqError) return res.status(400).json({ error: seqError, sequenceError: true })
+      } catch (seqErr) {
+        return res.status(500).json({ error: seqErr.message })
+      }
 
       // Case-insensitive duplicate check across every other record of this
       // type, not just the currently loaded page — the frontend's own check
@@ -351,6 +433,167 @@ function createLegislativeReviewRoutes({
       res.status(500).json({ error: err.message })
     }
   })
+
+  if (hasReadings) {
+    // GET /:id/author-approval — everything the View modal's approval panel
+    // needs: whether approval applies, the current stage, every decision so
+    // far (history for the panel/auditors), who the author is, and whether the
+    // caller is that author (so only they see Approve/Decline).
+    router.get('/:id/author-approval', verifyToken, async (req, res) => {
+      const { id } = req.params
+      try {
+        const { data: existing } = await supabase
+          .from(table).select('id, status, author_approval_required').eq('id', id).single()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        const [author, myMember, { data: approvals, error }] = await Promise.all([
+          authorOf(entityType, id),
+          memberForUser(req.user.id),
+          supabase.from('author_approvals')
+            .select('id, stage, decision, comment, on_behalf, requested_at, decided_at, official_id')
+            .eq('entity_type', entityType).eq('entity_id', id)
+            .order('requested_at', { ascending: true }),
+        ])
+        if (error) return res.status(500).json({ error: error.message })
+        const authorAccount = author ? await userForMember(author.id) : null
+        res.json({
+          required: !!existing.author_approval_required,
+          current_stage: stageForStatus(existing.status),
+          author,
+          author_has_account: !!authorAccount,
+          is_author: !!(author && myMember && myMember.id === author.id),
+          approvals: approvals || [],
+        })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+
+    // POST /:id/author-approval/request — Secretary, once a reading is done
+    // (or after the Vice-Mayor's approval, for the final 'publish' stage).
+    // Emails the author's linked account. A declined stage can be requested
+    // again; the same row just goes back to 'pending'.
+    router.post('/:id/author-approval/request', verifyToken, secretaryOnly, async (req, res) => {
+      const { id } = req.params
+      try {
+        const { data: existing } = await supabase.from(table).select('*').eq('id', id).single()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        const stage = stageForStatus(existing.status)
+        if (!stage || !existing.author_approval_required)
+          return res.status(400).json({ error: `${singularLabel} doesn't need author approval at this stage.` })
+        const author = await authorOf(entityType, id)
+        if (!author) return res.status(400).json({ error: `No Author is tagged on this ${lower}. Tag one first, or record the approval on the author's behalf.` })
+        const account = await userForMember(author.id)
+        if (!account)
+          return res.status(400).json({ error: `${author.full_name} has no linked login account. Record the approval on their behalf instead.`, noAccount: true })
+        const current = await approvalFor(entityType, id, stage)
+        if (current?.decision === 'approved') return res.status(400).json({ error: 'The author already approved this stage.' })
+
+        const { data, error } = await supabase.from('author_approvals').upsert({
+          entity_type: entityType, entity_id: Number(id), stage, official_id: author.id,
+          decision: 'pending', comment: null, on_behalf: false,
+          requested_by: req.user.id, requested_at: new Date().toISOString(),
+          decided_by_user_id: null, decided_at: null, reminder_sent_at: null,
+        }, { onConflict: 'entity_type,entity_id,stage' }).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+
+        await logActivity(req, 'REQUEST_AUTHOR_APPROVAL', activityModule,
+          `Requested ${author.full_name}'s approval (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
+        notify({
+          recipientId: account.id,
+          emailSubject: `Your Approval Is Needed: ${labelOf(existing)}`,
+          emailHtml: notificationEmailHtml(
+            'Your Approval Is Needed',
+            `As the author of <strong>${escapeHtml(labelOf(existing))}</strong>, your approval of the <strong>${STAGE_LABELS[stage]}</strong> is needed before it can move forward. Sign in and open <em>My Profile → Needs My Approval</em>.`
+          ),
+        })
+        res.json({ success: true, data })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+
+    // PUT /:id/author-approval/decide — { decision: 'approved'|'declined', comment? }
+    // Only the account linked to the record's Author may answer; having the
+    // Councilor position isn't enough. The WHERE decision='pending' makes a
+    // double-click or two tabs unable to both record a decision.
+    router.put('/:id/author-approval/decide', verifyToken, async (req, res) => {
+      const { id } = req.params
+      const { decision } = req.body
+      const comment = (req.body.comment || '').trim() || null
+      if (!['approved', 'declined'].includes(decision))
+        return res.status(400).json({ error: "decision must be 'approved' or 'declined'." })
+      try {
+        const { data: existing } = await supabase.from(table).select('*').eq('id', id).single()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        const stage = stageForStatus(existing.status)
+        const [author, myMember] = await Promise.all([authorOf(entityType, id), memberForUser(req.user.id)])
+        if (!author || !myMember || myMember.id !== author.id)
+          return res.status(403).json({ error: `Only the author of this ${lower} can approve or decline it.` })
+        const current = stage ? await approvalFor(entityType, id, stage) : null
+        if (!current || current.decision !== 'pending')
+          return res.status(400).json({ error: 'There is no approval request waiting for you on this stage.' })
+
+        const { data, error } = await supabase.from('author_approvals')
+          .update({ decision, comment, decided_by_user_id: req.user.id, decided_at: new Date().toISOString() })
+          .eq('id', current.id).eq('decision', 'pending')
+          .select().single()
+        if (error?.code === 'PGRST116') return res.status(409).json({ error: 'This request was just answered — please refresh.' })
+        if (error) return res.status(500).json({ error: error.message })
+
+        const verb = decision === 'approved' ? 'approved' : 'declined'
+        await logActivity(req, decision === 'approved' ? 'AUTHOR_APPROVE' : 'AUTHOR_DECLINE', activityModule,
+          `Author ${verb} (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
+        notifyByPosition('secretary', {
+          emailSubject: `Author ${decision === 'approved' ? 'Approved' : 'Declined'}: ${labelOf(existing)}`,
+          emailHtml: notificationEmailHtml(
+            `Author ${decision === 'approved' ? 'Approved' : 'Declined'}`,
+            `${escapeHtml(author.full_name)} ${verb} the <strong>${STAGE_LABELS[stage]}</strong> of <strong>${escapeHtml(labelOf(existing))}</strong>.` +
+              (comment ? `<br/><em>"${escapeHtml(comment)}"</em>` : '')
+          ),
+        })
+        res.json({ success: true, data })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+
+    // PUT /:id/author-approval/on-behalf — { note } (required). Secretary
+    // records the author's approval for an author with no linked account
+    // (past official, account not created yet) — e.g. "approved verbally
+    // during the 3rd reading, session of Sept 22". Flagged on_behalf = true.
+    router.put('/:id/author-approval/on-behalf', verifyToken, secretaryOnly, async (req, res) => {
+      const { id } = req.params
+      const note = (req.body.note || '').trim()
+      if (!note) return res.status(400).json({ error: 'A note explaining how the author approved is required.' })
+      try {
+        const { data: existing } = await supabase.from(table).select('*').eq('id', id).single()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        const stage = stageForStatus(existing.status)
+        if (!stage || !existing.author_approval_required)
+          return res.status(400).json({ error: `${singularLabel} doesn't need author approval at this stage.` })
+        const author = await authorOf(entityType, id)
+        if (author && (await userForMember(author.id)))
+          return res.status(400).json({ error: `${author.full_name} has a linked account — request their approval so they can approve it themselves.` })
+        const current = await approvalFor(entityType, id, stage)
+        if (current?.decision === 'approved') return res.status(400).json({ error: 'This stage is already approved.' })
+
+        const now = new Date().toISOString()
+        const { data, error } = await supabase.from('author_approvals').upsert({
+          entity_type: entityType, entity_id: Number(id), stage, official_id: author?.id || null,
+          decision: 'approved', comment: note, on_behalf: true,
+          requested_by: req.user.id, requested_at: current?.requested_at || now,
+          decided_by_user_id: req.user.id, decided_at: now,
+        }, { onConflict: 'entity_type,entity_id,stage' }).select().single()
+        if (error) return res.status(500).json({ error: error.message })
+
+        await logActivity(req, 'AUTHOR_APPROVE_ON_BEHALF', activityModule,
+          `Recorded author approval on behalf of ${author?.full_name || 'the author'} (${STAGE_LABELS[stage]}): ${labelOf(existing)} — ${note}`)
+        res.json({ success: true, data })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+  }
 
   // DELETE /:id — archive. Who may depends on which bucket the record is
   // currently in and, for Councilor/Vice-Mayor, whether they created it

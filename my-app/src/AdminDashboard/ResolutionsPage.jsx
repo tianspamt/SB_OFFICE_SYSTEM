@@ -50,6 +50,7 @@ import {
   useResetOnChange,
   useDeepLinkedTab,
   usePublishNumberDetection,
+  nextNumberMismatch,
 } from "./useLegislativeReview";
 
 import {
@@ -68,6 +69,7 @@ import {
 } from "./LegislativeComponents";
 import { ModalAlert } from "./AdminComponents";
 import ConfirmModal from "./ConfirmModal";
+import AuthorApprovalPanel from "./AuthorApprovalPanel";
 import LoadingModal from "./LoadingModal";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
@@ -98,13 +100,20 @@ export default function ResolutionsPage({
 }) {
   // Lets the dashboard's "Needs your review" widget deep-link straight into
   // the Pending tab instead of landing on the default Published tab.
-  const [activeTab, setActiveTab] = useDeepLinkedTab("published", initialSubTab);
+  const [activeTab, setActiveTab] = useDeepLinkedTab(
+    "published",
+    initialSubTab,
+    canPublish ? ["published", "pending", "ready_to_publish"] : ["published"]
+  );
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("All");
   const [dateFilter, setDateFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [presentTarget, setPresentTarget] = useState(null);
+  // False while the open record still needs its author's approval for the
+  // current stage (see AuthorApprovalPanel) — locks Advance / Publish.
+  const [authorGateOpen, setAuthorGateOpen] = useState(true);
   const queryClient = useQueryClient();
   // Co-Author / Sponsor tagging (see helpers/officialRoleRoutes.js) draws its
   // picker from the same full council-member list Councilor Management uses,
@@ -436,6 +445,12 @@ export default function ResolutionsPage({
     const number = publishNumberValue.trim();
     if (!number) {
       setPublishNumberError("Resolution number is required.");
+      return;
+    }
+    // Latest published + 1 only — see nextNumberMismatch / helpers/recordNumbers.js.
+    const sequenceError = nextNumberMismatch(number, publishDetect.next, "resolution");
+    if (sequenceError) {
+      setPublishNumberError(sequenceError);
       return;
     }
     if (isDuplicateRecordNumber(resolutions, "resolution_number", number, viewTarget.id)) {
@@ -1227,6 +1242,16 @@ export default function ResolutionsPage({
                       </button>
                     </div>
                   )}
+                  {(READING_STATUSES.includes(viewTarget.status) || viewTarget.status === "approved") && (
+                    <AuthorApprovalPanel
+                      key={viewTarget.id}
+                      route="resolutions"
+                      record={viewTarget}
+                      isSecretary={isSecretary}
+                      onGateChange={setAuthorGateOpen}
+                      onDecided={onRefresh}
+                    />
+                  )}
 
                   <div
                     className={lStyles.viewModalFileActions}
@@ -1269,7 +1294,8 @@ export default function ResolutionsPage({
                         </button>
                         <button
                           className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
-                          disabled={reviewSubmitting}
+                          disabled={reviewSubmitting || !authorGateOpen}
+                          title={!authorGateOpen ? "Waiting for the author's approval of this reading" : ""}
                           onClick={() => handleAdvanceReading(viewTarget.id)}
                         >
                           <CheckCircle2 size={16} /> {nextReadingActionLabel(viewTarget.status)}
@@ -1291,7 +1317,8 @@ export default function ResolutionsPage({
                     {isSecretary && viewTarget.status === "approved" && (
                       <button
                         className={lStyles.pillApprove}
-                        disabled={reviewSubmitting}
+                        disabled={reviewSubmitting || !authorGateOpen}
+                        title={!authorGateOpen ? "Waiting for the author's final approval" : ""}
                         onClick={openPublishModal}
                       >
                         <CheckCircle2 size={16} /> Publish
@@ -1334,11 +1361,16 @@ export default function ResolutionsPage({
             setShowPublishModal(false);
             publishDetect.reset();
           }}
+          nextNumber={publishDetect.next}
+          onYearChange={(year) => publishDetect.refreshNext(viewTarget.id, null, year)}
           detection={publishDetect.detected}
           onSkipDetection={publishDetect.reset}
           uppercase
           dateValue={publishDateValue}
-          onDateChange={setPublishDateValue}
+          onDateChange={(date) => {
+            setPublishDateValue(date);
+            publishDetect.refreshNext(viewTarget.id, date);
+          }}
           submitting={reviewSubmitting}
           error={publishNumberError}
         />

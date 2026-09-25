@@ -17,6 +17,7 @@ import styles from "./OfficialsPage.module.css";
 import { ModalAlert } from "./AdminComponents";
 import { useModalError } from "./AdminContext";
 import LoadingModal from "./LoadingModal";
+import { AccountLinkBadge } from "./AccountLinking";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,9 @@ function MemberCard({
           member's seat *within this specific council*, which can differ
           from whatever their current/other-term position is. */}
       <div className={styles.memberPos}>{term?.position || member.position || "—"}</div>
+      {/* Staff-only: whether this member can sign in and approve their own
+          records (see AccountLinking.jsx). */}
+      {!readOnly && <AccountLinkBadge member={member} />}
 
       {term ? (
         <span
@@ -453,6 +457,7 @@ export default function OfficialsPage({
   onViewProfile,
   onEditMember,
   onAddMember,
+  onSuggestMatches,
   readOnly = false,
 }) {
   const [openGroups, setOpenGroups] = useState({});
@@ -602,12 +607,24 @@ export default function OfficialsPage({
           {allGroups.length} council{allGroups.length !== 1 ? "s" : ""}
         </span>
         {!readOnly && (
-          <button
-            className={styles.primaryBtn}
-            onClick={() => setShowAddCouncil(true)}
-          >
-            <Plus size={14} /> Add Council
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onSuggestMatches && (
+              <button
+                className={styles.primaryBtn}
+                style={{ background: "#fff", color: "#1a365d", border: "1px solid #cbd5e0" }}
+                title="One-time cleanup: link existing members to their login accounts"
+                onClick={onSuggestMatches}
+              >
+                Suggest Account Matches
+              </button>
+            )}
+            <button
+              className={styles.primaryBtn}
+              onClick={() => setShowAddCouncil(true)}
+            >
+              <Plus size={14} /> Add Council
+            </button>
+          </div>
         )}
       </div>
 

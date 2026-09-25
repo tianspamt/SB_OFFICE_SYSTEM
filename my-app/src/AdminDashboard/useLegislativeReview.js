@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { API, authFetch, publishedQueryKey, fetchPublishedList, useModalError } from "./AdminContext";
+import { readUrlSubTab, useSyncSubTabToUrl } from "./useUrlSubTab";
 
 // The three readings an ordinance/resolution draft goes through in session
 // (RA 7160), inserted into the state machine as three more `status` values
@@ -95,18 +96,77 @@ export const REJECTED_STATUS = "rejected";
 // finishing after the dialog moved on to another record can't touch it.
 // `detected` is null | { status: "reading" } | { status: "error", message }
 // | { status: "done", data }.
+// Same parsing as the backend's recordNumberKey (helpers/utils.js): the
+// 4-digit group is the year, the first other number is the sequence.
+const numberKey = (number) => {
+  let year = 0;
+  let seq = 0;
+  for (const g of String(number ?? "").match(/\d+/g) || []) {
+    const n = Number(g);
+    if (!year && g.length === 4 && n >= 1900 && n <= 2100) year = n;
+    else if (!seq) seq = n;
+  }
+  return { year, seq };
+};
+
+// Client-side copy of Publish's sequence rule, so a skipped/reused number is
+// flagged inside the Publish dialog before the request (the backend still
+// enforces it — this only saves a round trip). null when `number` is fine or
+// the next number isn't known yet.
+export function nextNumberMismatch(number, next, lower) {
+  const k = numberKey(number);
+  if (!k.seq || !k.year) return `The ${lower} number must include its sequence number and 4-digit year.`;
+  // A different year than the suggestion was fetched for is the server's
+  // call (the dialog refetches the suggestion for the typed year).
+  if (!next || k.year !== next.year) return null;
+  if (k.seq === next.seq) return null;
+  return next.latest
+    ? `The next ${lower} number for ${next.year} is ${next.seq} ("${next.number}") — the latest published is "${next.latest}". Numbers can't be skipped or reused.`
+    : `This is the first ${lower} published in ${next.year}, so its number must be 1 ("${next.number}").`;
+}
+
+// Also fetches `next` — the only number the record may be published with
+// (latest published for that year + 1, see my-backend/helpers/recordNumbers.js)
+// — which PublishNumberModal pre-fills and shows as a hint. A number read off
+// the document is only used when it IS that next number (possibly worded
+// differently); otherwise the document is probably a draft with a stale or
+// placeholder number, and Publish would refuse it anyway.
 export function usePublishNumberDetection(route) {
   const [detected, setDetected] = useState(null);
+  const [next, setNext] = useState(null);
   const seq = useRef(0);
+  const nextSeq = useRef(0);
 
   const reset = () => {
     seq.current++;
     setDetected(null);
   };
 
+  // `date` = the approved date currently in the dialog; `year` = a numbering
+  // year the Secretary picked (wins over the date — any year, so old records
+  // can be encoded). Session minutes have no /next-number route — a 404 just
+  // leaves `next` null.
+  const refreshNext = async (id, date, year) => {
+    const mine = ++nextSeq.current;
+    try {
+      const q = year ? `?year=${year}` : date ? `?date=${encodeURIComponent(date)}` : "";
+      const res = await authFetch(`${API}/api/${route}/${id}/next-number${q}`);
+      const data = await res.json();
+      if (mine !== nextSeq.current) return null;
+      const value = res.ok && data.success ? data.data : null;
+      setNext(value);
+      return value;
+    } catch {
+      if (mine === nextSeq.current) setNext(null);
+      return null;
+    }
+  };
+
   const detect = async (id, onFound) => {
     const mine = ++seq.current;
+    setNext(null);
     setDetected({ status: "reading" });
+    const expected = await refreshNext(id);
     try {
       const res = await authFetch(`${API}/api/${route}/${id}/detect-meta`, { method: "POST" });
       const data = await res.json();
@@ -115,8 +175,16 @@ export function usePublishNumberDetection(route) {
         setDetected({ status: "error", message: data.error });
         return;
       }
-      setDetected({ status: "done", data: data.data });
-      if (data.data.number || data.data.date) onFound?.(data.data);
+      const found = { ...data.data };
+      if (found.number && expected) {
+        const k = numberKey(found.number);
+        if (k.seq !== expected.seq || k.year !== expected.year) found.number = null;
+      }
+      // A date read off the document can move the record into another year's
+      // numbering — refresh the suggestion for it.
+      if (found.date && expected && Number(found.date.slice(0, 4)) !== expected.year) refreshNext(id, found.date);
+      setDetected({ status: "done", data: found });
+      if (found.number || found.date) onFound?.(found);
     } catch {
       if (mine === seq.current) {
         setDetected({ status: "error", message: "Couldn't read the document automatically." });
@@ -124,7 +192,7 @@ export function usePublishNumberDetection(route) {
     }
   };
 
-  return { detected, detect, reset };
+  return { detected, detect, reset, next, refreshNext };
 }
 
 export function useLegislativePublished(route, params, resyncOn) {
@@ -184,8 +252,12 @@ export function useResetOnChange(deps, setState, resetValue) {
 // first render" is the common case here, not a later change. Seeding
 // `seenSubTab` from the same value is what makes that first render a
 // correctly-skipped no-op adjustment rather than a redundant extra set.
-export function useDeepLinkedTab(defaultTab, initialSubTab) {
-  const [activeTab, setActiveTab] = useState(initialSubTab || defaultTab);
+// `allowed` = the sub-tabs this account can see; the one in the address
+// (?sub=, see useUrlSubTab.js) is restored after a refresh only if it's one
+// of them.
+export function useDeepLinkedTab(defaultTab, initialSubTab, allowed) {
+  const [activeTab, setActiveTab] = useState(() => initialSubTab || readUrlSubTab(allowed) || defaultTab);
+  useSyncSubTabToUrl(activeTab, defaultTab);
   const [seenSubTab, setSeenSubTab] = useState(initialSubTab);
   if (initialSubTab !== seenSubTab) {
     setSeenSubTab(initialSubTab);

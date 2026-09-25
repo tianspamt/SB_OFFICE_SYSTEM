@@ -45,4 +45,14 @@ const accountCreationLimiter = rateLimit({
   message: { error: 'Too many account-creation requests. Please try again later.' }
 })
 
-module.exports = { globalLimiter, loginLimiter, otpLimiter, accountCreationLimiter }
+// "Email me a reset link" from My Profile — each click sends an email, so
+// cap it the same way as OTP requests.
+const resetLinkLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many reset link requests. Please wait 10 minutes.' }
+})
+
+module.exports = { globalLimiter, loginLimiter, otpLimiter, accountCreationLimiter, resetLinkLimiter }

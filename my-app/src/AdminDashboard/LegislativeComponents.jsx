@@ -4,7 +4,7 @@
  * SessionsPage — those pages own the actual data-fetching and backend calls.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import SectorSelect from "./SectorSelect";
 import { Search, Filter, X, Download, UserPlus } from "lucide-react";
 import styles from "./LegislativeModule.module.css";
@@ -286,6 +286,13 @@ export function PublishNumberModal({
   onSkipDetection,
   // Force the number into capitals as it's typed (resolutions).
   uppercase = false,
+  // { year, seq, number, latest } | null from usePublishNumberDetection —
+  // the only number Publish will accept (latest published + 1). Filled into
+  // the field while it's empty or still holds the previous suggestion.
+  nextNumber = null,
+  // (year) => void — the Secretary picked another numbering year (old
+  // records from past years); the caller refetches `nextNumber` for it.
+  onYearChange,
 }) {
   const reading = detection?.status === "reading";
   const found = detection?.status === "done" && (detection.data?.number || detection.data?.date);
@@ -296,6 +303,27 @@ export function PublishNumberModal({
   useEffect(() => {
     if (!reading) numberRef.current?.focus();
   }, [reading]);
+  const lastSuggested = useRef("");
+  useEffect(() => {
+    if (!nextNumber?.number) return;
+    if (!value.trim() || value === lastSuggested.current) onChange(nextNumber.number);
+    lastSuggested.current = nextNumber.number;
+    // Only reacts to a new suggestion, not to every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextNumber?.number]);
+  // The Year box keeps what's typed ("20", "201"...) and only asks for a new
+  // suggestion once it's a full year; it follows the suggestion otherwise.
+  const [yearText, setYearText] = useState("");
+  useEffect(() => {
+    if (nextNumber?.year) setYearText(String(nextNumber.year));
+  }, [nextNumber?.year]);
+  // Typing a number with another year in it (e.g. "... 05-2019") switches the
+  // suggestion to that year, same as picking it in the Year field.
+  const typedYear = (String(value).match(/\b(19|20|21)\d{2}\b/) || [])[0];
+  useEffect(() => {
+    if (onYearChange && typedYear && nextNumber && Number(typedYear) !== nextNumber.year) onYearChange(Number(typedYear));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedYear]);
   useEffect(() => {
     const handler = (e) => {
       if (e.key === "Escape" && !submitting) onCancel();
@@ -344,6 +372,7 @@ export function PublishNumberModal({
         .pnm-input:focus { outline: none; border-color: #22c55e; }
         .pnm-input:disabled { background: #f9fafb; cursor: not-allowed; }
         .pnm-error { color: #ef4444; font-size: 12.5px; margin: 0 0 12px; }
+        .pnm-next { font-size: 12.5px; color: #4b5563; margin: 0 0 8px; line-height: 1.5; }
         .pnm-status {
           display: flex; align-items: center; gap: 8px;
           font-size: 12.5px; line-height: 1.4; margin: 0 0 4px;
@@ -424,6 +453,35 @@ export function PublishNumberModal({
             onChange={(e) => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)}
             disabled={submitting || reading}
           />
+          {onYearChange && nextNumber && (
+            <>
+              <label className="pnm-label">Numbering year</label>
+              <input
+                className="pnm-input"
+                type="number"
+                min="1900"
+                max="2100"
+                value={yearText}
+                onChange={(e) => {
+                  setYearText(e.target.value);
+                  const y = Number(e.target.value);
+                  if (e.target.value.length === 4 && y >= 1900 && y <= 2100) onYearChange(y);
+                }}
+                disabled={submitting || reading}
+              />
+            </>
+          )}
+          {nextNumber?.number && (
+            <p className="pnm-next">
+              Next number for {nextNumber.year}: <strong>{nextNumber.number}</strong>
+              {nextNumber.latest ? ` (latest published: ${nextNumber.latest})` : " (first this year)"}
+              {value.trim() !== nextNumber.number && (
+                <button type="button" className="pnm-skip" style={{ marginLeft: 6 }} onClick={() => onChange(nextNumber.number)}>
+                  Use it
+                </button>
+              )}
+            </p>
+          )}
           {onDateChange && (
             <>
               <label className="pnm-label">Approved date</label>

@@ -1,5 +1,7 @@
 const express = require('express')
 const router = express.Router()
+const crypto = require('crypto')
+const bcrypt = require('bcrypt')
 
 const supabase = require('../config/supabase')
 const { verifyToken, adminOnly, secretaryOnly, secretaryOrClerk } = require('../middleware/auth')
@@ -15,6 +17,11 @@ const {
   countActiveCouncilors,
   autoUpdateCouncilStatuses,
 } = require('../helpers/councils')
+const { isValidEmail } = require('../helpers/utils')
+const { sendPasswordLink } = require('../helpers/passwordLink')
+const {
+  TERM_TO_USER_POSITION, LINKABLE_USER_POSITIONS, autoLinkMember, suggestLinks,
+} = require('../helpers/accountLinks')
 
 // GET /api/sb-council-members
 router.get('/', async (req, res) => {
@@ -53,6 +60,20 @@ router.get('/', async (req, res) => {
       }
     })
     res.json(enriched)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/sb-council-members/link-suggestions
+// One-time cleanup for members and accounts that existed before account
+// linking (Author_Approval_Workflow_v2.docx, Section 3.4): unlinked members
+// paired with similarly named unlinked accounts. Nothing is linked here —
+// the Admin confirms each pair via PUT /:id/account. Registered before
+// GET /:id so the path isn't read as an id.
+router.get('/link-suggestions', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
+  try {
+    res.json(await suggestLinks())
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -101,6 +122,22 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
   const { full_name, position, term_period, term_start, term_end, is_reelected, notes, force } = req.body
   if (!full_name)
     return res.status(400).json({ error: 'Full name is required.' })
+  // Option A (Author_Approval_Workflow_v2.docx, Section 3.2): "Create login
+  // account" creates the member's account in the same step, already linked,
+  // so a new councilor never needs manual linking. The account's position
+  // comes from the member's current term, so a term is required with it.
+  const createAccount = req.body.create_account === true || req.body.create_account === 'true'
+  const accountUsername = (req.body.account_username || '').trim()
+  const accountEmail = (req.body.account_email || '').trim().toLowerCase()
+  const accountPosition = TERM_TO_USER_POSITION[position] || null
+  if (createAccount) {
+    if (!term_period || !term_start || !accountPosition)
+      return res.status(400).json({ error: 'A current term with a position is required to create a login account.' })
+    if (!/^[A-Za-z0-9]+$/.test(accountUsername))
+      return res.status(400).json({ error: 'Username must be alphanumeric.' })
+    if (!isValidEmail(accountEmail))
+      return res.status(400).json({ error: 'Valid email is required.' })
+  }
   // position is now a per-term attribute (see 002_add_council_id_and_...
   // migration) — it only means anything alongside the term it belongs to,
   // so require all three together, or none at all (member added with no
@@ -133,6 +170,17 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
       }
     }
 
+    // Checked before anything is created, so a taken username/email can't
+    // leave a half-made member behind (the DB's unique indexes from
+    // migrations/011 still catch a race below).
+    if (createAccount) {
+      for (const [field, value] of [['username', accountUsername], ['email', accountEmail]]) {
+        const { data: taken, error: takenErr } = await supabase.from('users').select('id').ilike(field, value).limit(1)
+        if (takenErr) return res.status(500).json({ error: takenErr.message })
+        if (taken.length > 0) return res.status(400).json({ error: `That ${field} is already in use by another account.` })
+      }
+    }
+
     let photo = null
     let photo_path = null
     if (req.file) {
@@ -145,6 +193,47 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
       .insert({ full_name, photo, photo_path })
       .select().single()
     if (memberErr) return res.status(500).json({ error: memberErr.message })
+
+    // Option A: the account is created and linked right after the member.
+    // If the account can't be created, the member is removed again so the
+    // two are saved together or not at all. Nobody types a password — the
+    // official sets their own through the emailed link (helpers/passwordLink.js).
+    let account = null
+    if (createAccount) {
+      const undoMember = async () => {
+        await supabase.from('sb_council_members').delete().eq('id', member.id)
+        if (photo_path) await deleteFromStorage(photo_path)
+      }
+      const { data: user, error: userErr } = await supabase
+        .from('users')
+        .insert({
+          name: full_name, username: accountUsername, email: accountEmail,
+          password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
+          role: 'user', position: accountPosition,
+        })
+        .select('id, name, username, email').single()
+      if (userErr) {
+        await undoMember()
+        if (userErr.code === '23505') return res.status(400).json({ error: 'Username or email already exists.' })
+        return res.status(500).json({ error: userErr.message })
+      }
+      const { error: linkErr } = await supabase
+        .from('sb_council_members').update({ user_id: user.id }).eq('id', member.id)
+      if (linkErr) {
+        await supabase.from('users').delete().eq('id', user.id)
+        await undoMember()
+        return res.status(500).json({ error: linkErr.message })
+      }
+      account = { id: user.id, username: user.username, email: user.email, emailSent: true }
+      try {
+        await sendPasswordLink(user, 'welcome')
+      } catch {
+        // The account exists and is linked; the Secretary can resend the
+        // link any time with Users → Reset Password.
+        account.emailSent = false
+      }
+      await logActivity(req, 'CREATE', 'Users', `Created and linked account ${user.username} for council member: ${full_name}`)
+    }
 
     if (term_period && term_start) {
       // Flagged re-elected automatically when this person sat in the council
@@ -170,7 +259,21 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
       if (termErr) console.error('Term insert error:', termErr.message)
     }
     await logActivity(req, 'CREATE', 'Officials', `Added council member: ${full_name}`)
-    res.json({ success: true, id: member.id, data: member })
+
+    // Option B (safety net): no account was created here, but the office
+    // may have registered one first — link it if it's a certain match.
+    let linkedUser = null
+    if (!createAccount && term_period && term_start) {
+      try {
+        linkedUser = await autoLinkMember({ memberId: member.id, fullName: full_name, termPosition: position })
+        if (linkedUser) {
+          await logActivity(req, 'LINK_ACCOUNT', 'Officials', `Auto-linked council member ${full_name} to account: ${linkedUser.username}`)
+        }
+      } catch (linkErr) {
+        console.error('Auto-link on member create failed:', linkErr.message)
+      }
+    }
+    res.json({ success: true, id: member.id, data: member, account, linkedUser })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -203,6 +306,56 @@ router.put('/:id', verifyToken, adminOnly, secretaryOrClerk, upload.single('phot
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// PUT /api/sb-council-members/:id/account — { user_id } links, { user_id: null } unlinks.
+// The manual path for the rare cases auto-linking can't settle (two members
+// with the same name, a name typed differently) and for confirming the
+// one-time "Suggest matches" cleanup. Only Councilor / Vice-Mayor / Liga /
+// SK accounts can be linked — never Secretary or Clerk.
+router.put('/:id/account', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
+  const { id } = req.params
+  const userId = req.body.user_id == null || req.body.user_id === '' ? null : Number(req.body.user_id)
+  try {
+    const { data: member } = await supabase
+      .from('sb_council_members').select('id, full_name, user_id').eq('id', id).single()
+    if (!member) return res.status(404).json({ error: 'Council member not found.' })
+
+    if (userId === null) {
+      // Pending approvals addressed to this member can't be answered by the
+      // old account anymore — the client warns first (see pendingApprovals).
+      const { error } = await supabase.from('sb_council_members').update({ user_id: null }).eq('id', id)
+      if (error) return res.status(500).json({ error: error.message })
+      await logActivity(req, 'UNLINK_ACCOUNT', 'Officials', `Unlinked login account from council member: ${member.full_name}`)
+      return res.json({ success: true, data: { ...member, user_id: null } })
+    }
+
+    const { data: user } = await supabase
+      .from('users').select('id, username, position, is_archived').eq('id', userId).single()
+    if (!user || user.is_archived) return res.status(404).json({ error: 'Account not found.' })
+    if (!LINKABLE_USER_POSITIONS.includes(user.position))
+      return res.status(400).json({ error: 'Only Councilor, Vice-Mayor, Liga, or SK Federated accounts can be linked to a council member.' })
+
+    const { error } = await supabase.from('sb_council_members').update({ user_id: userId }).eq('id', id)
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ error: 'That account is already linked to another council member.' })
+      return res.status(500).json({ error: error.message })
+    }
+    await logActivity(req, 'LINK_ACCOUNT', 'Officials', `Linked council member ${member.full_name} to account: ${user.username}`)
+    res.json({ success: true, data: { ...member, user_id: userId } })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/sb-council-members/:id/pending-approvals — how many author
+// approvals are still waiting on this member, so unlinking can warn first.
+router.get('/:id/pending-approvals', verifyToken, adminOnly, async (req, res) => {
+  const { count, error } = await supabase
+    .from('author_approvals').select('id', { count: 'exact', head: true })
+    .eq('official_id', req.params.id).eq('decision', 'pending')
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ count: count || 0 })
 })
 
 // DELETE /api/sb-council-members/:id

@@ -1,22 +1,19 @@
 const express = require('express')
 const router = express.Router()
 const bcrypt = require('bcrypt')
-const crypto = require('crypto')
 const { body } = require('express-validator')
 
 const supabase = require('../config/supabase')
 const { verifyToken, adminOnly, secretaryOnly, validate } = require('../middleware/auth')
+const { resetLinkLimiter } = require('../middleware/rateLimiter')
 const { upload, handleMulterError } = require('../middleware/multer')
 const { uploadToStorage, deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
-const { sendEmail } = require('../helpers/email')
+const { sendPasswordLink } = require('../helpers/passwordLink')
 const { ROLE_POSITIONS, ALL_POSITIONS, isValidPositionForRole } = require('../helpers/roles')
+const { autoLinkUser, memberForUser, LINKABLE_USER_POSITIONS } = require('../helpers/accountLinks')
 
 const SALT_ROUNDS = 10
-// Base URL for links embedded in emails (password reset) — same
-// localhost-fallback pattern as the frontend's own API constant
-// (AdminContext.jsx), since there's no deployed URL configured yet.
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
 // POST /api/users
 // Admin-gated creation of a role:'user' account (councilor/vice_mayor) —
@@ -55,7 +52,21 @@ router.post('/', verifyToken, adminOnly, upload.single('photo'), handleMulterErr
       return res.status(500).json({ error: error.message })
     }
     await logActivity(req, 'CREATE', 'Users', `Added new user: ${username}`)
-    res.json({ success: true, userId: data.id })
+
+    // Option B (safety net): if the office registered the account before
+    // adding the council member through Officials, link it now — but only
+    // on a certain match (see autoLinkUser). A failed lookup never fails the
+    // account creation itself; the account just stays "Not linked".
+    let linkedMember = null
+    try {
+      linkedMember = await autoLinkUser(data)
+      if (linkedMember) {
+        await logActivity(req, 'LINK_ACCOUNT', 'Officials', `Auto-linked account ${username} to council member: ${linkedMember.full_name}`)
+      }
+    } catch (linkErr) {
+      console.error('Auto-link on user create failed:', linkErr.message)
+    }
+    res.json({ success: true, userId: data.id, linkedMember })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -68,7 +79,12 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
     .eq('is_archived', false)
     .order('id', { ascending: true })
   if (error) return res.status(500).json({ error: error.message })
-  res.json(data)
+  // Which council member each account is linked to (null = "Not linked"),
+  // so User Management can flag the rare account auto-linking couldn't place.
+  const { data: links } = await supabase
+    .from('sb_council_members').select('id, full_name, user_id').not('user_id', 'is', null)
+  const byUser = new Map((links || []).map((m) => [m.user_id, { id: m.id, full_name: m.full_name }]))
+  res.json(data.map((u) => ({ ...u, linked_member: byUser.get(u.id) || null })))
 })
 
 // GET /api/users/check-availability?field=username|email&value=&excludeId=
@@ -86,6 +102,96 @@ router.get('/check-availability', verifyToken, adminOnly, async (req, res) => {
     const { data, error } = await query.limit(1)
     if (error) return res.status(500).json({ error: error.message })
     res.json({ available: data.length === 0 })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/users/me/records
+// Backs "My Profile"'s record tabs. Resolves the caller's own council
+// member through the account link (sb_council_members.user_id) — never by
+// name, which broke whenever either side's name was edited — and returns
+// every ordinance/resolution they're tagged on, grouped by role, plus the
+// author approvals waiting on them. Secretary/Clerk and not-yet-linked
+// accounts get member: null (the profile explains why instead of looking
+// empty). Registered before GET /:id so "me" isn't read as an id.
+const RECORD_TYPES = [
+  { entityType: 'ordinance', table: 'ordinances', linkTable: 'ordinance_officials', idColumn: 'ordinance_id', numberField: 'ordinance_number' },
+  { entityType: 'resolution', table: 'resolutions', linkTable: 'resolution_officials', idColumn: 'resolution_id', numberField: 'resolution_number' },
+]
+
+router.get('/me/records', verifyToken, async (req, res) => {
+  try {
+    const member = await memberForUser(req.user.id)
+    const result = { member, authored: [], co_authored: [], sponsored: [], awaiting_my_approval: [] }
+    if (!member) {
+      const { data: me } = await supabase.from('users').select('position').eq('id', req.user.id).single()
+      result.linkable = LINKABLE_USER_POSITIONS.includes(me?.position)
+      return res.json(result)
+    }
+
+    const bucket = { author: result.authored, co_author: result.co_authored, sponsor: result.sponsored }
+    const rejected = []
+    for (const t of RECORD_TYPES) {
+      const { data, error } = await supabase
+        .from(t.linkTable)
+        .select(`role, term:sb_council_member_terms ( term_period ),
+          record:${t.table} ( id, title, ${t.numberField}, category, status, uploaded_at, approved_on, reviewed_at, filetype, filepath, filename )`)
+        .eq('official_id', member.id)
+      if (error) return res.status(500).json({ error: error.message })
+      for (const link of data || []) {
+        if (!link.record) continue
+        const row = {
+          entity_type: t.entityType,
+          id: link.record.id,
+          title: link.record.title,
+          number: link.record[t.numberField] || null,
+          category: link.record.category || null,
+          status: link.record.status,
+          uploaded_at: link.record.uploaded_at,
+          approved_on: link.record.approved_on,
+          reviewed_at: link.record.reviewed_at,
+          term_period: link.term?.term_period || null,
+          filetype: link.record.filetype,
+          filepath: link.record.filepath,
+          filename: link.record.filename,
+        }
+        bucket[link.role]?.push(row)
+        if (link.role === 'author' && row.status === 'rejected') rejected.push(row)
+      }
+    }
+
+    // The Secretary's reason for each rejection = the latest comment on it.
+    for (const t of RECORD_TYPES) {
+      const ids = rejected.filter((r) => r.entity_type === t.entityType).map((r) => r.id)
+      if (ids.length === 0) continue
+      const { data: comments } = await supabase
+        .from('comments').select('entity_id, text, created_at')
+        .eq('entity_type', t.entityType).in('entity_id', ids)
+        .order('created_at', { ascending: false })
+      for (const r of rejected.filter((x) => x.entity_type === t.entityType)) {
+        r.rejection_reason = (comments || []).find((c) => c.entity_id === r.id)?.text || null
+      }
+    }
+
+    const { data: approvals, error: apErr } = await supabase
+      .from('author_approvals')
+      .select('id, entity_type, entity_id, stage, requested_at')
+      .eq('official_id', member.id).eq('decision', 'pending')
+      .order('requested_at', { ascending: true })
+    if (apErr) return res.status(500).json({ error: apErr.message })
+    const titleOf = new Map(result.authored.map((r) => [`${r.entity_type}:${r.id}`, r]))
+    result.awaiting_my_approval = (approvals || []).map((a) => ({
+      ...a,
+      title: titleOf.get(`${a.entity_type}:${a.entity_id}`)?.title || null,
+      number: titleOf.get(`${a.entity_type}:${a.entity_id}`)?.number || null,
+    }))
+
+    const byNewest = (a, b) => new Date(b.approved_on || b.uploaded_at || 0) - new Date(a.approved_on || a.uploaded_at || 0)
+    result.authored.sort(byNewest)
+    result.co_authored.sort(byNewest)
+    result.sponsored.sort(byNewest)
+    res.json(result)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -143,11 +249,36 @@ router.put('/:id', verifyToken, adminOnly, upload.single('photo'), handleMulterE
       if (error.code === '23505') return res.status(400).json({ error: 'Username or email already in use.' })
       return res.status(500).json({ error: error.message })
     }
+    // Secretary/Clerk accounts are never linked to a council member — if an
+    // edit moves a linked account into one of those positions, drop the link.
+    if (!LINKABLE_USER_POSITIONS.includes(finalPosition)) {
+      await supabase.from('sb_council_members').update({ user_id: null }).eq('user_id', id)
+    }
     await logActivity(req, 'UPDATE', 'Users', `Updated user ID: ${id}`)
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// PUT /api/users/:id/name
+// Self-or-admin, same permission shape as /:id/email — backs the "My
+// Profile" modal's own name field (clicking your avatar), the one bit of
+// their own account a non-admin user (Vice-Mayor/Councilor/Liga/SK
+// Federated) can edit themselves; everything else about their account
+// (username, email, role, position, photo) stays admin-only via PUT /:id.
+router.put('/:id/name', verifyToken, [
+  body('name').trim().notEmpty().withMessage('Name is required.')
+    .matches(/^[A-Za-zÑñ.\s]+$/).withMessage('Name may only contain letters, spaces, a period, and ñ.'),
+], validate, async (req, res) => {
+  const { id } = req.params
+  const { name } = req.body
+  if (req.user.id !== parseInt(id) && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden.' })
+  const { error } = await supabase.from('users').update({ name }).eq('id', id)
+  if (error) return res.status(500).json({ error: error.message })
+  await logActivity(req, 'UPDATE', 'Users', `Updated name for user ID: ${id}`)
+  res.json({ success: true, name })
 })
 
 // PUT /api/users/:id/email
@@ -206,6 +337,29 @@ router.put('/:id/password', verifyToken, [
   }
 })
 
+// POST /api/users/me/reset-password
+// My Profile's "Email Me a Reset Link": sends the signed-in account a reset
+// link to its own email address, the same single-use, 1-hour link the
+// Secretary's Reset Password sends (helpers/passwordLink.js). Registered
+// before /:id/reset-password so "me" isn't read as an id.
+router.post('/me/reset-password', verifyToken, resetLinkLimiter, async (req, res) => {
+  try {
+    const { data: me } = await supabase
+      .from('users').select('id, username, name, email').eq('id', req.user.id).single()
+    if (!me) return res.status(404).json({ error: 'Account not found.' })
+    if (!me.email) return res.status(400).json({ error: 'Your account has no email address. Please ask the Secretary to add one.' })
+    try {
+      await sendPasswordLink(me, 'self')
+    } catch (linkErr) {
+      return res.status(linkErr.status || 500).json({ error: linkErr.message })
+    }
+    await logActivity(req, 'RESET_PASSWORD', 'Users', `Sent own password reset link: ${me.username}`)
+    res.json({ success: true, email: me.email })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // POST /api/users/:id/reset-password
 // Admin-initiated password reset: emails the account a time-limited,
 // single-use link (see migrations/022_add_password_reset_token.sql) that
@@ -225,38 +379,11 @@ router.post('/:id/reset-password', verifyToken, adminOnly, async (req, res) => {
       .from('users').select('id, username, name, email').eq('id', id).single()
     if (!existing) return res.status(404).json({ error: 'User not found.' })
 
-    const token = crypto.randomBytes(32).toString('hex')
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
-    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`
-
     try {
-      await sendEmail({
-        to: [{ email: existing.email, name: existing.name }],
-        subject: 'Reset your password',
-        htmlContent: `
-          <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:32px;border:1px solid #e0e0e0;border-radius:12px;">
-            <div style="text-align:center;margin-bottom:24px;">
-              <h2 style="color:#2e7d32;margin:0 0 4px;">Office of Sangguniang Bayan</h2>
-              <p style="color:#888;font-size:13px;margin:0;">Municipality of Balilihan, Bohol</p>
-            </div>
-            <p style="color:#555;font-size:15px;">An administrator requested a password reset for your account (<strong>${existing.username}</strong>). Click the button below to set a new password:</p>
-            <div style="text-align:center;margin:24px 0;">
-              <a href="${resetLink}" style="display:inline-block;padding:14px 28px;background:#2e7d32;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Reset Password</a>
-            </div>
-            <p style="color:#888;font-size:13px;">This link expires in <strong>1 hour</strong> and can only be used once. If you didn't expect this, contact the office immediately and ignore this email.</p>
-          </div>
-        `,
-      })
-    } catch (emailErr) {
-      console.error('Password reset email failed:', emailErr.message)
-      return res.status(502).json({ error: 'Could not send the reset email. Please try again.' })
+      await sendPasswordLink(existing, 'reset')
+    } catch (linkErr) {
+      return res.status(linkErr.status || 500).json({ error: linkErr.message })
     }
-
-    const { error } = await supabase
-      .from('users')
-      .update({ reset_token: token, reset_token_expires: expiresAt.toISOString() })
-      .eq('id', id)
-    if (error) return res.status(500).json({ error: error.message })
 
     await logActivity(req, 'RESET_PASSWORD', 'Users', `Sent password reset link to: ${existing.username}`)
     res.json({ success: true })

@@ -16,6 +16,7 @@ import {
 import styles from "./AdminDashboard.module.css";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
+import { useUrlSubTab } from "./useUrlSubTab";
 import ConfirmModal from "./ConfirmModal";
 import { useModalError } from "./AdminContext";
 import { ModalAlert } from "./AdminComponents";
@@ -36,7 +37,7 @@ const SECTIONS = [
 ];
 
 export default function ContentManagementPage({ isAdmin = false }) {
-  const [section, setSection] = useState("posts");
+  const [section, setSection] = useUrlSubTab("posts", SECTIONS.map((s) => s.value));
 
   const {
     posts,

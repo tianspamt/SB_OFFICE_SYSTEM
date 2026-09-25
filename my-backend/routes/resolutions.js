@@ -17,6 +17,8 @@ const { findDuplicateRecord, duplicateMessage } = require('../helpers/duplicates
 const { extractMetaHandler, storedMetaHandler } = require('../helpers/documentMeta')
 const { createOfficialRoleRoutes, syncRoleLinks } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
+const { memberForUser } = require('../helpers/accountLinks')
+const { clearApprovalsForReplacedAuthor } = require('../helpers/authorApprovals')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -150,10 +152,20 @@ router.get('/', verifyToken, async (req, res) => {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
       // Rejected drafts are visible system-wide only to the Secretary —
-      // every other role only ever sees their own, so a rejected record
-      // isn't browsable by anyone but its creator and the Secretary.
+      // everyone else sees only the ones they created OR are the linked
+      // Author of (the Clerk often uploads the draft, so created_by alone
+      // hid an author's own rejected record from them).
       if (statuses.includes('rejected') && req.user.position !== 'secretary') {
-        query = query.eq('created_by', req.user.id)
+        const me = await memberForUser(req.user.id).catch(() => null)
+        let authoredIds = []
+        if (me) {
+          const { data: links } = await supabase
+            .from('resolution_officials').select('resolution_id').eq('official_id', me.id).eq('role', 'author')
+          authoredIds = (links || []).map((l) => l.resolution_id)
+        }
+        query = authoredIds.length > 0
+          ? query.or(`created_by.eq.${req.user.id},id.in.(${authoredIds.join(',')})`)
+          : query.eq('created_by', req.user.id)
       }
     }
     const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
@@ -385,6 +397,12 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
       })))
       await supabase.from('resolution_officials').insert(rows)
     }
+    // A different Author means approvals given (or pending) for the previous
+    // one no longer count — the new author has to give them again.
+    if (toRemove.length > 0 || toAdd.length > 0) {
+      await clearApprovalsForReplacedAuthor('resolution', id, [...newIds])
+    }
+
     // Co-Author / Sponsor are set from the edit form too — but only when the
     // form sent them, so a client that doesn't know about them leaves the
     // existing ones alone.
@@ -511,6 +529,7 @@ router.use('/', createLegislativeReviewRoutes({
   uppercaseNumber: true,
   approvedDateField: 'approved_on',
   hasReadings: true,
+  defaultNumberFormat: (year, seq) => `RESOLUTION NO. ${String(seq).padStart(2, '0')}-${year}`,
 }))
 
 // Co-Author/Sponsor tagging — see helpers/officialRoleRoutes.js.

@@ -5,6 +5,22 @@ import { UserAvatar } from "./AdminComponents";
 import { useIsMobile, truncateText } from "./AdminContext";
 
 const SKELETON_ROWS = 5;
+
+// Accounts for an SB seat are linked to their council member automatically
+// (see AccountLinking.jsx); this flags the rare one that couldn't be, so the
+// Admin can link it from Officials -> Edit member -> Login Account.
+const LINKABLE_POSITIONS = ["councilor", "vice_mayor", "liga_ng_mga_barangay", "sk_federated"];
+function NotLinkedFlag({ user }) {
+  if (!LINKABLE_POSITIONS.includes(user.position) || user.linked_member !== null) return null;
+  return (
+    <span
+      title="Not linked to a council member. Link it from Officials -> Edit member -> Login Account."
+      style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 999, background: "#fff5f5", color: "#c53030" }}
+    >
+      Not linked
+    </span>
+  );
+}
 const SKELETON_WIDTHS = [24, 130, 110, 170, 50, 220]; // Name, Username, Email, Role, Action
 
 export default function UsersPage({ users, totalUsers, loading, setDeleteTarget, onEdit, onResetPassword }) {
@@ -46,7 +62,7 @@ export default function UsersPage({ users, totalUsers, loading, setDeleteTarget,
                   <div key={u.id} className={styles.mobileRowCard}>
                     <span className={styles.mobileRowIdBadge}>{u.id}</span>
                     <div className={styles.mobileRowMain}>
-                      <span className={styles.mobileRowTitle}>{u.name}</span>
+                      <span className={styles.mobileRowTitle}>{u.name}<NotLinkedFlag user={u} /></span>
                     </div>
                     <button
                       className={`${styles.mobileIconBtn} ${styles.mobileIconBtnWarning}`}
@@ -131,7 +147,7 @@ export default function UsersPage({ users, totalUsers, loading, setDeleteTarget,
                 <tr key={u.id} className={i % 2 === 0 ? styles.rowEven : styles.rowOdd}>
                   <td className={styles.td}><UserAvatar name={u.name} photo={u.photo} size={30} /></td>
                   <td className={styles.td}>{u.id}</td>
-                  <td className={styles.td}>{u.name}</td>
+                  <td className={styles.td}>{u.name}<NotLinkedFlag user={u} /></td>
                   <td className={`${styles.td} ${styles.tdTruncate}`} title={u.username}>{truncateText(u.username, 15)}</td>
                   <td className={styles.td}>{u.email}</td>
                   <td className={styles.td}><span className={`${styles.badge} ${styles.badgeUser}`}>user</span></td>
