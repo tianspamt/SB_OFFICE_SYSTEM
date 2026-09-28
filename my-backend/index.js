@@ -7,6 +7,7 @@ const helmet = require('helmet')
 
 const { globalLimiter } = require('./middleware/rateLimiter')
 require('./helpers/reminderJob') // starts the daily 8am calendar-reminder cron schedule
+require('./helpers/autoArchiveJob') // archives session minutes / order of business older than 3 years, daily at 1am + on startup
 
 // ---- ROUTES ----
 const authRoutes          = require('./routes/auth')

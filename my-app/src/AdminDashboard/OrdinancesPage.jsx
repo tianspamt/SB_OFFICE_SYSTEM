@@ -4,7 +4,7 @@
  * Preserves existing props: ordinances, setDeleteTarget, onEdit
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -100,6 +100,12 @@ export default function OrdinancesPage({
   isCouncilor = false,
   onRefresh,
   initialSubTab = null,
+  // Dashboard "Review" button (PendingRecordsWidget): open just this record's
+  // View modal — the exact same one this module uses — without the list
+  // behind it. onViewOnlyClose runs once the modal (and anything it opened,
+  // like the Publish dialog or a success message) has closed.
+  viewOnlyRecord = null,
+  onViewOnlyClose,
 }) {
   // Lets the dashboard's "Needs your review" widget deep-link straight into
   // the Pending tab instead of landing on the default Published tab.
@@ -144,12 +150,10 @@ export default function OrdinancesPage({
     enabled: activeTab === "ready_to_publish" && canPublish,
     staleTime: 15000,
   });
-  // Rejected records don't get a tab in this module — they surface instead
-  // under the tagged author's own entry in Councilor Management (see
-  // AdminDashboard.jsx's official-profile modal, "Rejected Records"
-  // section). This page still fires the /reject action (below) and
-  // invalidates that query's cache key on success, it just doesn't render
-  // a list of them itself.
+  // Rejected records don't get a tab in this module — a rejected record is
+  // private to its author and shows only in their own My Profile (see
+  // MyProfileRecords.jsx); the list API never returns them. This page still
+  // fires the /reject action (below), it just doesn't list them itself.
 
   // ── Published tab: server-paginated ─────────────────────────────────────────
   const [publishedPage, setPublishedPage] = useState(1);
@@ -265,6 +269,18 @@ export default function OrdinancesPage({
     setViewTarget(item);
     if (item.status !== "published") fetchComments(item.id);
   };
+
+  const viewOnly = !!viewOnlyRecord;
+  // Set once the record's modal has actually been on screen — the close
+  // check below must not fire before that (on the first render viewTarget is
+  // still null, which would otherwise close the modal the instant it opens).
+  const viewOnlyShown = useRef(false);
+  useEffect(() => {
+    if (!viewOnlyRecord) return;
+    handleOpenView(viewOnlyRecord);
+    // Opens once per record; handleOpenView is recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewOnlyRecord?.id]);
 
   const handleSendComment = async () => {
     if (!viewTarget) return;
@@ -557,8 +573,24 @@ export default function OrdinancesPage({
       ? READY_TO_PUBLISH_STATUSES.split(",").map((s) => ({ value: s, label: statusLabel(s) }))
       : null;
 
+  // View-only mode: once nothing is open any more, hand control back.
+  useEffect(() => {
+    if (!viewOnly) return;
+    if (viewTarget) {
+      viewOnlyShown.current = true;
+      return;
+    }
+    if (viewOnlyShown.current && !reviewSuccessMsg && !showPublishModal && !presentTarget) {
+      viewOnlyShown.current = false;
+      onViewOnlyClose?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewOnly, viewTarget, reviewSuccessMsg, showPublishModal, presentTarget]);
+
   return (
     <>
+      {!viewOnly && (
+      <>
       <StatsRow
         loading={loading || (fetchingPublished && publishedTotal === 0)}
         stats={[
@@ -898,6 +930,9 @@ export default function OrdinancesPage({
       )}
 
       {/* ── VIEW ORDINANCE MODAL ─────────────────────────────────────────────── */}
+      </>
+      )}
+
       {viewTarget && (
         <div
           className={lStyles.viewModalOverlay}
@@ -1198,7 +1233,8 @@ export default function OrdinancesPage({
                       approved/rejected — see isLockedStatus. */}
                   {(isSecretary || isClerk) &&
                     (!isLockedStatus(viewTarget.status) ||
-                      READING_STATUSES.includes(viewTarget.status)) && (
+                      READING_STATUSES.includes(viewTarget.status) ||
+                      ["ready_to_publish", "approved"].includes(viewTarget.status)) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
                         className={lStyles.viewModalCouncilTitle}
@@ -1230,12 +1266,12 @@ export default function OrdinancesPage({
                       </div>
                       {reviewFile && (
                         <button
-                          className={`${lStyles.btn} ${lStyles.btnSm}`}
-                          style={{ marginTop: 8 }}
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                          style={{ marginTop: 10, width: "100%" }}
                           disabled={reviewSubmitting}
                           onClick={() => handleReplaceFile(viewTarget.id)}
                         >
-                          <Upload size={13} />{" "}
+                          <Upload size={16} />{" "}
                           {viewTarget.status === "needs_revision"
                             ? "Replace File & Resubmit"
                             : "Upload Replacement"}
@@ -1296,7 +1332,8 @@ export default function OrdinancesPage({
                     // — except mid-reading, where the Secretary needs this
                     // same box to type a required reason before Reject.
                     (!isLockedStatus(viewTarget.status) ||
-                      READING_STATUSES.includes(viewTarget.status)) && (
+                      READING_STATUSES.includes(viewTarget.status) ||
+                      ["ready_to_publish", "approved"].includes(viewTarget.status)) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
                         className={lStyles.commentInput}
@@ -1377,6 +1414,19 @@ export default function OrdinancesPage({
                       </div>
                     )}
 
+                    {/* Waiting on the Vice-Mayor — the Secretary can still reject. */}
+                    {isSecretary && viewTarget.status === "ready_to_publish" && (
+                      <div className={lStyles.pendingActionsRow}>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
+                          disabled={reviewSubmitting}
+                          onClick={handleReject}
+                        >
+                          <X size={16} /> Reject
+                        </button>
+                      </div>
+                    )}
+
                     {isViceMayor &&
                       viewTarget.status === "ready_to_publish" && (
                         <button
@@ -1388,15 +1438,25 @@ export default function OrdinancesPage({
                         </button>
                       )}
 
+                    {/* Same side-by-side row as Reject / Mark Reading above. */}
                     {isSecretary && viewTarget.status === "approved" && (
-                      <button
-                        className={lStyles.pillApprove}
-                        disabled={reviewSubmitting || !authorGateOpen}
-                        title={!authorGateOpen ? "Waiting for the author's final approval" : ""}
-                        onClick={openPublishModal}
-                      >
-                        <CheckCircle2 size={16} /> Publish
-                      </button>
+                      <div className={lStyles.pendingActionsRow}>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
+                          disabled={reviewSubmitting}
+                          onClick={handleReject}
+                        >
+                          <X size={16} /> Reject
+                        </button>
+                        <button
+                          className={`${lStyles.pillActionBtn} ${lStyles.pillAccept}`}
+                          disabled={reviewSubmitting || !authorGateOpen}
+                          title={!authorGateOpen ? "Waiting for the author's final approval" : ""}
+                          onClick={openPublishModal}
+                        >
+                          <CheckCircle2 size={16} /> Publish
+                        </button>
+                      </div>
                     )}
                   </div>
                 </>

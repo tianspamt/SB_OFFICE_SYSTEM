@@ -55,7 +55,20 @@ async function clearApprovalsForReplacedAuthor(entityType, entityId, newAuthorId
   if (error) console.error('clearApprovalsForReplacedAuthor failed:', error.message)
 }
 
+// Called when the file is replaced: whatever the author approved (or was
+// asked to approve) for the record's current stage was the old file, so that
+// stage's approval is cleared and must be requested again. Earlier stages'
+// approvals are history and stay.
+async function clearCurrentStageApproval(entityType, record) {
+  const stage = stageForStatus(record.status)
+  if (!stage || !record.author_approval_required) return
+  const { error } = await supabase.from('author_approvals').delete()
+    .eq('entity_type', entityType).eq('entity_id', record.id).eq('stage', stage)
+  if (error) console.error('clearCurrentStageApproval failed:', error.message)
+}
+
 module.exports = {
+  clearCurrentStageApproval,
   READING_STATUSES,
   STAGE_LABELS,
   stageForStatus,

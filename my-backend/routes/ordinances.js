@@ -19,7 +19,7 @@ const { extractMetaHandler, storedMetaHandler } = require('../helpers/documentMe
 const { createOfficialRoleRoutes, syncRoleLinks } = require('../helpers/officialRoleRoutes')
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 const { memberForUser } = require('../helpers/accountLinks')
-const { clearApprovalsForReplacedAuthor } = require('../helpers/authorApprovals')
+const { clearApprovalsForReplacedAuthor, clearCurrentStageApproval } = require('../helpers/authorApprovals')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -154,23 +154,11 @@ router.get('/', verifyToken, async (req, res) => {
     if (req.query.status !== 'all') {
       const statuses = req.query.status ? req.query.status.split(',') : ['published']
       query = query.in('status', statuses)
-      // Rejected drafts are visible system-wide only to the Secretary —
-      // everyone else sees only the ones they created OR are the linked
-      // Author of (the Clerk often uploads the draft, so created_by alone
-      // hid an author's own rejected record from them).
-      if (statuses.includes('rejected') && req.user.position !== 'secretary') {
-        const me = await memberForUser(req.user.id).catch(() => null)
-        let authoredIds = []
-        if (me) {
-          const { data: links } = await supabase
-            .from('ordinance_officials').select('ordinance_id').eq('official_id', me.id).eq('role', 'author')
-          authoredIds = (links || []).map((l) => l.ordinance_id)
-        }
-        query = authoredIds.length > 0
-          ? query.or(`created_by.eq.${req.user.id},id.in.(${authoredIds.join(',')})`)
-          : query.eq('created_by', req.user.id)
-      }
     }
+    // Rejected records are private to their author and appear only in the
+    // author's own My Profile (GET /api/users/me/records) — never in this
+    // list, for anyone, including status=all.
+    query = query.neq('status', 'rejected')
     const page = req.query.page ? Math.max(parseInt(req.query.page) || 1, 1) : null
     const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100) : null
     if (page && limit && !publishedOnly) query = query.range((page - 1) * limit, page * limit - 1)
@@ -280,6 +268,13 @@ router.get('/:id', verifyToken, async (req, res) => {
       .eq('id', req.params.id)
       .single()
     if (error || !o) return res.status(404).json({ error: 'Not found' })
+    // A rejected record is private to its Author — anyone else gets "not
+    // found", same as the list (which never returns rejected records).
+    if (o.status === 'rejected') {
+      const me = await memberForUser(req.user.id).catch(() => null)
+      const isAuthor = !!me && (o.ordinance_officials || []).some((l) => l.role === 'author' && l.official_id === me.id)
+      if (!isAuthor) return res.status(404).json({ error: 'Not found' })
+    }
     const parsed = {
       ...o,
       officials: mapOfficials(o.ordinance_officials, 'author'),
@@ -530,6 +525,8 @@ router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file
     if (error) return res.status(500).json({ error: error.message })
 
     if (existing.filepath) await deleteFromStorage(existing.filepath)
+    // The author approved the old file — they need to approve the new one.
+    await clearCurrentStageApproval('ordinance', existing)
 
     await logActivity(req, 'REPLACE_FILE', 'Ordinances', `Replaced draft file for ordinance: ${existing.title}`)
     res.json({ success: true, data })

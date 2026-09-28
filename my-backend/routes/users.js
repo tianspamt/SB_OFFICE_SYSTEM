@@ -156,6 +156,9 @@ router.get('/me/records', verifyToken, async (req, res) => {
           filepath: link.record.filepath,
           filename: link.record.filename,
         }
+        // A rejected record is private to its Author — co-authors and
+        // sponsors don't see it, even here.
+        if (row.status === 'rejected' && link.role !== 'author') continue
         bucket[link.role]?.push(row)
         if (link.role === 'author' && row.status === 'rejected') rejected.push(row)
       }

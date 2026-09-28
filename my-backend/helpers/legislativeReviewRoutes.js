@@ -202,14 +202,19 @@ function createLegislativeReviewRoutes({
   //
   // A comment explaining the rejection is optional at every reading stage —
   // if one is given it's saved to the record and included in the email.
+  //
+  // Also allowed while it waits on the Vice-Mayor ('ready_to_publish') and
+  // once the Vice-Mayor has approved ('approved'), up until it's published —
+  // the Secretary may still find a problem at the last steps before it goes
+  // live.
   if (hasReadings) {
     router.put('/:id/reject', verifyToken, secretaryOnly, async (req, res) => {
       const { id } = req.params
       const { comment } = req.body
       const { data: existing, error: fetchErr } = await supabase.from(table).select('*').eq('id', id).single()
       if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
-      if (!READING_STATUSES.includes(existing.status)) {
-        return res.status(400).json({ error: `${singularLabel} is not currently in a reading stage.` })
+      if (!READING_STATUSES.includes(existing.status) && !['ready_to_publish', 'approved'].includes(existing.status)) {
+        return res.status(400).json({ error: `${singularLabel} can only be rejected during a reading, while ready to publish, or after the Vice-Mayor's approval.` })
       }
       try {
         if (comment?.trim()) {
@@ -229,16 +234,22 @@ function createLegislativeReviewRoutes({
         if (conflict) return conflictResponse(res)
         if (error) return res.status(500).json({ error: error.message })
         await logActivity(req, 'REJECT', activityModule, `Rejected: ${labelOf(existing)}`)
+        // A rejected record is private to its Author (it shows only in their
+        // My Profile), so the email goes to the Author's linked account — not
+        // to whoever uploaded the draft. No linked account = no email.
+        const author = await authorOf(entityType, id).catch(() => null)
+        const authorAccount = author ? await userForMember(author.id).catch(() => null) : null
         notify({
-          recipientId: existing.created_by,
+          recipientId: authorAccount?.id,
           message: `Your ${lower} was rejected: ${labelOf(existing)}`,
           entityType, entityId: id,
           emailSubject: `Rejected: ${labelOf(existing)}`,
           emailHtml: notificationEmailHtml(
             'Rejected',
-            comment?.trim()
+            (comment?.trim()
               ? `The Secretary rejected <strong>${escapeHtml(labelOf(existing))}</strong>:<br/><em>"${escapeHtml(comment.trim())}"</em>`
-              : `The Secretary rejected <strong>${escapeHtml(labelOf(existing))}</strong>.`
+              : `The Secretary rejected <strong>${escapeHtml(labelOf(existing))}</strong>.`) +
+              `<br/>You can find it under <em>My Profile → Rejected</em>.`
           ),
         })
         res.json({ success: true, data })

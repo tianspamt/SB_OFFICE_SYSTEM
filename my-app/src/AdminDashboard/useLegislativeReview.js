@@ -31,9 +31,13 @@ export const READING_STATUSES = ["first_reading", "second_reading", "third_readi
 // a record into the ready_to_publish bucket, it moves to its own tab (see
 // READY_TO_PUBLISH_STATUSES below) and stays there, through approved, until
 // it's published — never back in Pending.
+// Councilor / Vice-Mayor / Clerk also see records mid-reading here (view
+// only — advancing a reading is still the Secretary's action), so they can
+// follow a draft through First → Second → Third Reading, not just while it
+// waits for its first review.
 export const pendingStatusesForRole = ({ isSecretary }) => {
   if (isSecretary) return ["pending", ...READING_STATUSES].join(",");
-  return "pending,needs_revision";
+  return ["pending", "needs_revision", ...READING_STATUSES].join(",");
 };
 
 // Broader than pendingStatusesForRole above — this is "every status the

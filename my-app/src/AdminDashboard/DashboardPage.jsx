@@ -356,6 +356,7 @@ const DashboardPage = ({
   unreadAnnouncements = 0,
   loading = false,
   onNavigate,
+  onReview,
   canQuickAdd = false,
   onAddOrdinance,
   onAddResolution,
@@ -367,7 +368,7 @@ const DashboardPage = ({
   isCouncilor = false,
 }) => {
   const [activityTab, setActivityTab] = useState("ordinances");
-  const { toasts, showMsg, dismissToast } = useToasts();
+  const { toasts, dismissToast } = useToasts();
   const isMobile = useIsMobile();
   const [mobileSection, setMobileSection] = useState("legislative");
   const canSeePending = isViceMayor || isSecretary || isClerk || isCouncilor;
@@ -613,8 +614,7 @@ const DashboardPage = ({
       isSecretary={isSecretary}
       isClerk={isClerk}
       isCouncilor={isCouncilor}
-      onNavigate={onNavigate}
-      showMsg={showMsg}
+      onReview={onReview}
       style={{ flex: 1, minHeight: 0 }}
     />
   ) : null;

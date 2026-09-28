@@ -1,0 +1,211 @@
+/* My Profile as a full page inside the dashboard (MyProfilePage.jsx).
+   Brand colors match the sidebar gradient. */
+
+.page {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ── Banner ── */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  padding: 32px 32px 28px;
+  color: #fff;
+  background: linear-gradient(135deg, #090446 0%, #380075 100%);
+  box-shadow: 0 10px 30px rgba(9, 4, 70, 0.18);
+}
+
+/* Soft decorative circles */
+.hero::before,
+.hero::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+.hero::before {
+  width: 320px;
+  height: 320px;
+  right: -90px;
+  top: -140px;
+}
+.hero::after {
+  width: 200px;
+  height: 200px;
+  right: 160px;
+  bottom: -130px;
+}
+
+.heroRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+
+.avatar {
+  flex: none;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  /* Same purple as the banner, so a photo with a transparent background
+     blends in instead of sitting on a gold circle. */
+  background: linear-gradient(135deg, #090446 0%, #380075 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  font-weight: 800;
+  color: #fff;
+}
+
+/* Zoomed in a little so the face fills more of the circle; the origin sits a
+   bit above center to keep the face (not the shoulders) in view. */
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.25);
+  transform-origin: center 35%;
+}
+
+.identity {
+  flex: 1;
+  min-width: 220px;
+}
+
+.name {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: #fff;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stat {
+  min-width: 96px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(4px);
+}
+
+.statValue {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.statLabel {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* ── Tabs + content ── */
+.tabsCard {
+  background: #fff;
+  border: 1px solid #e8eaf2;
+  border-radius: 16px;
+  padding: 6px 20px 0;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.content {
+  background: #fff;
+  border: 1px solid #e8eaf2;
+  border-radius: 16px;
+  padding: 8px 24px 24px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+/* The Account tab is already made of cards — show them on the page
+   background instead of inside another white box. */
+.contentPlain {
+  padding: 0;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    padding: 24px 20px;
+    border-radius: 16px;
+  }
+  .heroRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .avatar {
+    width: 84px;
+    height: 84px;
+    font-size: 32px;
+  }
+  .name {
+    font-size: 22px;
+  }
+  .stats {
+    width: 100%;
+  }
+  .stat {
+    flex: 1;
+    min-width: 0;
+  }
+  .content {
+    padding: 4px 14px 16px;
+  }
+  .tabsCard {
+    padding: 4px 10px 0;
+    overflow-x: auto;
+  }
+}

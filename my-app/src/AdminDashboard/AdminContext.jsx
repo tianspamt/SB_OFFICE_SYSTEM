@@ -592,4 +592,5 @@ export const tabTitles = {
   logs: "Activity Logs",
   content: "Content Management",
   archives: "Archives",
+  profile: "My Profile",
 };

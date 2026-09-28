@@ -89,16 +89,13 @@ import ContentManagementPage from "./ContentManagementPage";
 import ArchivesPage from "./ArchivesPage";
 import { TabNavigation, PresentOverlay } from "./LegislativeComponents";
 import { CreateAccountFields, LoginAccountField, SuggestMatchesModal } from "./AccountLinking";
-import MyProfileRecords, { NotLinkedNotice } from "./MyProfileRecords";
-import MyAccountTab from "./MyAccountTab";
+import MyProfilePage from "./MyProfilePage";
 import {
   appendAccountFields,
   accountFieldsError,
   accountLinkMessage,
   MY_RECORDS_QUERY_KEY,
   fetchMyRecords,
-  myRecordTabs,
-  myRecordStats,
 } from "./authorWorkflow";
 
 const ARCHIVABLE_TYPES = [
@@ -118,6 +115,7 @@ const DELETE_TYPE_LABELS = { session_agenda: "order of business" };
 const MODULE_TABS = [
   "dashboard", "users", "admins", "ordinances", "resolutions", "officials", "sessions",
   "session_agendas", "announcements", "calendar", "logs", "content", "archives",
+  "profile",
 ];
 
 export default function AdminDashboard() {
@@ -179,6 +177,16 @@ export default function AdminDashboard() {
   // the destination module (Ordinances / Resolutions / Sessions) can open
   // directly on its Pending tab instead of the default Published tab.
   const [subTabRequest, setSubTabRequest] = useState(null);
+  // Record opened from the dashboard's "Needs your review" widget — shown in
+  // its module's own View modal (see the view-only OrdinancesPage /
+  // ResolutionsPage below DashboardPage).
+  const [dashboardReview, setDashboardReview] = useState(null);
+  // The widget keeps its own pending list (a different status set than the
+  // module's tabs), so refresh every pending list once the modal closes.
+  const closeDashboardReview = () => {
+    setDashboardReview(null);
+    queryClient.invalidateQueries({ queryKey: ["pending"] });
+  };
 
   // PH Holidays now live entirely in CalendarPage.jsx — it owns the viewed
   // month/year (calendarViewDate) and fetches holidays for whichever year is
@@ -414,7 +422,8 @@ export default function AdminDashboard() {
   // their own avatar in the sidebar. Separate from selectedOfficialProfile
   // above (which is Officials Management viewing/editing SOMEONE ELSE) so
   // self-service editing can never leak into that admin-only flow.
-  const [showMyProfile, setShowMyProfile] = useState(false);
+  // My Profile is a page (activeTab "profile"), not a modal any more.
+  const showMyProfile = activeTab === "profile";
   const [myProfileTab, setMyProfileTab] = useState("account");
   const [myProfileName, setMyProfileName] = useState("");
   // Email address the last "Email Me a Reset Link" went to, shown under the
@@ -1458,20 +1467,6 @@ export default function AdminDashboard() {
   // only in the UI below, since a rejected record's existence shouldn't be
   // visible to every Councilor Management viewer, only whoever also has
   // full rejected-records visibility elsewhere in the app.
-  const getOfficialRejectedOrdinances = (id) =>
-    ordinances.filter(
-      (o) =>
-        o.status === "rejected" &&
-        o.officials &&
-        o.officials.some((x) => x.id === id)
-    );
-  const getOfficialRejectedResolutions = (id) =>
-    resolutions.filter(
-      (r) =>
-        r.status === "rejected" &&
-        r.officials &&
-        r.officials.some((x) => x.id === id)
-    );
   // ─── Terms ────────────────────────────────────────────────────────────────────
   const handleOpenAddTerm = (memberId) => {
     setTermTarget({ memberId });
@@ -2076,12 +2071,16 @@ export default function AdminDashboard() {
   });
 
   const openMyProfile = () => {
-    setMyProfileName(admin?.name || "");
     setMyResetLinkSentTo("");
     setModalMessage("");
     setMyProfileTab("account");
-    setShowMyProfile(true);
+    handleTabChange("profile");
   };
+  // Fill the name field whenever the page opens — including straight from a
+  // refresh on ?tab=profile, where openMyProfile never ran.
+  useEffect(() => {
+    if (showMyProfile && admin) setMyProfileName(admin.name || "");
+  }, [showMyProfile, admin]);
 
   // Updates the account's own name — the one piece of their account a
   // non-admin user may edit themselves (see PUT /:id/name in routes/users.js).
@@ -2529,7 +2528,7 @@ export default function AdminDashboard() {
       <div className={styles.main}>
         <div
           className={styles.header}
-          style={activeTab === "dashboard" ? { display: "none" } : {}}
+          style={activeTab === "dashboard" || activeTab === "profile" ? { display: "none" } : {}}
         >
           <div>
             <h1 className={styles.headerTitle}>{tabTitles[activeTab]}</h1>
@@ -2632,6 +2631,47 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             isCouncilor={isCouncilor}
+            onReview={setDashboardReview}
+          />
+        )}
+        {/* Dashboard "Review": the record's own module page, in view-only
+            mode — the same View modal as in Ordinances / Resolutions. */}
+        {activeTab === "dashboard" && dashboardReview?.record_type === "ordinance" && (
+          <OrdinancesPage
+            ordinances={ordinances}
+            loading={fetchingOrdinances}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditOrdinance}
+            readOnly={!canEditLegislative}
+            canPublish={canPublishLegislative}
+            canManagePending={canManagePendingLegislative}
+            currentUserId={admin?.id}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
+            isCouncilor={isCouncilor}
+            onRefresh={fetchOrdinances}
+            viewOnlyRecord={dashboardReview}
+            onViewOnlyClose={closeDashboardReview}
+          />
+        )}
+        {activeTab === "dashboard" && dashboardReview?.record_type === "resolution" && (
+          <ResolutionsPage
+            resolutions={resolutions}
+            loading={fetchingResolutions}
+            setDeleteTarget={setDeleteTarget}
+            onEdit={handleOpenEditResolution}
+            readOnly={!canEditLegislative}
+            canPublish={canPublishLegislative}
+            canManagePending={canManagePendingLegislative}
+            currentUserId={admin?.id}
+            isViceMayor={isViceMayor}
+            isSecretary={isSecretary}
+            isClerk={isClerk}
+            isCouncilor={isCouncilor}
+            onRefresh={fetchResolutions}
+            viewOnlyRecord={dashboardReview}
+            onViewOnlyClose={closeDashboardReview}
           />
         )}
         {activeTab === "users" && (
@@ -2804,6 +2844,42 @@ export default function AdminDashboard() {
           <ContentManagementPage isAdmin={isAdmin} currentUser={admin} />
         )}
         {activeTab === "archives" && canViewArchives && <ArchivesPage />}
+
+        {/* My Profile — opened by clicking your own avatar in the sidebar.
+            Account tab is always shown; the record tabs only appear when
+            this account is linked to a council member (MyProfileRecords.jsx). */}
+        {activeTab === "profile" && admin && (
+          <MyProfilePage
+            admin={admin}
+            positionLabel={
+              {
+                secretary: "Secretary",
+                clerk: "Clerk",
+                vice_mayor: "Vice Mayor",
+                councilor: "Councilor",
+                liga_ng_mga_barangay: "Liga ng mga Barangay",
+                sk_federated: "SK Federated",
+              }[position] || (isAdmin ? "Administrator" : "User")
+            }
+            tab={myProfileTab}
+            onTabChange={setMyProfileTab}
+            name={myProfileName}
+            onNameChange={setMyProfileName}
+            onSaveName={handleUpdateMyName}
+            onSendResetLink={handleSendMyResetLink}
+            submitting={myProfileSubmitting}
+            resetSentTo={myResetLinkSentTo}
+            records={myRecords}
+            recordsLoading={fetchingMyRecords}
+            dashStyles={styles}
+            onPreview={setOfficialRecordPreview}
+            onRecordsChanged={() => {
+              refetchMyRecords();
+              fetchOrdinances();
+              fetchResolutions();
+            }}
+          />
+        )}
       </div>
 
       {/* ══════════════════ MODALS ══════════════════ */}
@@ -3312,18 +3388,6 @@ export default function AdminDashboard() {
                   </div>
                   <div className={styles.officialStatLabel}>Resolutions</div>
                 </div>
-                {isSecretary && (
-                  <div className={styles.officialStatChip}>
-                    <div className={styles.officialStatValue}>
-                      {getOfficialRejectedOrdinances(selectedOfficialProfile.id)
-                        .length +
-                        getOfficialRejectedResolutions(
-                          selectedOfficialProfile.id
-                        ).length}
-                    </div>
-                    <div className={styles.officialStatLabel}>Rejected</div>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -3348,27 +3412,8 @@ export default function AdminDashboard() {
                     badge: getOfficialResolutions(selectedOfficialProfile.id)
                       .length,
                   },
-                  // Rejected records are scoped to this official as the
-                  // tagged author (ordinance_officials/resolution_officials),
-                  // not to whichever staff account entered the data.
-                  // Secretary-only: a rejection shouldn't be visible to
-                  // every Councilor Management viewer, only whoever already
-                  // has full rejected-records visibility elsewhere in the app.
-                  ...(isSecretary
-                    ? [
-                        {
-                          id: "rejected",
-                          label: "Rejected",
-                          badge:
-                            getOfficialRejectedOrdinances(
-                              selectedOfficialProfile.id
-                            ).length +
-                            getOfficialRejectedResolutions(
-                              selectedOfficialProfile.id
-                            ).length,
-                        },
-                      ]
-                    : []),
+                  // No Rejected tab here: a rejected record is private to its
+                  // author and shows only in their own My Profile.
                 ]}
                 activeTab={officialProfileTab}
                 onTabChange={setOfficialProfileTab}
@@ -3544,65 +3589,6 @@ export default function AdminDashboard() {
                   )
                 ))}
 
-              {officialProfileTab === "rejected" && isSecretary && (
-                getOfficialRejectedOrdinances(selectedOfficialProfile.id)
-                  .length === 0 &&
-                getOfficialRejectedResolutions(selectedOfficialProfile.id)
-                  .length === 0 ? (
-                  <p className={styles.officialEmptyState}>
-                    No rejected records.
-                  </p>
-                ) : (
-                  <>
-                    {getOfficialRejectedOrdinances(
-                      selectedOfficialProfile.id
-                    ).map((o) => (
-                      <div key={`rej-ord-${o.id}`} className={styles.officialRecordItem}>
-                        <div
-                          className={`${styles.officialRecordIcon} ${styles.officialRecordIconRejected}`}
-                        >
-                          <XCircle size={16} strokeWidth={1.5} />
-                        </div>
-                        <div className={styles.officialRecordBody}>
-                          <div className={styles.officialRecordTitle}>
-                            {o.title}
-                          </div>
-                          <div className={styles.officialRecordMeta}>
-                            {new Date(o.uploaded_at).toLocaleDateString(
-                              "en-PH",
-                              { year: "numeric", month: "long", day: "numeric" }
-                            )}
-                          </div>
-                        </div>
-                        <span className={styles.officialTypeTag}>Ordinance</span>
-                      </div>
-                    ))}
-                    {getOfficialRejectedResolutions(
-                      selectedOfficialProfile.id
-                    ).map((r) => (
-                      <div key={`rej-res-${r.id}`} className={styles.officialRecordItem}>
-                        <div
-                          className={`${styles.officialRecordIcon} ${styles.officialRecordIconRejected}`}
-                        >
-                          <XCircle size={16} strokeWidth={1.5} />
-                        </div>
-                        <div className={styles.officialRecordBody}>
-                          <div className={styles.officialRecordTitle}>
-                            {r.title}
-                          </div>
-                          <div className={styles.officialRecordMeta}>
-                            {new Date(r.uploaded_at).toLocaleDateString(
-                              "en-PH",
-                              { year: "numeric", month: "long", day: "numeric" }
-                            )}
-                          </div>
-                        </div>
-                        <span className={styles.officialTypeTag}>Resolution</span>
-                      </div>
-                    ))}
-                  </>
-                )
-              )}
             </div>
           </div>
         </div>
@@ -3613,123 +3599,6 @@ export default function AdminDashboard() {
           record={officialRecordPreview}
           onClose={() => setOfficialRecordPreview(null)}
         />
-      )}
-
-      {/* My Profile — opened by clicking your own avatar in the sidebar.
-          Account tab (name + password) is always shown; the record tabs
-          (Needs My Approval / Authored / Co-Authored / Rejected, see
-          MyProfileRecords.jsx) only appear when this account is linked to a
-          council member — Secretary/Clerk have none, so they only ever see
-          the Account tab. */}
-      {showMyProfile && admin && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => setShowMyProfile(false)}
-        >
-          <div
-            className={styles.officialModal}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className={styles.officialHero}>
-              <button
-                className={styles.officialModalCloseBtn}
-                onClick={() => setShowMyProfile(false)}
-                aria-label="Close modal"
-              >
-                <X size={16} />
-              </button>
-              <div className={styles.officialHeroTop}>
-                <div className={styles.officialAvatarWrap}>
-                  {admin.photo ? (
-                    <img
-                      src={admin.photo}
-                      alt={admin.name}
-                      className={styles.officialAvatarPhoto}
-                    />
-                  ) : (
-                    <div className={styles.officialAvatarFallback}>
-                      {(admin.name || "?").charAt(0)}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <div className={styles.officialHeroName}>{admin.name}</div>
-                  <div>
-                    <span className={styles.officialHeroPosition}>
-                      {position === "secretary"
-                        ? "Secretary"
-                        : position === "clerk"
-                        ? "Clerk"
-                        : position === "vice_mayor"
-                        ? "Vice Mayor"
-                        : position === "councilor"
-                        ? "Councilor"
-                        : position === "liga_ng_mga_barangay"
-                        ? "Liga ng mga Barangay"
-                        : position === "sk_federated"
-                        ? "SK Federated"
-                        : isAdmin
-                        ? "Administrator"
-                        : "User"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {myRecordStats(myRecords).length > 0 && (
-                <div className={styles.officialStatsRow}>
-                  {myRecordStats(myRecords).map((stat) => (
-                    <div key={stat.label} className={styles.officialStatChip}>
-                      <div className={styles.officialStatValue}>{stat.value}</div>
-                      <div className={styles.officialStatLabel}>{stat.label}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className={styles.officialTabsWrap}>
-              <TabNavigation
-                tabs={[
-                  { id: "account", label: "Account" },
-                  ...myRecordTabs(myRecords),
-                ]}
-                activeTab={myProfileTab}
-                onTabChange={setMyProfileTab}
-              />
-            </div>
-
-            <div className={styles.officialModalBody}>
-              {myProfileTab === "account" && (
-                <MyAccountTab
-                  admin={admin}
-                  name={myProfileName}
-                  onNameChange={setMyProfileName}
-                  onSaveName={handleUpdateMyName}
-                  onSendResetLink={handleSendMyResetLink}
-                  submitting={myProfileSubmitting}
-                  resetSentTo={myResetLinkSentTo}
-                  notice={<NotLinkedNotice data={myRecords} />}
-                />
-              )}
-
-              {myProfileTab !== "account" && (
-                <MyProfileRecords
-                  tab={myProfileTab}
-                  data={myRecords}
-                  loading={fetchingMyRecords}
-                  styles={styles}
-                  onPreview={setOfficialRecordPreview}
-                  onChanged={() => {
-                    refetchMyRecords();
-                    fetchOrdinances();
-                    fetchResolutions();
-                  }}
-                />
-              )}
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Add Term */}
