@@ -1,30 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
-import { API, authFetch, extractErrorMsg } from "../AdminContext";
+import { API, authFetch, extractErrorMsg, useAutoRefresh } from "../AdminContext";
 
 export function useSchedules() {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
 
-  const fetchSchedules = useCallback(async () => {
-    setLoading(true);
-    setFetchError("");
+  // `silent` is the background auto-refresh: no spinner, and a failed
+  // attempt leaves the current list (and any error) as it was.
+  const fetchSchedules = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setFetchError("");
+    }
     try {
       const res = await authFetch(`${API}/api/schedules/all`);
       const data = await res.json();
       if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load schedules."));
       setSchedules(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (silent) return;
       setFetchError(err.message || "Failed to load schedules. Please refresh.");
       setSchedules([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchSchedules();
   }, [fetchSchedules]);
+  useAutoRefresh(() => fetchSchedules({ silent: true }));
 
   const saveSchedule = useCallback(async (editTarget, form) => {
     if (editTarget) {

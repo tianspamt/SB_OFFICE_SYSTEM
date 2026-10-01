@@ -45,12 +45,13 @@ export const pendingStatusesForRole = ({ isSecretary }) => {
 // review" widget (a cross-module action list, not a tab), not the Pending
 // tab itself. Secretary needs pending (accept/reject), the three reading
 // statuses (advance-reading), and approved (publish); Vice-Mayor needs
-// ready_to_publish (approve); Clerk/Councilor's only actionable slice is the
-// same one Pending shows them — they can't act on a record mid-reading.
+// ready_to_publish (approve); Clerk/Councilor get the same slice their
+// Pending tab shows — including records mid-reading, view only, so they can
+// follow a draft through its readings from the dashboard too.
 export const actionableStatusesForRole = ({ isSecretary, isViceMayor }) => {
   if (isSecretary) return ["pending", ...READING_STATUSES, "approved"].join(",");
   if (isViceMayor) return "ready_to_publish";
-  return "pending,needs_revision";
+  return pendingStatusesForRole({ isSecretary });
 };
 
 // The tail of the pipeline — split into its own tab (next to Pending) on

@@ -27,6 +27,7 @@ import {
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
 import PendingRecordsWidget from "./PendingRecordsWidget";
+import { pendingStatusesForRole } from "./useLegislativeReview";
 import { PresentOverlay } from "./LegislativeComponents";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
@@ -412,14 +413,12 @@ const DashboardPage = ({
     .sort((a, b) => (a.session_date > b.session_date ? -1 : 1));
   const latestAgendas = sortedAgendas.slice(0, 6);
 
-  // Everything still somewhere in the review pipeline (pending,
-  // needs_revision, ready_to_publish, or approved) across all three record
-  // types — a simple, role-agnostic total, unlike the sidebar's "Pending
-  // your review" widget which scopes to what the logged-in role can act on.
+  // Same count as the Ordinances/Resolutions Pending tabs: drafts awaiting
+  // review (or a fix) plus everything mid First/Second/Third Reading.
+  const pendingStatuses = pendingStatusesForRole({ isSecretary }).split(",");
+  const isPending = (r) => pendingStatuses.includes(r.status);
   const pendingCount =
-    ordinances.filter((o) => o.status !== "published").length +
-    resolutions.filter((r) => r.status !== "published").length +
-    sessionMinutes.filter((s) => s.status !== "published").length;
+    ordinances.filter(isPending).length + resolutions.filter(isPending).length;
 
   const stats = [
     {
@@ -445,6 +444,14 @@ const DashboardPage = ({
       iconBg: "#fff3e0",
       iconColor: "#f57c00",
       trend: "Latest on record",
+    },
+    {
+      label: "Order of Business",
+      value: sessionAgendas.length,
+      icon: BookOpen,
+      iconBg: "#e0f2f1",
+      iconColor: "#00897b",
+      trend: "On record",
     },
     {
       label: "Pending",
@@ -554,7 +561,7 @@ const DashboardPage = ({
             onClick={() => setActivityTab(tab.id)}
           >
             <tab.icon size={14} strokeWidth={2} />
-            {tab.label}
+            <span className={styles.dashTabLabel}>{tab.label}</span>
             {tab.count > 0 && (
               <span className={styles.dashSectionCount}>{tab.count}</span>
             )}
@@ -738,7 +745,7 @@ const DashboardPage = ({
         </div>
         <div className={styles.dashTopBarStats}>
           {loading
-            ? Array.from({ length: 4 }).map((_, i) => <DashStatChipSkeleton key={i} />)
+            ? Array.from({ length: 5 }).map((_, i) => <DashStatChipSkeleton key={i} />)
             : stats.map((s) => (
                 <div key={s.label} className={styles.dashStatChip}>
                   <div className={styles.dashStatChipTop}>

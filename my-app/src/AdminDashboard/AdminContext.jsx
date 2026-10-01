@@ -3,6 +3,62 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ─── API Base URL ──────────────────────────────────────────────────────────────
 export const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+// ─── Auto-refresh ─────────────────────────────────────────────────────────────
+// Keeps lists current without a page reload: re-runs `refresh` every
+// AUTO_REFRESH_MS while the browser tab is visible, as soon as the tab is
+// focused again, and whenever notifyDataChanged() fires (after this user saves
+// something). Callers should refetch silently — no loading spinner — so the
+// page doesn't flash on every tick.
+export const AUTO_REFRESH_MS = 15000;
+const DATA_CHANGED_EVENT = "app:data-changed";
+
+export const notifyDataChanged = () =>
+  window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+
+export function useAutoRefresh(refresh, enabled = true) {
+  // Always call the latest closure, so the interval never runs stale filters.
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+    let running = false;
+    let queued = false;
+    const run = async () => {
+      if (document.visibilityState !== "visible") return;
+      // A save landing mid-refresh must not be dropped — run once more after.
+      if (running) {
+        queued = true;
+        return;
+      }
+      running = true;
+      try {
+        do {
+          queued = false;
+          await refreshRef.current();
+        } while (queued);
+      } finally {
+        running = false;
+      }
+    };
+    const timer = setInterval(run, AUTO_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", run);
+    window.addEventListener(DATA_CHANGED_EVENT, run);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", run);
+      window.removeEventListener(DATA_CHANGED_EVENT, run);
+    };
+  }, [enabled]);
+}
+
 // ─── Naming a stored file after its record ───────────────────────────────────
 // Files sit in storage under a timestamp name (1790012695202-31q5sm.pdf), which
 // is what a browser shows in the tab and offers when saving. These give them
@@ -453,9 +509,9 @@ export const ACTION_COLORS = {
   COMMENT: { bg: "#f3f4f6", color: "#374151" },
 };
 
-// Two states only: "urgent" is the one tier that does something (it emails
-// every other active user — see notifyUrgent in the backend's announcements
-// route), so there's no value in extra severity labels nobody acts on.
+// Two states only. Every new announcement is emailed (see notifyAnnouncement
+// in the backend's announcements route); "urgent" just flags the email and
+// the feed post as URGENT.
 export const priorityConfig = {
   urgent: {
     label: "Urgent",

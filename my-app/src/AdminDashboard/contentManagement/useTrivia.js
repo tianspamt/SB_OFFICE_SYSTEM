@@ -1,30 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
-import { API, authFetch, extractErrorMsg } from "../AdminContext";
+import { API, authFetch, extractErrorMsg, useAutoRefresh } from "../AdminContext";
 
 export function useTrivia() {
   const [facts, setFacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
 
-  const fetchFacts = useCallback(async () => {
-    setLoading(true);
-    setFetchError("");
+  // `silent` is the background auto-refresh: no spinner, and a failed
+  // attempt leaves the current list (and any error) as it was.
+  const fetchFacts = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setFetchError("");
+    }
     try {
       const res = await authFetch(`${API}/api/trivia/all`);
       const data = await res.json();
       if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load trivia."));
       setFacts(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (silent) return;
       setFetchError(err.message || "Failed to load trivia. Please refresh.");
       setFacts([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchFacts();
   }, [fetchFacts]);
+  useAutoRefresh(() => fetchFacts({ silent: true }));
 
   const saveFact = useCallback(async (editTarget, form) => {
     if (editTarget) {

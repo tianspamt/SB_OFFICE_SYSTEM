@@ -3641,13 +3641,18 @@
   margin-bottom: 18px;
   border-bottom: 1px solid #f1f5f9;
   padding-bottom: 14px;
-  flex-wrap: wrap;
+  /* One row, always — when the sidebar is open and space runs short the
+     labels shrink with "…" instead of a tab dropping to its own line. */
+  flex-wrap: nowrap;
 }
 
 .dashTabBtn {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
   font-size: 12.5px;
   font-weight: 700;
   color: #64748b;
@@ -3663,6 +3668,17 @@
   background: #eef2ff;
   border-color: #a5b4fc;
   color: #090446;
+}
+
+.dashTabBtn > svg,
+.dashTabBtn > .dashSectionCount {
+  flex-shrink: 0;
+}
+
+.dashTabLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dashTabBtnActive {
@@ -3854,7 +3870,7 @@
    the mobile media query) rather than trying to keep 4 across. */
 .dashTopBarStats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   width: 100%;
 }
@@ -4460,6 +4476,10 @@
   .dashTopBarStats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* An odd last chip (5 stats) spans the row instead of sitting alone. */
+  .dashTopBarStats > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
   .dashStatsRow {
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
@@ -4488,13 +4508,12 @@
   .dashMainPanel {
     padding: 16px;
   }
-  /* Same fix as .dashTopBarStats above: a fixed 3-column grid instead of
-     flex-wrap pills, so the three tabs always sit in one even row instead
-     of the 2-then-1 ragged wrap that left-aligned pills of different
-     widths produced. */
+  /* Same fix as .dashTopBarStats above: a fixed grid instead of flex-wrap
+     pills, so the four tabs sit in an even 2x2 block instead of a ragged
+     wrap of left-aligned pills of different widths. */
   .dashTabRow {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
   .dashTabBtn {

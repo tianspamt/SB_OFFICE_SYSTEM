@@ -21,7 +21,7 @@ import styles from "./AdminDashboard.module.css";
 import ConfirmModal from "./ConfirmModal";
 import { ToastContainer } from "./Toast";
 import { useToasts } from "./useToasts";
-import { API, authFetch, useIsMobile } from "./AdminContext";
+import { API, authFetch, useAutoRefresh, useIsMobile } from "./AdminContext";
 
 const MODULE_OPTIONS = [
   { value: "all", label: "All Modules" },
@@ -103,8 +103,8 @@ export default function ArchivesPage() {
     setSelected(new Set());
   }, [page]);
 
-  const fetchArchives = async () => {
-    setLoading(true);
+  const fetchArchives = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const params = new URLSearchParams({
         module: moduleFilter,
@@ -119,11 +119,13 @@ export default function ArchivesPage() {
       setTotal(data?.total || 0);
       setTotalPages(data?.totalPages || 1);
     } catch {
+      // A failed background refresh keeps the page already on screen.
+      if (silent) return;
       setRows([]);
       setTotal(0);
       setTotalPages(1);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -131,6 +133,7 @@ export default function ArchivesPage() {
     fetchArchives();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleFilter, search, page, sort]);
+  useAutoRefresh(() => fetchArchives({ silent: true }));
 
   useEffect(() => {
     if (!selectAllRef.current) return;

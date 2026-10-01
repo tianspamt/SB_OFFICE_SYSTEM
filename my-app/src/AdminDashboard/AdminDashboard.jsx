@@ -50,7 +50,6 @@ import {
   toLocalIso,
   formatDate,
   recordDate,
-  priorityConfig,
   tabTitles,
   getCurrentYear,
   suggestSessionNumber,
@@ -63,6 +62,8 @@ import {
   ORDINANCE_CATEGORIES,
   RESOLUTION_CATEGORIES,
   setConnectionErrorHandler,
+  useAutoRefresh,
+  notifyDataChanged,
 } from "./AdminContext";
 import {
   TermStatusBadge,
@@ -582,10 +583,16 @@ export default function AdminDashboard() {
       fetchLogs();
       fetchLogStats();
     }
+    // Keyed on the tab only — the fetchers are redefined every render, so
+    // listing them would re-run this on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "logs") fetchLogs();
+    // Only the filters should trigger a refetch; switching to the tab is
+    // already handled by the effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logModuleFilter, logActionFilter]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -618,8 +625,8 @@ export default function AdminDashboard() {
   };
 
   // ─── Fetches ──────────────────────────────────────────────────────────────────
-  const fetchUsers = async () => {
-    setFetchingUsers(true);
+  const fetchUsers = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingUsers(true);
     try {
       const res = await authFetch(`${API}/api/users`);
       // 401 (expired/invalid session) is now handled globally by authFetch
@@ -630,53 +637,58 @@ export default function AdminDashboard() {
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
     } catch {
-      setUsers([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setUsers([]);
     } finally {
-      setFetchingUsers(false);
+      if (!silent) setFetchingUsers(false);
     }
   };
-  const fetchOrdinances = async () => {
-    setFetchingOrdinances(true);
+  const fetchOrdinances = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingOrdinances(true);
     try {
       const d = await (await authFetch(`${API}/api/ordinances?status=all`)).json();
       setOrdinances(Array.isArray(d) ? d : []);
     } catch {
-      setOrdinances([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setOrdinances([]);
     } finally {
-      setFetchingOrdinances(false);
+      if (!silent) setFetchingOrdinances(false);
     }
   };
-  const fetchResolutions = async () => {
-    setFetchingResolutions(true);
+  const fetchResolutions = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingResolutions(true);
     try {
       const d = await (await authFetch(`${API}/api/resolutions?status=all`)).json();
       setResolutions(Array.isArray(d) ? d : []);
     } catch {
-      setResolutions([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setResolutions([]);
     } finally {
-      setFetchingResolutions(false);
+      if (!silent) setFetchingResolutions(false);
     }
   };
-  const fetchSessionMinutes = async () => {
-    setFetchingMinutes(true);
+  const fetchSessionMinutes = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingMinutes(true);
     try {
       const d = await (await authFetch(`${API}/api/session-minutes?status=all`)).json();
       setSessionMinutes(Array.isArray(d) ? d : []);
     } catch {
-      setSessionMinutes([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setSessionMinutes([]);
     } finally {
-      setFetchingMinutes(false);
+      if (!silent) setFetchingMinutes(false);
     }
   };
-  const fetchSessionAgendas = async () => {
-    setFetchingAgendas(true);
+  const fetchSessionAgendas = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingAgendas(true);
     try {
       const d = await (await authFetch(`${API}/api/session-agendas`)).json();
       setSessionAgendas(Array.isArray(d) ? d : []);
     } catch {
-      setSessionAgendas([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setSessionAgendas([]);
     } finally {
-      setFetchingAgendas(false);
+      if (!silent) setFetchingAgendas(false);
     }
   };
   // `silent` skips the fetchingAnnouncements toggle — used for background
@@ -691,7 +703,8 @@ export default function AdminDashboard() {
       const d = await (await authFetch(`${API}/api/announcements`)).json();
       setAnnouncements(Array.isArray(d) ? d : []);
     } catch {
-      setAnnouncements([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setAnnouncements([]);
     } finally {
       if (!silent) setFetchingAnnouncements(false);
     }
@@ -729,20 +742,42 @@ export default function AdminDashboard() {
       fetchAnnouncements({ silent: true });
     }
   };
-  const [fetchingCalendar, setFetchingCalendar] = useState(false);
-  const fetchLocalEvents = async () => {
-    setFetchingCalendar(true);
+  // Silent re-pull of everything the dashboard shows, so records added by
+  // this user or anyone else appear without a page reload. Runs on a timer,
+  // on tab focus, and after every save (see useAutoRefresh).
+  const refreshAllData = () => {
+    const jobs = [
+      fetchOrdinances({ silent: true }),
+      fetchResolutions({ silent: true }),
+      fetchSessionMinutes({ silent: true }),
+      fetchSessionAgendas({ silent: true }),
+      fetchAnnouncements({ silent: true }),
+      fetchUnreadAnnouncements(),
+      fetchActiveStaffCount(),
+      fetchLocalEvents({ silent: true }),
+      // Re-fetches every React Query list currently on screen (officials,
+      // councils, pending / ready-to-publish / published records, …). The
+      // holidays list is fixed for the year, so it's left alone.
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey[0] !== "holidays",
+      }),
+    ];
+    if (admin?.role === "admin") jobs.push(fetchUsers({ silent: true }));
+    if (activeTab === "logs") jobs.push(fetchLogs({ silent: true }), fetchLogStats());
+    return Promise.allSettled(jobs);
+  };
+  useAutoRefresh(refreshAllData, !!admin);
+  const fetchLocalEvents = async ({ silent = false } = {}) => {
     try {
       const d = await (await authFetch(`${API}/api/calendar-events`)).json();
       setLocalEvents(Array.isArray(d) ? d : []);
     } catch {
-      setLocalEvents([]);
-    } finally {
-      setFetchingCalendar(false);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setLocalEvents([]);
     }
   };
-  const fetchLogs = async () => {
-    setFetchingLogs(true);
+  const fetchLogs = async ({ silent = false } = {}) => {
+    if (!silent) setFetchingLogs(true);
     try {
       let url = `${API}/api/activity-logs?limit=100`;
       if (logModuleFilter !== "all") url += `&module=${logModuleFilter}`;
@@ -750,9 +785,10 @@ export default function AdminDashboard() {
       const d = await (await authFetch(url)).json();
       setLogs(Array.isArray(d) ? d : []);
     } catch {
-      setLogs([]);
+      // A failed background refresh keeps the list already on screen.
+      if (!silent) setLogs([]);
     } finally {
-      setFetchingLogs(false);
+      if (!silent) setFetchingLogs(false);
     }
   };
   const fetchLogStats = async () => {
@@ -796,7 +832,7 @@ export default function AdminDashboard() {
         setNewAdmin({ name: "", username: "", email: "", password: "", position: "secretary" });
         setNewAdminPhoto(null);
         setShowAddAdminModal(false);
-        fetchUsers();
+        notifyDataChanged();
       } else showModalMsg(extractErrorMsg(data, "Failed!"), "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -842,7 +878,7 @@ export default function AdminDashboard() {
         setNewUser({ name: "", username: "", email: "", password: "", position: "councilor" });
         setNewUserPhoto(null);
         setShowAddUserModal(false);
-        fetchUsers();
+        notifyDataChanged();
       } else showModalMsg(extractErrorMsg(data, "Failed!"), "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -885,7 +921,7 @@ export default function AdminDashboard() {
         showSuccessModal(`${editingUser.role === "admin" ? "Admin" : "User"} updated!`);
         setShowEditUserModal(false);
         setEditingUser(null);
-        fetchUsers();
+        notifyDataChanged();
       } else showModalMsg(extractErrorMsg(data, "Update failed!"), "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -901,7 +937,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("User archived!");
-        fetchUsers();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1093,7 +1129,7 @@ export default function AdminDashboard() {
         setSelectedOfficials([]);
         setUploadType("");
         setShowOrdinanceModal(false);
-        fetchOrdinances();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Upload failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1174,7 +1210,7 @@ export default function AdminDashboard() {
         showSuccessModal("Ordinance updated!");
         setShowEditOrdinanceModal(false);
         setEditingOrdinance(null);
-        fetchOrdinances();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1190,7 +1226,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("Archived!");
-        fetchOrdinances();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1237,7 +1273,7 @@ export default function AdminDashboard() {
         setResolutionCategory("");
         setSelectedResolutionOfficials([]);
         setShowResolutionModal(false);
-        fetchResolutions();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Upload failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1316,7 +1352,7 @@ export default function AdminDashboard() {
         showSuccessModal("Resolution updated!");
         setShowEditResolutionModal(false);
         setEditingResolution(null);
-        fetchResolutions();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1332,7 +1368,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("Resolution archived!");
-        fetchResolutions();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1625,7 +1661,7 @@ export default function AdminDashboard() {
         showSuccessModal("Session added!");
         resetSessionForm();
         setShowSessionModal(false);
-        fetchSessionMinutes();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Upload failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1685,7 +1721,7 @@ export default function AdminDashboard() {
         showSuccessModal("Session minutes updated!");
         setShowEditSessionModal(false);
         setEditingSession(null);
-        fetchSessionMinutes();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1701,7 +1737,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("Session archived!");
-        fetchSessionMinutes();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1746,7 +1782,7 @@ export default function AdminDashboard() {
         showSuccessModal("Order of business posted!");
         resetAgendaForm();
         setShowAgendaModal(false);
-        fetchSessionAgendas();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Upload failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1785,7 +1821,7 @@ export default function AdminDashboard() {
         showSuccessModal("Order of business updated!");
         setShowEditAgendaModal(false);
         setEditingAgenda(null);
-        fetchSessionAgendas();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1801,7 +1837,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("Order of business archived!");
-        fetchSessionAgendas();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -1922,7 +1958,7 @@ export default function AdminDashboard() {
         showSuccessModal("Event saved!");
         setShowLocalEventModal(false);
         setLocalEventForm(emptyEventForm);
-        fetchLocalEvents();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Failed to save event!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1977,7 +2013,7 @@ export default function AdminDashboard() {
         showSuccessModal("Event updated!");
         setShowEditEventModal(false);
         setEditingEvent(null);
-        fetchLocalEvents();
+        notifyDataChanged();
       } else showModalMsg(data.error || "Update failed!", "error");
     } catch {
       showModalMsg("Server error!", "error");
@@ -1993,7 +2029,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         showSuccessModal("Event deleted!");
-        fetchLocalEvents();
+        notifyDataChanged();
       } else showMsg(data.error || "Error!", "error");
     } catch {
       showMsg("Error!", "error");
@@ -2062,7 +2098,6 @@ export default function AdminDashboard() {
   const {
     data: myRecords,
     isLoading: fetchingMyRecords,
-    refetch: refetchMyRecords,
   } = useQuery({
     queryKey: MY_RECORDS_QUERY_KEY,
     queryFn: fetchMyRecords,
@@ -2650,7 +2685,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             isCouncilor={isCouncilor}
-            onRefresh={fetchOrdinances}
+            onRefresh={notifyDataChanged}
             viewOnlyRecord={dashboardReview}
             onViewOnlyClose={closeDashboardReview}
           />
@@ -2669,7 +2704,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             isCouncilor={isCouncilor}
-            onRefresh={fetchResolutions}
+            onRefresh={notifyDataChanged}
             viewOnlyRecord={dashboardReview}
             onViewOnlyClose={closeDashboardReview}
           />
@@ -2708,7 +2743,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             isCouncilor={isCouncilor}
-            onRefresh={fetchOrdinances}
+            onRefresh={notifyDataChanged}
             initialSubTab={activeTab === "ordinances" ? subTabRequest : null}
           />
         )}
@@ -2726,7 +2761,7 @@ export default function AdminDashboard() {
             isSecretary={isSecretary}
             isClerk={isClerk}
             isCouncilor={isCouncilor}
-            onRefresh={fetchResolutions}
+            onRefresh={notifyDataChanged}
             initialSubTab={activeTab === "resolutions" ? subTabRequest : null}
           />
         )}
@@ -2873,11 +2908,7 @@ export default function AdminDashboard() {
             recordsLoading={fetchingMyRecords}
             dashStyles={styles}
             onPreview={setOfficialRecordPreview}
-            onRecordsChanged={() => {
-              refetchMyRecords();
-              fetchOrdinances();
-              fetchResolutions();
-            }}
+            onRecordsChanged={notifyDataChanged}
           />
         )}
       </div>
@@ -5525,42 +5556,25 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <label className={styles.fieldLabel}>Priority</label>
-              <div className={styles.priorityRow}>
-                {["normal", "urgent"].map((p) => {
-                  const cfg = priorityConfig[p];
-                  return (
-                    <button
-                      key={p}
-                      className={`${styles.priorityBtn} ${
-                        announcementForm.priority === p
-                          ? styles.priorityBtnActive
-                          : ""
-                      }`}
-                      style={
-                        announcementForm.priority === p
-                          ? {
-                              background: cfg.bg,
-                              borderColor: cfg.border,
-                              color: cfg.color,
-                            }
-                          : {}
-                      }
-                      onClick={() =>
-                        setAnnouncementForm({
-                          ...announcementForm,
-                          priority: p,
-                        })
-                      }
-                    >
-                      {cfg.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <label
+                className={styles.fieldLabel}
+                style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={announcementForm.priority === "urgent"}
+                  onChange={(e) =>
+                    setAnnouncementForm({
+                      ...announcementForm,
+                      priority: e.target.checked ? "urgent" : "normal",
+                    })
+                  }
+                />
+                Mark as urgent
+              </label>
               {announcementForm.priority === "urgent" && (
                 <p className={styles.fieldHint} style={{ marginTop: -6, marginBottom: 12 }}>
-                  Emails every other active user as soon as this is posted.
+                  Every announcement is emailed to all active users. Urgent ones are flagged "URGENT" in the email and the feed.
                 </p>
               )}
               <label
@@ -5714,43 +5728,26 @@ export default function AdminDashboard() {
                   })
                 }
               />
-              <label className={styles.fieldLabel}>Priority</label>
-              <div className={styles.priorityRow}>
-                {["normal", "urgent"].map((p) => {
-                  const cfg = priorityConfig[p];
-                  return (
-                    <button
-                      key={p}
-                      className={`${styles.priorityBtn} ${
-                        editAnnouncementForm.priority === p
-                          ? styles.priorityBtnActive
-                          : ""
-                      }`}
-                      style={
-                        editAnnouncementForm.priority === p
-                          ? {
-                              background: cfg.bg,
-                              borderColor: cfg.border,
-                              color: cfg.color,
-                            }
-                          : {}
-                      }
-                      onClick={() =>
-                        setEditAnnouncementForm({
-                          ...editAnnouncementForm,
-                          priority: p,
-                        })
-                      }
-                    >
-                      {cfg.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <label
+                className={styles.fieldLabel}
+                style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={editAnnouncementForm.priority === "urgent"}
+                  onChange={(e) =>
+                    setEditAnnouncementForm({
+                      ...editAnnouncementForm,
+                      priority: e.target.checked ? "urgent" : "normal",
+                    })
+                  }
+                />
+                Mark as urgent
+              </label>
               {editAnnouncementForm.priority === "urgent" &&
                 editingAnnouncement.priority !== "urgent" && (
                   <p className={styles.fieldHint} style={{ marginTop: -6, marginBottom: 12 }}>
-                    Emails every other active user as soon as this is saved.
+                    Sends a new "URGENT" email to every other active user when you save.
                   </p>
                 )}
               <label

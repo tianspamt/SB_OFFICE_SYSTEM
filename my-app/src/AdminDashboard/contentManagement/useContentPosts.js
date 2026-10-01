@@ -1,30 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
-import { API, authFetch, extractErrorMsg } from "../AdminContext";
+import { API, authFetch, extractErrorMsg, useAutoRefresh } from "../AdminContext";
 
 export function useContentPosts() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
 
-  const fetchPosts = useCallback(async () => {
-    setLoading(true);
-    setFetchError("");
+  // `silent` is the background auto-refresh: no spinner, and a failed
+  // attempt leaves the current list (and any error) as it was.
+  const fetchPosts = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setFetchError("");
+    }
     try {
       const res = await authFetch(`${API}/api/content-posts`);
       const data = await res.json();
       if (!res.ok) throw new Error(extractErrorMsg(data, "Failed to load posts."));
       setPosts(Array.isArray(data) ? data : []);
     } catch (err) {
+      if (silent) return;
       setFetchError(err.message || "Failed to load posts. Please refresh.");
       setPosts([]);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchPosts();
   }, [fetchPosts]);
+  useAutoRefresh(() => fetchPosts({ silent: true }));
 
   // `formData` is a ready-to-send FormData built by ContentPostModal (title,
   // body, category, published, pinned, existingImages, and any new image

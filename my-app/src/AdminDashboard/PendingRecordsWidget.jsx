@@ -102,11 +102,12 @@ export default function PendingRecordsWidget({
 
   // Title reflects what this specific role is being asked to do, not just
   // a generic "pending" label — a Secretary is reviewing new drafts, a Vice
-  // Mayor is approving finished ones, a Clerk/Councilor is drafting/fixing.
+  // Mayor is approving finished ones. Clerk/Councilor just see "Pending":
+  // their drafts plus records moving through the readings.
   const widgetTitle = () => {
     if (isSecretary) return "Pending your review";
     if (isViceMayor) return "Awaiting your approval";
-    if (isClerk || isCouncilor) return "Drafts in progress";
+    if (isClerk || isCouncilor) return "Pending";
     return "Needs your review";
   };
 
