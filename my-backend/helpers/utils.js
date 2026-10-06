@@ -121,18 +121,36 @@ const parseApprovedDay = (value) => {
 //   "Municipal Ordinance No. 2025-04"  -> year 2025, seq 4
 //   "RESOLUTION NO. 02 - 2025"         -> year 2025, seq 2
 //   "RES-2025-045"                     -> year 2025, seq 45
-// The 4-digit group between 1900 and 2100 is the year, the other group the
-// sequence. A number with no digits sorts as year 0 / seq 0 (last, newest-first).
-const recordNumberKey = (number) => {
-  const groups = String(number ?? '').match(/\d+/g) || []
-  let year = 0
-  let seq = 0
-  for (const g of groups) {
-    const n = Number(g)
-    if (!year && g.length === 4 && n >= 1900 && n <= 2100) year = n
-    else if (!seq) seq = n
+// The 4-digit group between 1900 and 2100 is the year. The sequence is the
+// group joined to the year by only "-", "/", "." or spaces (after the year
+// first, then before it), so a stray digit typed elsewhere — e.g.
+// "2MUNICIPAL ORDINANCE NO. 2026-04" — isn't mistaken for the sequence.
+// Without such a neighbour, the first other group is the sequence.
+// A number with no digits sorts as year 0 / seq 0 (last, newest-first).
+const YEAR_SEQ_JOIN = /^[\s\-–—/.]*$/
+const recordNumberParts = (number) => {
+  const text = String(number ?? '')
+  const groups = [...text.matchAll(/\d+/g)].map((m) => ({ digits: m[0], index: m.index, value: Number(m[0]) }))
+  const yearIndex = groups.findIndex((g) => g.digits.length === 4 && g.value >= 1900 && g.value <= 2100)
+  const joined = (a, b) => YEAR_SEQ_JOIN.test(text.slice(a.index + a.digits.length, b.index))
+  let seqIndex = -1
+  if (yearIndex >= 0) {
+    const year = groups[yearIndex]
+    const after = groups[yearIndex + 1]
+    const before = groups[yearIndex - 1]
+    if (after && joined(year, after)) seqIndex = yearIndex + 1
+    else if (before && joined(before, year)) seqIndex = yearIndex - 1
   }
-  return { year, seq }
+  if (seqIndex < 0) seqIndex = groups.findIndex((_, i) => i !== yearIndex)
+  return { groups, yearIndex, seqIndex }
+}
+
+const recordNumberKey = (number) => {
+  const { groups, yearIndex, seqIndex } = recordNumberParts(number)
+  return {
+    year: yearIndex >= 0 ? groups[yearIndex].value : 0,
+    seq: seqIndex >= 0 ? groups[seqIndex].value : 0,
+  }
 }
 
 // Newest/highest number first: by year, then sequence — so 2025-09 and 2025-08
@@ -154,6 +172,7 @@ module.exports = {
   applyTokenSearch,
   SESSION_VENUE,
   recordNumberKey,
+  recordNumberParts,
   sortByRecordNumber,
   parseApprovedDay,
   yearInManila,

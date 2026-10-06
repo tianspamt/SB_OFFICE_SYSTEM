@@ -18,5 +18,7 @@ ok('a new year swaps the year and restarts at 01',
   formatLike('Municipal Ordinance No. 2025-17', 2026, 1) === 'Municipal Ordinance No. 2026-01')
 ok('grows past the padding when needed: 99 → 100',
   formatLike('RESOLUTION NO. 99-2025', 2025, 100) === 'RESOLUTION NO. 100-2025')
+ok('rewrites the sequence next to the year and drops a stray leading digit',
+  formatLike('2Municipal Ordinance No. 2026-04', 2026, 5) === 'Municipal Ordinance No. 2026-05')
 
 summary('record-numbers.test.js')

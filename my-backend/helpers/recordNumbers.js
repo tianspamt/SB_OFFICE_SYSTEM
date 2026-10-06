@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase')
-const { recordNumberKey } = require('./utils')
+const { recordNumberKey, recordNumberParts } = require('./utils')
 
 // Sequential official numbers for ordinances/resolutions: when the latest
 // published number for a year is 13, the next one published must be 14 —
@@ -36,15 +36,23 @@ async function publishedNumbers({ table, numberField, entityType, excludeId }) {
 // Rewrites `template`'s sequence and year digits, keeping its wording and
 // zero-padding — "RESOLUTION NO. 13-2025" → "RESOLUTION NO. 14-2025",
 // "Municipal Ordinance No. 2025-17" → "Municipal Ordinance No. 2025-18".
+// Uses the same year/sequence groups as recordNumberKey, so the digits it
+// rewrites are the ones Publish will read back. A stray number glued to the
+// front of the wording ("2Municipal Ordinance No. 2026-04") is a typo in the
+// template, so it's dropped rather than copied into the suggestion.
 function formatLike(template, year, seq) {
-  let seqDone = false
-  return template.replace(/\d+/g, (g) => {
-    const n = Number(g)
-    if (g.length === 4 && n >= 1900 && n <= 2100) return String(year)
-    if (seqDone) return g
-    seqDone = true
-    return String(seq).padStart(Math.max(g.length, 2), '0')
+  const { groups, yearIndex, seqIndex } = recordNumberParts(template)
+  let out = ''
+  let pos = 0
+  groups.forEach((g, i) => {
+    let digits = g.digits
+    if (i === yearIndex) digits = String(year)
+    else if (i === seqIndex) digits = String(seq).padStart(Math.max(g.digits.length, 2), '0')
+    else if (g.index === 0 && /\p{L}/u.test(template.charAt(g.digits.length))) digits = ''
+    out += template.slice(pos, g.index) + digits
+    pos = g.index + g.digits.length
   })
+  return out + template.slice(pos)
 }
 
 // { year, seq, number, latest } — the only number that may be published next

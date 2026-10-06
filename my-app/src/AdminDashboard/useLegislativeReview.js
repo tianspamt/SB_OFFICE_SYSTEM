@@ -102,16 +102,28 @@ export const REJECTED_STATUS = "rejected";
 // `detected` is null | { status: "reading" } | { status: "error", message }
 // | { status: "done", data }.
 // Same parsing as the backend's recordNumberKey (helpers/utils.js): the
-// 4-digit group is the year, the first other number is the sequence.
+// 4-digit group is the year; the sequence is the group joined to it by only
+// "-", "/", "." or spaces (after the year first, then before), else the first
+// other group — so a stray digit like "2MUNICIPAL ... 2026-04" is ignored.
+const YEAR_SEQ_JOIN = /^[\s\-–—/.]*$/;
 const numberKey = (number) => {
-  let year = 0;
-  let seq = 0;
-  for (const g of String(number ?? "").match(/\d+/g) || []) {
-    const n = Number(g);
-    if (!year && g.length === 4 && n >= 1900 && n <= 2100) year = n;
-    else if (!seq) seq = n;
+  const text = String(number ?? "");
+  const groups = [...text.matchAll(/\d+/g)].map((m) => ({ digits: m[0], index: m.index, value: Number(m[0]) }));
+  const yearIndex = groups.findIndex((g) => g.digits.length === 4 && g.value >= 1900 && g.value <= 2100);
+  const joined = (a, b) => YEAR_SEQ_JOIN.test(text.slice(a.index + a.digits.length, b.index));
+  let seqIndex = -1;
+  if (yearIndex >= 0) {
+    const year = groups[yearIndex];
+    const after = groups[yearIndex + 1];
+    const before = groups[yearIndex - 1];
+    if (after && joined(year, after)) seqIndex = yearIndex + 1;
+    else if (before && joined(before, year)) seqIndex = yearIndex - 1;
   }
-  return { year, seq };
+  if (seqIndex < 0) seqIndex = groups.findIndex((_, i) => i !== yearIndex);
+  return {
+    year: yearIndex >= 0 ? groups[yearIndex].value : 0,
+    seq: seqIndex >= 0 ? groups[seqIndex].value : 0,
+  };
 };
 
 // Client-side copy of Publish's sequence rule, so a skipped/reused number is

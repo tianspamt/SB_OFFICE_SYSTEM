@@ -14,6 +14,12 @@ ok('key: sequence-first resolution number', k.year === 2025 && k.seq === 2, JSON
 k = recordNumberKey('RES-2025-045')
 ok('key: legacy RES-YYYY-NNN', k.year === 2025 && k.seq === 45, JSON.stringify(k))
 
+k = recordNumberKey('2MUNICIPAL ORDINANCE NO. 2026-04')
+ok('key: stray leading digit is not the sequence', k.year === 2026 && k.seq === 4, JSON.stringify(k))
+
+k = recordNumberKey('Resolution No. 12, Series of 2025')
+ok('key: no year neighbour -> first other number', k.year === 2025 && k.seq === 12, JSON.stringify(k))
+
 k = recordNumberKey(null)
 ok('key: no number -> 0 / 0', k.year === 0 && k.seq === 0)
 

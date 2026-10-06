@@ -53,7 +53,8 @@ export default function Login() {
         localStorage.setItem('user', JSON.stringify(data.user))
         navigate('/dashboard')
       } else {
-        setLoginError(data.message || 'Invalid credentials.')
+        // Rate-limit and validation failures come back as `error`, not `message`.
+        setLoginError(data.message || data.error || 'Invalid credentials.')
       }
     } catch (err) {
       console.error('Error:', err)
