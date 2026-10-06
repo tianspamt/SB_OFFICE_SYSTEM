@@ -139,7 +139,7 @@ export default function OrdinancesPage({
   const { data: pendingOrdinances = [], isLoading: fetchingPending } = useQuery({
     queryKey: pendingQueryKey("ordinances", pendingStatusQ),
     queryFn: () => fetchPendingList("ordinances", pendingStatusQ),
-    enabled: activeTab === "pending" && canPublish,
+    enabled: canPublish,
     staleTime: 15000,
   });
   // Ready to Publish: its own tab (see READY_TO_PUBLISH_STATUSES) — Vice-Mayor
@@ -147,7 +147,7 @@ export default function OrdinancesPage({
   const { data: readyToPublishOrdinances = [], isLoading: fetchingReadyToPublish } = useQuery({
     queryKey: pendingQueryKey("ordinances", READY_TO_PUBLISH_STATUSES),
     queryFn: () => fetchPendingList("ordinances", READY_TO_PUBLISH_STATUSES),
-    enabled: activeTab === "ready_to_publish" && canPublish,
+    enabled: canPublish,
     staleTime: 15000,
   });
   // Rejected records don't get a tab in this module — a rejected record is

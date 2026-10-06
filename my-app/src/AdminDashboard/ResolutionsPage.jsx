@@ -135,7 +135,7 @@ export default function ResolutionsPage({
   const { data: pendingResolutions = [], isLoading: fetchingPending } = useQuery({
     queryKey: pendingQueryKey("resolutions", pendingStatusQ),
     queryFn: () => fetchPendingList("resolutions", pendingStatusQ),
-    enabled: activeTab === "pending" && canPublish,
+    enabled: canPublish,
     staleTime: 15000,
   });
   // Ready to Publish: its own tab (see READY_TO_PUBLISH_STATUSES) — Vice-Mayor
@@ -143,7 +143,7 @@ export default function ResolutionsPage({
   const { data: readyToPublishResolutions = [], isLoading: fetchingReadyToPublish } = useQuery({
     queryKey: pendingQueryKey("resolutions", READY_TO_PUBLISH_STATUSES),
     queryFn: () => fetchPendingList("resolutions", READY_TO_PUBLISH_STATUSES),
-    enabled: activeTab === "ready_to_publish" && canPublish,
+    enabled: canPublish,
     staleTime: 15000,
   });
   // Rejected records don't get a tab in this module — a rejected record is

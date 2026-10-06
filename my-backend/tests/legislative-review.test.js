@@ -100,14 +100,30 @@ async function main() {
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, clerkHeaders)
       ok('Clerk cannot advance-reading — wrong position (403)', res.status === 403, `status=${res.status}`)
 
+      // Each reading (and the final publish) is gated on the author's
+      // approval (helpers/authorApprovals.js). This draft has no Author with
+      // a linked account, so the Secretary records it on their behalf.
+      const approveOnBehalf = async (stageLabel) => {
+        const r = await putJson(`${BASE}/api/ordinances/${idAccept}/author-approval/on-behalf`, secHeaders, { note: 'E2E: approved during session' })
+        const b = await r.json()
+        ok(`Secretary records author approval on behalf (${stageLabel})`, r.ok && b.data?.decision === 'approved', JSON.stringify(b))
+      }
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary advance-reading blocked until the author approves (409)', res.status === 409 && body.authorApproval === 'missing', `status=${res.status} ${JSON.stringify(body)}`)
+
+      await approveOnBehalf('first reading')
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
       body = await res.json()
       ok('Secretary advance-reading: first_reading -> second_reading', res.ok && body.data?.status === 'second_reading', JSON.stringify(body))
 
+      await approveOnBehalf('second reading')
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
       body = await res.json()
       ok('Secretary advance-reading: second_reading -> third_reading', res.ok && body.data?.status === 'third_reading', JSON.stringify(body))
 
+      await approveOnBehalf('third reading')
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
       body = await res.json()
       ok('Secretary advance-reading: third_reading -> ready_to_publish', res.ok && body.data?.status === 'ready_to_publish', JSON.stringify(body))
@@ -125,10 +141,17 @@ async function main() {
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/publish`, clerkHeaders)
       ok('Clerk cannot publish — wrong position (403)', res.status === 403, `status=${res.status}`)
 
+      await approveOnBehalf('final approval to publish')
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/publish`, secHeaders)
       ok('Secretary publish rejected without an ordinance number (400)', res.status === 400, `status=${res.status}`)
 
-      const publishNumber = `Ordinance No. E2E-${Date.now()}`
+      // Numbers must be the next in sequence for their year
+      // (helpers/recordNumbers.js), so ask the server for it. Year 2100 keeps
+      // the test clear of the office's real numbering.
+      res = await fetch(`${BASE}/api/ordinances/${idAccept}/next-number?year=2100`, { headers: secHeaders })
+      body = await res.json()
+      const publishNumber = body.data?.number
+      ok('Secretary gets the next ordinance number for the year', res.ok && !!publishNumber, JSON.stringify(body))
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/publish`, secHeaders, { ordinance_number: publishNumber })
       body = await res.json()
       ok(
