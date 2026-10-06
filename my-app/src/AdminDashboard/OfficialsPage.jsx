@@ -12,6 +12,7 @@ import {
   ChevronRight,
   CalendarDays,
   UserPlus,
+  GripVertical,
 } from "lucide-react";
 import styles from "./OfficialsPage.module.css";
 import { ModalAlert } from "./AdminComponents";
@@ -81,6 +82,17 @@ function buildCouncilGroups(officials) {
     }
   });
 
+  // Within a council: the official order the Secretary/Clerk set by dragging
+  // (term.display_order, migrations/032). Unplaced terms (NULL — newly added
+  // members) go last, oldest first.
+  groups.forEach((g) =>
+    g.entries.sort(
+      (a, b) =>
+        (a.term?.display_order ?? Infinity) - (b.term?.display_order ?? Infinity) ||
+        new Date(a.member.created_at) - new Date(b.member.created_at)
+    )
+  );
+
   return Array.from(groups.entries())
     .sort(([keyA, a], [keyB, b]) => {
       if (keyA === "unknown") return 1;
@@ -118,6 +130,9 @@ function MemberCard({
   onDelete,
   onViewProfile,
   readOnly = false,
+  dragProps = null,
+  isDragging = false,
+  isDragOver = false,
 }) {
   const isActive = term?.status === "active";
   const hasTerm = !!term;
@@ -135,7 +150,17 @@ function MemberCard({
     : styles.statusDotEnded;
 
   return (
-    <div className={styles.memberCard}>
+    <div
+      className={`${styles.memberCard} ${dragProps ? styles.memberCardDraggable : ""} ${
+        isDragging ? styles.memberCardDragging : ""
+      } ${isDragOver ? styles.memberCardDragOver : ""}`}
+      {...(dragProps || {})}
+    >
+      {dragProps && (
+        <span className={styles.dragHandle} title="Drag to rearrange">
+          <GripVertical size={14} />
+        </span>
+      )}
       <div className={styles.avatarWrap}>
         <Avatar member={member} ringClass={ringClass} />
         <span className={`${styles.statusDot} ${dotClass}`} />
@@ -313,9 +338,65 @@ function CouncilGroup({
   onViewProfile,
   onEditCouncil,
   onDeleteCouncil,
+  onReorder,
   readOnly = false,
 }) {
   const activeCount = entries.filter((e) => e.term?.status === "active").length;
+
+  // ── drag to rearrange (Secretary/Clerk only) ──
+  // The saved order is the official order used by every author/sponsor
+  // picker and the public website. Disabled while a search narrows the
+  // list, since dropping between filtered cards would hide where the
+  // missing ones end up.
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const [orderError, setOrderError] = useState("");
+  const isSearching = !!norm(search) || !!norm(globalSearch);
+  const canDrag =
+    !readOnly && councilId != null && !!onReorder && !isSearching && entries.length > 1;
+
+  // onReorder moves the cards immediately (cached list) and saves in the
+  // background, so nothing here waits — it only reports a failed save.
+  const handleDrop = async (targetId) => {
+    const fromId = dragId;
+    setDragId(null);
+    setOverId(null);
+    if (fromId == null || fromId === targetId) return;
+    const ids = entries.map((e) => e.term.id);
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1);
+    ids.splice(to, 0, fromId);
+    setOrderError("");
+    const result = await onReorder(councilId, ids);
+    if (!result?.success) setOrderError(result?.error || "Failed to save the new order.");
+  };
+
+  const dragPropsFor = (term) =>
+    canDrag && term
+      ? {
+          draggable: true,
+          onDragStart: (e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", String(term.id));
+            setDragId(term.id);
+          },
+          onDragOver: (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (overId !== term.id) setOverId(term.id);
+          },
+          onDrop: (e) => {
+            e.preventDefault();
+            handleDrop(term.id);
+          },
+          onDragEnd: () => {
+            setDragId(null);
+            setOverId(null);
+          },
+        }
+      : null;
 
   // A page-wide search that matches the council's own label (say "2022")
   // keeps every member of it; otherwise only members matching the query stay.
@@ -417,7 +498,15 @@ function CouncilGroup({
               <div className={styles.resultInfo}>
                 {filtered.length} member{filtered.length !== 1 ? "s" : ""}
                 {search ? " found" : ""}
+                {!readOnly && councilId != null && onReorder && entries.length > 1 && (
+                  <span className={styles.dragHint}>
+                    {isSearching
+                      ? " · Clear the search to rearrange"
+                      : " · Drag the cards to arrange the official order"}
+                  </span>
+                )}
               </div>
+              {orderError && <div className={styles.orderError}>{orderError}</div>}
               <div className={styles.memberGrid}>
                 {filtered.map(({ member, term }) => (
                   <MemberCard
@@ -428,6 +517,9 @@ function CouncilGroup({
                     onDelete={onDelete}
                     onViewProfile={onViewProfile}
                     readOnly={readOnly}
+                    dragProps={dragPropsFor(term)}
+                    isDragging={term != null && dragId === term.id}
+                    isDragOver={term != null && overId === term.id && dragId !== term.id}
                   />
                 ))}
               </div>
@@ -452,6 +544,7 @@ export default function OfficialsPage({
   councils = [],
   onAddCouncil,
   onEditCouncil,
+  onReorderCouncil,
   showSuccessModal,
   setDeleteTarget,
   onViewProfile,
@@ -685,6 +778,7 @@ export default function OfficialsPage({
               onViewProfile={onViewProfile}
               onEditCouncil={(id, label) => setEditCouncilTarget({ id, label })}
               onDeleteCouncil={handleDeleteCouncilClick}
+              onReorder={onReorderCouncil}
               readOnly={readOnly}
             />
           ))}

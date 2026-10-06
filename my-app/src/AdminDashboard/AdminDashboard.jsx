@@ -388,6 +388,51 @@ export default function AdminDashboard() {
       return { success: false, error: "Server error." };
     }
   };
+  // Card drag in OfficialsPage (migrations/032). The new order is written
+  // into the cached officials list right away so the cards move instantly,
+  // then saved in the background once the user pauses — several quick drags
+  // become one request, and nothing waits on the network.
+  const reorderSaves = useRef({}); // councilId -> { timer, resolve }
+  const handleReorderCouncil = (councilId, termIds) => {
+    const rank = new Map(termIds.map((id, i) => [id, i + 1]));
+    const place = (t) => (t && rank.has(t.id) ? { ...t, display_order: rank.get(t.id) } : t);
+    queryClient.cancelQueries({ queryKey: OFFICIALS_QUERY_KEY });
+    queryClient.setQueryData(OFFICIALS_QUERY_KEY, (old = []) =>
+      old.map((m) => ({ ...m, terms: (m.terms || []).map(place), active_term: place(m.active_term) }))
+    );
+
+    // A newer drag in the same council replaces the pending save.
+    const prev = reorderSaves.current[councilId];
+    if (prev) {
+      clearTimeout(prev.timer);
+      prev.resolve({ success: true });
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(async () => {
+        let result;
+        try {
+          const res = await authFetch(`${API}/api/sb-council-members/reorder`, {
+            method: "PUT",
+            body: JSON.stringify({ council_id: councilId, term_ids: termIds }),
+          });
+          const data = await res.json();
+          result = res.ok && data.success
+            ? { success: true }
+            : { success: false, error: data.error || "Failed to save the new order." };
+        } catch {
+          result = { success: false, error: "Server error. The new order was not saved." };
+        }
+        if (reorderSaves.current[councilId]?.timer === timer) {
+          delete reorderSaves.current[councilId];
+          // Re-sorts the author/sponsor pickers — or, on failure, puts the
+          // cards back to the order that's actually saved.
+          fetchOfficials();
+        }
+        resolve(result);
+      }, 800);
+      reorderSaves.current[councilId] = { timer, resolve };
+    });
+  };
   // Council deletion is blocked server-side (400, with an explanatory
   // message) while any member term still references it — surfaced as a
   // toast rather than silently failing, since the blocking ConfirmModal
@@ -2774,6 +2819,7 @@ export default function AdminDashboard() {
             councils={councils}
             onAddCouncil={handleAddCouncil}
             onEditCouncil={handleEditCouncil}
+            onReorderCouncil={handleReorderCouncil}
             showSuccessModal={showSuccessModal}
             setDeleteTarget={setDeleteTarget}
             onViewProfile={(o) => {

@@ -23,6 +23,25 @@ const {
   TERM_TO_USER_POSITION, LINKABLE_USER_POSITIONS, autoLinkMember, suggestLinks,
 } = require('../helpers/accountLinks')
 
+// Sorts members by their current term: newer council first, then the
+// council's saved display_order. An unplaced term (display_order NULL — a
+// member added since the last drag) goes to the end of its council.
+const councilYear = (term) => {
+  const label = term?.council?.term_label || term?.term_period || ''
+  const year = parseInt((label.match(/\d{4}/) || [''])[0])
+  return Number.isNaN(year) ? new Date(term?.term_start || 0).getFullYear() : year
+}
+const compareByCouncilOrder = (a, b) => {
+  const ta = a.active_term, tb = b.active_term
+  if (!ta || !tb) return (ta ? 0 : 1) - (tb ? 0 : 1)
+  return (
+    councilYear(tb) - councilYear(ta) ||
+    (ta.council_id ?? 0) - (tb.council_id ?? 0) ||
+    (ta.display_order ?? Infinity) - (tb.display_order ?? Infinity) ||
+    new Date(a.created_at) - new Date(b.created_at)
+  )
+}
+
 // GET /api/sb-council-members
 router.get('/', async (req, res) => {
   try {
@@ -34,7 +53,7 @@ router.get('/', async (req, res) => {
         *,
         sb_council_member_terms (
           id, term_period, term_start, term_end, status, is_reelected, notes, created_at,
-          council_id, position,
+          council_id, position, display_order,
           council:councils ( id, term_label, status )
         )
       `)
@@ -59,6 +78,10 @@ router.get('/', async (req, res) => {
         term_status: activeTerm?.status || null,
       }
     })
+    // Official order (migrations/032): newest council first, then the order
+    // the Secretary/Clerk set by dragging cards in Councilor Management. Every
+    // author/sponsor picker reads this list, so they all follow that order.
+    enriched.sort(compareByCouncilOrder)
     res.json(enriched)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -90,7 +113,7 @@ router.get('/:id', async (req, res) => {
         *,
         sb_council_member_terms (
           id, term_period, term_start, term_end, status, is_reelected, notes, created_at,
-          council_id, position,
+          council_id, position, display_order,
           council:councils ( id, term_label, status )
         )
       `)
@@ -274,6 +297,40 @@ router.post('/add', verifyToken, adminOnly, secretaryOrClerk, upload.single('pho
       }
     }
     res.json({ success: true, id: member.id, data: member, account, linkedUser })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/sb-council-members/reorder
+// Saves the official order of one council's members after the Secretary or
+// Clerk drags the cards in Councilor Management. Body: { council_id,
+// term_ids } with term_ids in the new order. Registered before PUT /:id so
+// "reorder" isn't read as a member id.
+router.put('/reorder', verifyToken, adminOnly, secretaryOrClerk, async (req, res) => {
+  const councilId = Number(req.body?.council_id)
+  const termIds = Array.isArray(req.body?.term_ids) ? req.body.term_ids.map(Number) : null
+  if (!Number.isInteger(councilId) || !termIds || termIds.length === 0 || termIds.some((n) => !Number.isInteger(n)))
+    return res.status(400).json({ error: 'council_id and a list of term_ids are required.' })
+  if (new Set(termIds).size !== termIds.length)
+    return res.status(400).json({ error: 'term_ids contains duplicates.' })
+  try {
+    const { data: terms, error: tErr } = await supabase
+      .from('sb_council_member_terms').select('id').eq('council_id', councilId)
+    if (tErr) return res.status(500).json({ error: tErr.message })
+    const inCouncil = new Set((terms || []).map((t) => t.id))
+    if (termIds.some((id) => !inCouncil.has(id)))
+      return res.status(400).json({ error: 'Some of these members do not belong to this council. Refresh the page and try again.' })
+
+    const results = await Promise.all(termIds.map((id, i) =>
+      supabase.from('sb_council_member_terms').update({ display_order: i + 1 }).eq('id', id)
+    ))
+    const failed = results.find((r) => r.error)
+    if (failed) return res.status(500).json({ error: failed.error.message })
+
+    const { data: council } = await supabase.from('councils').select('term_label').eq('id', councilId).single()
+    await logActivity(req, 'UPDATE', 'Officials', `Rearranged the order of council members (${council?.term_label || `council ${councilId}`})`)
+    res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
