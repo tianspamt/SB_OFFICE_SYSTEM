@@ -263,19 +263,34 @@ function createLegislativeReviewRoutes({
   router.put('/:id/request-changes', verifyToken, secretaryOnly, async (req, res) => {
     const { id } = req.params
     const { comment } = req.body
-    if (!comment?.trim()) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
     const { notFound, wrongStatus, data: existing } = await loadInStatus(id, 'pending')
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not pending review.` })
     try {
-      const { error: commentErr } = await supabase.from('comments').insert({
-        entity_type: entityType,
-        entity_id: id,
-        author_id: req.user.id,
-        author_role: req.user.position || req.user.role,
-        text: comment.trim(),
-      })
-      if (commentErr) return res.status(500).json({ error: commentErr.message })
+      // The comment can come with this request, or already be on the
+      // thread (the Secretary posted it via the comment box first) — in
+      // that case the latest comment is the one quoted in the email.
+      let reason = comment?.trim()
+      if (reason) {
+        const { error: commentErr } = await supabase.from('comments').insert({
+          entity_type: entityType,
+          entity_id: id,
+          author_id: req.user.id,
+          author_role: req.user.position || req.user.role,
+          text: reason,
+        })
+        if (commentErr) return res.status(500).json({ error: commentErr.message })
+      } else {
+        const { data: latest, error: latestErr } = await supabase.from('comments')
+          .select('text')
+          .eq('entity_type', entityType)
+          .eq('entity_id', id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        if (latestErr) return res.status(500).json({ error: latestErr.message })
+        reason = latest?.[0]?.text?.trim()
+        if (!reason) return res.status(400).json({ error: 'A comment is required when requesting changes.' })
+      }
 
       const { data, conflict, error } = await atomicUpdate(id, 'pending', {
         status: 'needs_revision', reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
@@ -290,7 +305,7 @@ function createLegislativeReviewRoutes({
         emailSubject: `Changes Requested: ${labelOf(existing)}`,
         emailHtml: notificationEmailHtml(
           'Changes Requested',
-          `The Secretary requested changes on <strong>${escapeHtml(labelOf(existing))}</strong>:<br/><em>"${escapeHtml(comment.trim())}"</em>`
+          `The Secretary requested changes on <strong>${escapeHtml(labelOf(existing))}</strong>:<br/><em>"${escapeHtml(reason)}"</em>`
         ),
       })
       res.json({ success: true, data })

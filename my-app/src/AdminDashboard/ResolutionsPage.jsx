@@ -300,7 +300,8 @@ export default function ResolutionsPage({
   };
 
   const handleRequestChanges = async () => {
-    if (!reviewCommentText.trim() || !viewTarget) return;
+    if (!viewTarget) return;
+    if (!reviewCommentText.trim() && reviewComments.length === 0) return;
     const ok = await runReviewAction(
       `/api/resolutions/${viewTarget.id}/request-changes`,
       {
@@ -1298,10 +1299,13 @@ export default function ResolutionsPage({
                         <button
                           className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}
                           disabled={
-                            reviewSubmitting || !reviewCommentText.trim()
+                            reviewSubmitting ||
+                            (!reviewCommentText.trim() &&
+                              reviewComments.length === 0)
                           }
                           title={
-                            !reviewCommentText.trim()
+                            !reviewCommentText.trim() &&
+                            reviewComments.length === 0
                               ? "Enter a comment above explaining the requested changes"
                               : ""
                           }
