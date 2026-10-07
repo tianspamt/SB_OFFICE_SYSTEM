@@ -75,8 +75,8 @@ async function sendAuthorApprovalReminders() {
   }
 }
 
-// Runs every day at 8:00 AM server time.
-cron.schedule('0 8 * * *', sendCalendarReminders)
-cron.schedule('0 8 * * *', sendAuthorApprovalReminders)
+// Runs every day at 8:00 AM Philippine time (hosts like Render run on UTC).
+cron.schedule('0 8 * * *', sendCalendarReminders, { timezone: 'Asia/Manila' })
+cron.schedule('0 8 * * *', sendAuthorApprovalReminders, { timezone: 'Asia/Manila' })
 
 module.exports = { sendCalendarReminders, sendAuthorApprovalReminders }

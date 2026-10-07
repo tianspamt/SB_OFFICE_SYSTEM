@@ -60,13 +60,12 @@ import {
   EmptyState,
   StatsRow,
   StatusBadge,
-  statusLabel,
-  nextReadingActionLabel,
   RecordListSkeleton,
   PresentOverlay,
   PublishNumberModal,
   CouncilorRoleSection,
 } from "./LegislativeComponents";
+import { statusLabel, nextReadingActionLabel } from "./legislativeStatus";
 import { ModalAlert } from "./AdminComponents";
 import ConfirmModal from "./ConfirmModal";
 import AuthorApprovalPanel from "./AuthorApprovalPanel";

@@ -7,19 +7,16 @@ const { deleteFromStorage } = require('../helpers/storage')
 const { logActivity } = require('../helpers/logger')
 
 // ─── Retention policy ───────────────────────────────────────────────────────
-// Archived records (ordinances, resolutions, session minutes, users,
-// officials) are kept indefinitely — there is no background job that
-// auto-purges old entries. This is a deliberate choice, not an oversight:
-// ordinances/resolutions/session minutes are official legislative records,
-// and archived users/officials are kept (rather than hard-deleted) so
-// existing foreign keys — activity_logs.user_id, an ordinance's authorship
-// links — keep resolving. Silently age-based-deleting any of that could
-// destroy records the office is legally obligated to retain, and this route
-// has no visibility into what retention period, if any, actually applies.
-// Permanent deletion stays a manual, secretary-gated, per-record action
-// (DELETE /:id below). If the office later adopts an explicit retention
-// schedule, implement it as its own logged, admin-triggered batch endpoint —
-// never as silent automatic deletion.
+// Archived session minutes and order of business are permanently deleted
+// automatically once they've been in Archives for over 3 years
+// (helpers/archivePurgeJob.js — logged under "System" in Activity Logs).
+//
+// Everything else is kept indefinitely: ordinances and resolutions are
+// permanent legislative records, and archived users/officials are kept
+// (rather than hard-deleted) so existing foreign keys — activity_logs.user_id,
+// an ordinance's authorship links — keep resolving. For those, permanent
+// deletion stays a manual, secretary-gated, per-record action (DELETE /:id
+// below).
 
 const titleOf = (entityType, data) => {
   if (entityType === 'ordinance') return data.ordinance_number || data.title

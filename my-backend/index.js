@@ -7,7 +7,7 @@ const helmet = require('helmet')
 
 const { globalLimiter } = require('./middleware/rateLimiter')
 require('./helpers/reminderJob') // starts the daily 8am calendar-reminder cron schedule
-require('./helpers/autoArchiveJob') // archives session minutes / order of business older than 3 years, daily at 1am + on startup
+require('./helpers/archivePurgeJob') // permanently deletes session minutes / order of business archived over 3 years ago, daily at 1am + on startup
 
 // ---- ROUTES ----
 const authRoutes          = require('./routes/auth')
@@ -30,19 +30,36 @@ const holidayRoutes       = require('./routes/holidays')
 
 const app = express()
 
+// Render (and most hosts) sit behind one proxy hop. Without this every request
+// looks like it comes from the proxy's IP, so the rate limiters would put the
+// whole office — every user — into a single shared budget.
+app.set('trust proxy', 1)
+
 // ---- SECURITY ----
 app.use(helmet())
 
 // ---- CORS ----
+// The deployed site's address comes from .env (FRONTEND_URL, plus any extra
+// comma-separated CORS_ORIGINS, e.g. a custom domain), so moving domains
+// needs no code change. Local dev (Vite on :5173) is always allowed.
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ORIGINS || '').split(','),
+]
+  .map((o) => (o || '').trim().replace(/\/+$/, ''))
+  .filter(Boolean)
+
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://your-app-name.vercel.app',
-    /\.vercel\.app$/,
-  ],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'DELETE', 'PUT', 'PATCH', 'OPTIONS'],
   credentials: true
 }))
+
+// ---- HEALTH CHECK ----
+// For Render's health check (and uptime monitors): no auth, no database call,
+// and mounted before the rate limiter so frequent pings never count against it.
+app.get('/api/health', (req, res) => res.json({ ok: true }))
 
 // ---- BODY PARSING ----
 app.use(bodyParser.json())

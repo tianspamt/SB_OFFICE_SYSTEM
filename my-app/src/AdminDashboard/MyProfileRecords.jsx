@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import { ClipboardList, Eye, XCircle, CheckCircle2, UserCheck } from "lucide-react";
-import { statusLabel } from "./LegislativeComponents";
+import { statusLabel } from "./legislativeStatus";
 import { STAGE_LABELS, decideAuthorApproval } from "./authorWorkflow";
 
 const TYPE_LABEL = { ordinance: "Ordinance", resolution: "Resolution" };
