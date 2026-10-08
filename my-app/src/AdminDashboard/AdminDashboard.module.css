@@ -1600,13 +1600,64 @@
   flex-shrink: 0;
 }
 
+/* The whole profile row is one button (opens My Profile) — hover/focus
+   styling matches .navBtn so it reads as clickable like the menu items. */
 .adminInfo {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   margin-bottom: 10px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   overflow: hidden;
   white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.adminInfo:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.adminInfo:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.7);
+  outline-offset: 2px;
+}
+
+/* Ring around the avatar; brightens on hover. */
+.adminAvatarRing {
+  display: flex;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+  transition: box-shadow 0.2s;
+}
+
+.adminInfo:hover .adminAvatarRing,
+.adminInfo:focus-visible .adminAvatarRing {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
+}
+
+.adminChevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: rgba(255,255,255,0.5);
+  transition: color 0.2s, transform 0.2s;
+}
+
+.adminInfo:hover .adminChevron {
+  color: #fff;
+  transform: translateX(2px);
+}
+
+.sidebar.collapsed .adminChevron {
+  display: none;
 }
 
 .adminAvatar {
@@ -1640,6 +1691,9 @@
 .sidebar.collapsed .adminInfo {
   justify-content: center;
   gap: 0;
+  /* Collapsed footer is only ~48px wide — side padding would clip the
+     34px avatar and its ring. */
+  padding: 6px 0;
 }
 
 .adminName {

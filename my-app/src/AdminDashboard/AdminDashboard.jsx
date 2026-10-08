@@ -2573,9 +2573,11 @@ export default function AdminDashboard() {
             className={styles.adminInfo}
             onClick={openMyProfile}
             title="My Profile"
-            style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+            aria-label="Open my profile"
           >
-            <UserAvatar name={admin?.name} photo={admin?.photo} size={34} fallbackBg="#c09a3c" />
+            <span className={styles.adminAvatarRing}>
+              <UserAvatar name={admin?.name} photo={admin?.photo} size={34} fallbackBg="#c09a3c" />
+            </span>
             <div className={styles.adminTextWrap}>
               <div className={styles.adminName}>{admin?.name}</div>
               <div className={styles.adminRole}>
@@ -2596,6 +2598,7 @@ export default function AdminDashboard() {
                   : "User"}
               </div>
             </div>
+            <ChevronRight size={16} className={styles.adminChevron} aria-hidden="true" />
           </button>
           <button className={styles.logoutBtn} onClick={handleLogout}>
             <LogOut size={15} strokeWidth={1.5} />
