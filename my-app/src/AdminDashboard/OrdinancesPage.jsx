@@ -19,6 +19,7 @@ import {
   Download,
   ExternalLink,
   Upload,
+  CheckSquare,
   Send,
   Check,
   CheckCircle2,
@@ -1243,17 +1244,29 @@ export default function OrdinancesPage({
                         Replace Draft File
                       </div>
                       <div
-                        className={lStyles.uploadZone}
+                        className={lStyles.replaceFileBox}
                         onClick={() =>
                           document.getElementById("reviewFileInput")?.click()
                         }
                       >
-                        <div className={lStyles.uploadIcon}>📎</div>
-                        <div className={lStyles.uploadText}>
-                          {reviewFile
-                            ? reviewFile.name
-                            : "Click to choose a replacement file"}
+                        <div className={lStyles.replaceFileLabel}>
+                          {reviewFile ? (
+                            <>
+                              <CheckSquare size={14} strokeWidth={1.5} />{" "}
+                              {reviewFile.name}
+                            </>
+                          ) : (
+                            <>
+                              <Upload size={14} strokeWidth={1.5} />{" "}
+                              Click to replace file
+                            </>
+                          )}
                         </div>
+                        {viewTarget.filename && (
+                          <p className={lStyles.fileHint}>
+                            Current file: {viewTarget.filename}
+                          </p>
+                        )}
                         <input
                           id="reviewFileInput"
                           type="file"

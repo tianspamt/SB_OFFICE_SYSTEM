@@ -1577,3 +1577,32 @@
     flex-direction: column;
   }
 }
+/* Replace Draft File picker in the review modal — same look as the Edit
+   forms' .fileUploadBox / .fileLabel / .fileHint in AdminDashboard.module.css. */
+.replaceFileBox {
+  border: 2px dashed #cbd5e0;
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.replaceFileBox:hover { border-color: #090446; }
+
+.replaceFileLabel {
+  font-size: 15px;
+  color: #4a5568;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.fileHint {
+  font-size: 13px;
+  color: #a0aec0;
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}

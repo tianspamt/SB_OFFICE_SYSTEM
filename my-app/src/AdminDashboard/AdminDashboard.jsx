@@ -4152,11 +4152,7 @@ export default function AdminDashboard() {
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
-                  accept={
-                    editingOrdinance.filetype === "application/pdf"
-                      ? ".pdf"
-                      : "image/*"
-                  }
+                  accept=".pdf,.doc,.docx,image/*"
                   id="editFileInput"
                   style={{ display: "none" }}
                   onChange={(e) => setEditOrdinanceFile(e.target.files[0])}
@@ -4170,9 +4166,7 @@ export default function AdminDashboard() {
                   ) : (
                     <>
                       <Upload size={14} strokeWidth={1.5} />{" "}
-                      {editingOrdinance.filetype === "application/pdf"
-                        ? "Click to replace PDF"
-                        : "Click to replace Image"}
+                      Click to replace file
                     </>
                   )}
                 </label>
@@ -4519,11 +4513,7 @@ export default function AdminDashboard() {
               <div className={styles.fileUploadBox}>
                 <input
                   type="file"
-                  accept={
-                    editingResolution.filetype === "application/pdf"
-                      ? ".pdf"
-                      : "image/*"
-                  }
+                  accept=".pdf,.doc,.docx,image/*"
                   id="editResFileInput"
                   style={{ display: "none" }}
                   onChange={(e) => setEditResolutionFile(e.target.files[0])}
@@ -4537,9 +4527,7 @@ export default function AdminDashboard() {
                   ) : (
                     <>
                       <Upload size={14} strokeWidth={1.5} />{" "}
-                      {editingResolution.filetype === "application/pdf"
-                        ? "Click to replace PDF"
-                        : "Click to replace Image"}
+                      Click to replace file
                     </>
                   )}
                 </label>
@@ -5095,7 +5083,10 @@ export default function AdminDashboard() {
                     </>
                   ) : (
                     <>
-                      <Upload size={14} strokeWidth={1.5} /> Click to choose file
+                      <Upload size={14} strokeWidth={1.5} />{" "}
+                      {editingSession.filepath
+                        ? "Click to replace file"
+                        : "Click to choose file"}
                     </>
                   )}
                 </label>
@@ -5482,8 +5473,7 @@ export default function AdminDashboard() {
                     </>
                   ) : (
                     <>
-                      <Upload size={14} strokeWidth={1.5} /> Click to replace
-                      the file
+                      <Upload size={14} strokeWidth={1.5} /> Click to replace file
                     </>
                   )}
                 </label>
