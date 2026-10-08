@@ -15,11 +15,13 @@
 import { useState } from "react";
 import { ClipboardList, Eye, XCircle, CheckCircle2, UserCheck } from "lucide-react";
 import { statusLabel } from "./legislativeStatus";
-import { STAGE_LABELS, decideAuthorApproval } from "./authorWorkflow";
+import { STAGE_LABELS, decideAuthorApproval, decisionSuccess } from "./authorWorkflow";
+import ConfirmModal from "./ConfirmModal";
+import BusySpinner from "./BusySpinner";
 
 const TYPE_LABEL = { ordinance: "Ordinance", resolution: "Resolution" };
 const ROUTE = { ordinance: "ordinances", resolution: "resolutions" };
-const IN_PROGRESS = ["pending", "needs_revision", "first_reading", "second_reading", "third_reading", "ready_to_publish", "approved"];
+const IN_PROGRESS = ["pending", "needs_revision", "accepted", "first_reading", "second_reading", "third_reading", "ready_to_publish", "approved"];
 
 const groupLabel = {
   fontSize: 12,
@@ -81,17 +83,18 @@ function RejectedRow({ item, styles }) {
 
 // One approval request, answered right here — the author doesn't need access
 // to the Secretary's review queues to approve their own record.
-function ApprovalRow({ item, record, styles, onPreview, onChanged }) {
+function ApprovalRow({ item, record, styles, onPreview, onDone }) {
   const [comment, setComment] = useState("");
-  const [busy, setBusy] = useState(false);
+  // 'approved' | 'declined' while that request is in flight, else null.
+  const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
 
   const decide = async (decision) => {
-    setBusy(true);
+    setBusy(decision);
     setError("");
     const result = await decideAuthorApproval(ROUTE[item.entity_type], item.entity_id, decision, comment.trim());
-    setBusy(false);
-    if (result.ok) onChanged?.();
+    setBusy(null);
+    if (result.ok) onDone(decisionSuccess(decision, item.stage, item.title));
     else setError(result.error);
   };
 
@@ -107,6 +110,7 @@ function ApprovalRow({ item, record, styles, onPreview, onChanged }) {
         </div>
         <textarea
           placeholder="Comment (optional)"
+          disabled={!!busy}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           style={{
@@ -124,20 +128,25 @@ function ApprovalRow({ item, record, styles, onPreview, onChanged }) {
         />
         <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
           <button
-            disabled={busy}
+            disabled={!!busy}
             onClick={() => decide("declined")}
-            style={{ border: "none", borderRadius: 999, padding: "6px 12px", background: "#fed7d7", color: "#c53030", fontWeight: 600, cursor: "pointer", display: "inline-flex", gap: 5, alignItems: "center" }}
+            style={{ border: "none", borderRadius: 999, padding: "6px 12px", background: "#fed7d7", color: "#c53030", fontWeight: 600, cursor: busy ? "wait" : "pointer", opacity: busy && busy !== "declined" ? 0.5 : 1, display: "inline-flex", gap: 5, alignItems: "center" }}
           >
-            <XCircle size={13} /> Decline
+            {busy === "declined" ? <><BusySpinner /> Declining…</> : <><XCircle size={13} /> Decline</>}
           </button>
           <button
-            disabled={busy}
+            disabled={!!busy}
             onClick={() => decide("approved")}
-            style={{ border: "none", borderRadius: 999, padding: "6px 12px", background: "#2f855a", color: "#fff", fontWeight: 600, cursor: "pointer", display: "inline-flex", gap: 5, alignItems: "center" }}
+            style={{ border: "none", borderRadius: 999, padding: "6px 12px", background: "#2f855a", color: "#fff", fontWeight: 600, cursor: busy ? "wait" : "pointer", opacity: busy && busy !== "approved" ? 0.5 : 1, display: "inline-flex", gap: 5, alignItems: "center" }}
           >
-            <CheckCircle2 size={13} /> Approve
+            {busy === "approved" ? <><BusySpinner /> Approving…</> : <><CheckCircle2 size={13} /> Approve</>}
           </button>
         </div>
+        {busy && (
+          <div style={{ color: "#4a5568", fontSize: 12, marginTop: 6 }}>
+            Saving your decision and notifying the Secretary…
+          </div>
+        )}
         {error && <div style={{ color: "#c53030", fontSize: 12, fontWeight: 600, marginTop: 6 }}>{error}</div>}
       </div>
       {record?.filepath && (
@@ -146,6 +155,47 @@ function ApprovalRow({ item, record, styles, onPreview, onChanged }) {
         </button>
       )}
     </div>
+  );
+}
+
+// The Needs My Approval list. Owns the success modal (not each row): once a
+// request is answered its row drops out of the list on the next refresh, and
+// that must not take the modal with it. The list refreshes when it's closed.
+function ApprovalList({ data, styles, onPreview, onChanged }) {
+  const [done, setDone] = useState(null); // { title, message }
+  const closeDone = () => {
+    setDone(null);
+    onChanged?.();
+  };
+  const byKey = new Map(data.authored.map((r) => [`${r.entity_type}:${r.id}`, r]));
+  return (
+    <>
+      {data.awaiting_my_approval.length === 0 ? (
+        <p className={styles.officialEmptyState}>Nothing is waiting for your approval.</p>
+      ) : (
+        data.awaiting_my_approval.map((a) => (
+          <ApprovalRow
+            key={a.id}
+            item={a}
+            record={byKey.get(`${a.entity_type}:${a.entity_id}`)}
+            styles={styles}
+            onPreview={onPreview}
+            onDone={setDone}
+          />
+        ))
+      )}
+      {done && (
+        <ConfirmModal
+          type="success"
+          title={done.title}
+          message={done.message}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={closeDone}
+          onCancel={closeDone}
+        />
+      )}
+    </>
   );
 }
 
@@ -180,18 +230,7 @@ export default function MyProfileRecords({ tab, data, loading, styles, onPreview
   );
 
   if (tab === "approvals") {
-    if (data.awaiting_my_approval.length === 0) return empty("Nothing is waiting for your approval.");
-    const byKey = new Map(data.authored.map((r) => [`${r.entity_type}:${r.id}`, r]));
-    return data.awaiting_my_approval.map((a) => (
-      <ApprovalRow
-        key={a.id}
-        item={a}
-        record={byKey.get(`${a.entity_type}:${a.entity_id}`)}
-        styles={styles}
-        onPreview={onPreview}
-        onChanged={onChanged}
-      />
-    ));
+    return <ApprovalList data={data} styles={styles} onPreview={onPreview} onChanged={onChanged} />;
   }
 
   if (tab === "authored") {

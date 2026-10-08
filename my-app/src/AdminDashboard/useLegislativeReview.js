@@ -21,6 +21,13 @@ import { readUrlSubTab, useSyncSubTabToUrl } from "./useUrlSubTab";
 // keep moving, same as a fresh pending draft.
 export const READING_STATUSES = ["first_reading", "second_reading", "third_reading"];
 
+// "accepted" comes before the readings (migrations/033): Accept lands there
+// and the author approves the draft, then the Secretary clicks "Proceed to
+// First Reading". It behaves like a reading everywhere (Pending tab, locked,
+// author approval panel, Reject, advance button) — except co-author/sponsor
+// tagging, which stays on READING_STATUSES.
+export const REVIEW_STATUSES = ["accepted", ...READING_STATUSES];
+
 // Role-aware pending queue — strictly "still needs review/fixing/advancing"
 // work: pending (awaiting Secretary's first look) and, for Secretary only,
 // the three reading statuses too (advancing a reading is Secretary's job,
@@ -36,8 +43,8 @@ export const READING_STATUSES = ["first_reading", "second_reading", "third_readi
 // follow a draft through First → Second → Third Reading, not just while it
 // waits for its first review.
 export const pendingStatusesForRole = ({ isSecretary }) => {
-  if (isSecretary) return ["pending", ...READING_STATUSES].join(",");
-  return ["pending", "needs_revision", ...READING_STATUSES].join(",");
+  if (isSecretary) return ["pending", ...REVIEW_STATUSES].join(",");
+  return ["pending", "needs_revision", ...REVIEW_STATUSES].join(",");
 };
 
 // Broader than pendingStatusesForRole above — this is "every status the
@@ -49,7 +56,7 @@ export const pendingStatusesForRole = ({ isSecretary }) => {
 // Pending tab shows — including records mid-reading, view only, so they can
 // follow a draft through its readings from the dashboard too.
 export const actionableStatusesForRole = ({ isSecretary, isViceMayor }) => {
-  if (isSecretary) return ["pending", ...READING_STATUSES, "approved"].join(",");
+  if (isSecretary) return ["pending", ...REVIEW_STATUSES, "approved"].join(",");
   if (isViceMayor) return "ready_to_publish";
   return pendingStatusesForRole({ isSecretary });
 };
@@ -66,7 +73,7 @@ export const actionableStatusesForRole = ({ isSecretary, isViceMayor }) => {
 // and to the three reading statuses too even though those stay in Pending.
 export const READY_TO_PUBLISH_STATUSES = "ready_to_publish,approved";
 export const isLockedStatus = (status) =>
-  READING_STATUSES.includes(status) ||
+  REVIEW_STATUSES.includes(status) ||
   status === "ready_to_publish" ||
   status === "approved" ||
   status === "rejected";
@@ -295,12 +302,26 @@ export function useDeepLinkedTab(defaultTab, initialSubTab, allowed) {
 // updated the status in place before this. Pass a 4th `successMsg` arg to
 // runAction only for actions that should show one; omitting it (Publish,
 // replace-file/revise, etc.) leaves this alone.
+// Success text for Accept on ordinances/resolutions, from the server's
+// authorApproval result: the author is asked to approve automatically.
+export const acceptSuccessMessage = (data) => {
+  switch (data.authorApproval) {
+    case "requested": return "Accepted — the author was emailed to approve it before First Reading.";
+    case "no_account": return "Accepted — the author has no login account, so record their approval on their behalf below.";
+    case "no_author": return "Accepted — no Author is tagged, so record the approval on their behalf below.";
+    case "failed": return "Accepted — but the author's approval request couldn't be sent. Use Request Author Approval below.";
+    default: return "Accepted!";
+  }
+};
+
 export function useReviewWorkflow({ onRefresh } = {}) {
   const [viewTarget, setViewTarget] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, showError, clearError] = useModalError();
   const [successMsg, setSuccessMsg] = useState("");
 
+  // successMsg: a string, or (response body) => string when the message
+  // depends on what the server reports (e.g. Accept's author request).
   const runAction = async (url, options, applyUpdate, successMsg) => {
     setSubmitting(true);
     clearError();
@@ -310,7 +331,8 @@ export function useReviewWorkflow({ onRefresh } = {}) {
       if (res.ok && data.success) {
         setViewTarget((prev) => (prev ? { ...prev, ...applyUpdate(data.data) } : prev));
         onRefresh?.();
-        if (successMsg) setSuccessMsg(successMsg);
+        const msg = typeof successMsg === "function" ? successMsg(data) : successMsg;
+        if (msg) setSuccessMsg(msg);
         return true;
       }
       showError(data.error || "Action failed.");

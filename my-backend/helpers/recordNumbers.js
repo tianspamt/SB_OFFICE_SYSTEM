@@ -11,26 +11,30 @@ const { recordNumberKey, recordNumberParts } = require('./utils')
 // encoded (e.g. "RESOLUTION NO. 03-2019"). Only the sequence within that
 // year is enforced.
 //
-// "Latest" = the highest sequence among PUBLISHED records of that year,
-// including published records that were archived since — an archived number
-// is never handed out again. Drafts that already carry a typed-in number
-// (older uploads) don't count until they're published. Existing gaps in
-// old data are left alone: after 2025-09 and 2025-17, the next is 18.
+// "Latest" = the highest sequence among PUBLISHED records of that year in
+// the live table. Archived records don't count — an archived record (e.g. a
+// test or a mistake) can't push the suggestion off, and its number may be
+// given out again. Drafts that already carry a typed-in number (older
+// uploads) don't count until they're published. Existing gaps in old data
+// are left alone: after 2025-09 and 2025-17, the next is 18.
 
-// Every published number of this type (live + archived), except `excludeId`.
-async function publishedNumbers({ table, numberField, entityType, excludeId }) {
-  let live = supabase.from(table).select(`id, ${numberField}`).eq('status', 'published').not(numberField, 'is', null)
-  if (excludeId != null) live = live.neq('id', excludeId)
-  const [{ data: rows, error }, { data: archived, error: archErr }] = await Promise.all([
-    live,
-    supabase.from('archives').select('data').eq('entity_type', entityType).eq('data->>status', 'published'),
-  ])
+// Every published number of this type, except `excludeId`.
+async function publishedNumbers({ table, numberField, excludeId }) {
+  let query = supabase.from(table).select(`id, ${numberField}`).eq('status', 'published').not(numberField, 'is', null)
+  if (excludeId != null) query = query.neq('id', excludeId)
+  const { data: rows, error } = await query
   if (error) throw new Error(error.message)
-  if (archErr) throw new Error(archErr.message)
-  return [
-    ...(rows || []).map((r) => r[numberField]),
-    ...(archived || []).map((a) => a.data?.[numberField]),
-  ].filter(Boolean)
+  return (rows || []).map((r) => r[numberField]).filter(Boolean)
+}
+
+// Year of the latest (highest year, then sequence) published number, or null
+// when nothing is published yet.
+async function latestPublishedYear({ table, numberField, excludeId }) {
+  const years = (await publishedNumbers({ table, numberField, excludeId }))
+    .map((n) => recordNumberKey(n))
+    .filter((k) => k.seq > 0 && k.year > 0)
+    .map((k) => k.year)
+  return years.length ? Math.max(...years) : null
 }
 
 // Rewrites `template`'s sequence and year digits, keeping its wording and
@@ -85,4 +89,4 @@ async function sequentialNumberError({ table, numberField, entityType, excludeId
   return null
 }
 
-module.exports = { nextNumberFor, sequentialNumberError, formatLike }
+module.exports = { nextNumberFor, sequentialNumberError, formatLike, latestPublishedYear }

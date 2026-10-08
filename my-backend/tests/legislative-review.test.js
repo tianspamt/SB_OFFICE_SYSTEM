@@ -7,7 +7,8 @@
 // never edit its content. Secretary alone approves/rejects and does the
 // final publish; Vice-Mayor's only other action is approving a
 // ready_to_publish item.
-//   pending -> ready_to_publish -> approved -> published        (accept path)
+//   pending -> accepted -> first/second/third_reading -> ready_to_publish
+//     -> approved -> published                                 (accept path)
 //   pending -> needs_revision -> pending                        (revision path,
 //     driven by a Secretary/Clerk edit in place — replacing the file on a
 //     needs_revision record auto-flips it back to pending, no separate
@@ -92,7 +93,8 @@ async function main() {
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/accept`, secHeaders)
       body = await res.json()
-      ok('Secretary accept: pending -> first_reading', res.ok && body.data?.status === 'first_reading', JSON.stringify(body))
+      ok('Secretary accept: pending -> accepted (awaiting author)', res.ok && body.data?.status === 'accepted', JSON.stringify(body))
+      ok('Accept reports why no approval request was emailed (draft has no Author)', body.authorApproval === 'no_author', JSON.stringify(body))
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/accept`, secHeaders)
       ok('Secretary accept: rejected once no longer pending (400)', res.status === 400, `status=${res.status}`)
@@ -100,9 +102,9 @@ async function main() {
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, clerkHeaders)
       ok('Clerk cannot advance-reading — wrong position (403)', res.status === 403, `status=${res.status}`)
 
-      // Each reading (and the final publish) is gated on the author's
-      // approval (helpers/authorApprovals.js). This draft has no Author with
-      // a linked account, so the Secretary records it on their behalf.
+      // Acceptance, each reading, and the final publish are gated on the
+      // author's approval (helpers/authorApprovals.js). This draft has no
+      // Author with a linked account, so the Secretary records it on their behalf.
       const approveOnBehalf = async (stageLabel) => {
         const r = await putJson(`${BASE}/api/ordinances/${idAccept}/author-approval/on-behalf`, secHeaders, { note: 'E2E: approved during session' })
         const b = await r.json()
@@ -111,7 +113,16 @@ async function main() {
 
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
       body = await res.json()
-      ok('Secretary advance-reading blocked until the author approves (409)', res.status === 409 && body.authorApproval === 'missing', `status=${res.status} ${JSON.stringify(body)}`)
+      ok('Proceed to First Reading blocked until the author approves the accepted draft (409)', res.status === 409 && body.authorApproval === 'missing', `status=${res.status} ${JSON.stringify(body)}`)
+
+      await approveOnBehalf('acceptance')
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary Proceed to First Reading: accepted -> first_reading', res.ok && body.data?.status === 'first_reading', JSON.stringify(body))
+
+      res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)
+      body = await res.json()
+      ok('Secretary advance-reading blocked until the author approves the first reading (409)', res.status === 409 && body.authorApproval === 'missing', `status=${res.status} ${JSON.stringify(body)}`)
 
       await approveOnBehalf('first reading')
       res = await putJson(`${BASE}/api/ordinances/${idAccept}/advance-reading`, secHeaders)

@@ -7,7 +7,7 @@ const { findDuplicateRecord } = require('./duplicates')
 const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = require('./notify')
 const { STAGE_LABELS, stageForStatus, authorOf, approvalFor } = require('./authorApprovals')
 const { memberForUser, userForMember } = require('./accountLinks')
-const { nextNumberFor, sequentialNumberError } = require('./recordNumbers')
+const { nextNumberFor, sequentialNumberError, latestPublishedYear } = require('./recordNumbers')
 
 // Builds the shared review-workflow routes — accept / request-changes /
 // vm-approve / publish / archive (plus advance-reading for ordinances/
@@ -51,10 +51,16 @@ const { nextNumberFor, sequentialNumberError } = require('./recordNumbers')
 // session_minutes has no reading requirement, so it keeps the original
 // direct pending → ready_to_publish jump on Accept (see `hasReadings` below).
 const READING_STATUSES = ['first_reading', 'second_reading', 'third_reading']
+// Accept now lands on 'accepted' first (migrations/033): the author approves
+// the draft before its first reading starts, then the Secretary clicks
+// "Proceed to First Reading", which is /advance-reading's first step:
+//   pending → accepted → first_reading → second_reading → third_reading →
+//     ready_to_publish → approved → published
+const REVIEW_STATUSES = ['accepted', ...READING_STATUSES]
 
 // Author approval (panel recommendation, Author_Approval_Workflow_v2.docx):
-// for hasReadings types, the record's Author must approve each completed
-// reading before /advance-reading moves it on, and give a final approval
+// for hasReadings types, the record's Author must approve the accepted draft
+// and each completed reading before /advance-reading moves it on, and give a final approval
 // before /publish. Tracked in `author_approvals` (migrations/031), one row per
 // (record, stage), rather than as extra `status` values — the state machine
 // above stays exactly as it was. Only records accepted after this shipped
@@ -76,6 +82,10 @@ function createLegislativeReviewRoutes({
   // (year, seq) => number in this type's usual wording, used for the next
   // number when no published record exists yet to copy the format from.
   defaultNumberFormat,
+  // true → the suggested number always continues from the latest published
+  // one (its year + 1), rather than restarting at 01 when the approved date
+  // or today falls in a newer year. A year the Secretary types still wins.
+  numberContinuesLatest = false,
 }) {
   const router = express.Router()
   const lower = singularLabel.toLowerCase()
@@ -126,6 +136,30 @@ function createLegislativeReviewRoutes({
     return { error: `The author's approval of the ${what} is required first. Use "Request Author Approval".`, authorApproval: 'missing' }
   }
 
+  // Marks `stage` as waiting on `author` (whose login is `account`), logs it,
+  // and emails them. A declined stage goes back to 'pending' (same row).
+  // Shared by POST /:id/author-approval/request and Accept.
+  async function sendApprovalRequest({ req, existing, stage, author, account }) {
+    const { data, error } = await supabase.from('author_approvals').upsert({
+      entity_type: entityType, entity_id: Number(existing.id), stage, official_id: author.id,
+      decision: 'pending', comment: null, on_behalf: false,
+      requested_by: req.user.id, requested_at: new Date().toISOString(),
+      decided_by_user_id: null, decided_at: null, reminder_sent_at: null,
+    }, { onConflict: 'entity_type,entity_id,stage' }).select().single()
+    if (error) return { error }
+    await logActivity(req, 'REQUEST_AUTHOR_APPROVAL', activityModule,
+      `Requested ${author.full_name}'s approval (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
+    notify({
+      recipientId: account.id,
+      emailSubject: `Your Approval Is Needed: ${labelOf(existing)}`,
+      emailHtml: notificationEmailHtml(
+        'Your Approval Is Needed',
+        `As the author of <strong>${escapeHtml(labelOf(existing))}</strong>, your approval of the <strong>${STAGE_LABELS[stage]}</strong> is needed before it can move forward. Sign in and open <em>My Profile → Needs My Approval</em>.`
+      ),
+    })
+    return { data }
+  }
+
   const notifyVmReadyForApproval = (existing, id) => notifyByPosition('vice_mayor', {
     message: `${singularLabel} ready for your approval: ${labelOf(existing)}`,
     entityType, entityId: id,
@@ -136,15 +170,17 @@ function createLegislativeReviewRoutes({
     ),
   })
 
-  // PUT /:id/accept — Secretary. hasReadings types land on 'first_reading'
-  // (the three readings happen next, see /advance-reading below); others
-  // (session_minutes) jump straight to 'ready_to_publish' as before.
+  // PUT /:id/accept — Secretary. hasReadings types land on 'accepted' and the
+  // author's approval is requested right away (emailed, if the author has a
+  // linked account — otherwise the Secretary records it on their behalf from
+  // the approval panel); /advance-reading then starts the first reading.
+  // Others (session_minutes) jump straight to 'ready_to_publish' as before.
   router.put('/:id/accept', verifyToken, secretaryOnly, async (req, res) => {
     const { id } = req.params
     const { notFound, wrongStatus, data: existing } = await loadInStatus(id, 'pending')
     if (notFound) return res.status(404).json({ error: `${singularLabel} not found.` })
     if (wrongStatus) return res.status(400).json({ error: `${singularLabel} is not pending review.` })
-    const targetStatus = hasReadings ? READING_STATUSES[0] : 'ready_to_publish'
+    const targetStatus = hasReadings ? 'accepted' : 'ready_to_publish'
     try {
       const { data, conflict, error } = await atomicUpdate(id, 'pending', {
         status: targetStatus, reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
@@ -156,14 +192,35 @@ function createLegislativeReviewRoutes({
       // hasReadings types don't notify the Vice-Mayor yet — that happens once
       // /advance-reading actually reaches 'ready_to_publish'.
       if (!hasReadings) notifyVmReadyForApproval(existing, id)
-      res.json({ success: true, data })
+      // Ask the author to approve the accepted draft. Best effort: Accept has
+      // already succeeded, and the panel still offers Request / on-behalf if
+      // this can't be sent (no Author tagged, or no linked account).
+      let authorApproval = null
+      if (hasReadings) {
+        try {
+          const author = await authorOf(entityType, id)
+          const account = author ? await userForMember(author.id) : null
+          if (author && account) {
+            const { error: reqErr } = await sendApprovalRequest({ req, existing: data, stage: 'accepted', author, account })
+            if (reqErr) console.error(`Auto author-approval request failed for ${entityType} #${id}:`, reqErr.message)
+            authorApproval = reqErr ? 'failed' : 'requested'
+          } else {
+            authorApproval = author ? 'no_account' : 'no_author'
+          }
+        } catch (reqErr) {
+          console.error('Auto author-approval request failed:', reqErr.message)
+          authorApproval = 'failed'
+        }
+      }
+      res.json({ success: true, data, authorApproval })
     } catch (err) {
       res.status(500).json({ error: err.message })
     }
   })
 
   // PUT /:id/advance-reading — Secretary only, hasReadings types only.
-  // Walks first_reading → second_reading → third_reading → ready_to_publish,
+  // Walks accepted → first_reading → second_reading → third_reading →
+  // ready_to_publish,
   // one status at a time; the last step is what actually notifies the
   // Vice-Mayor, since only then is the record really ready for them.
   if (hasReadings) {
@@ -171,10 +228,10 @@ function createLegislativeReviewRoutes({
       const { id } = req.params
       const { data: existing, error: fetchErr } = await supabase.from(table).select('*').eq('id', id).single()
       if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
-      const currentIndex = READING_STATUSES.indexOf(existing.status)
+      const currentIndex = REVIEW_STATUSES.indexOf(existing.status)
       if (currentIndex === -1) return res.status(400).json({ error: `${singularLabel} is not currently in a reading stage.` })
-      const isFinalReading = currentIndex === READING_STATUSES.length - 1
-      const nextStatus = isFinalReading ? 'ready_to_publish' : READING_STATUSES[currentIndex + 1]
+      const isFinalReading = currentIndex === REVIEW_STATUSES.length - 1
+      const nextStatus = isFinalReading ? 'ready_to_publish' : REVIEW_STATUSES[currentIndex + 1]
       try {
         const missing = await missingAuthorApproval(existing)
         if (missing) return res.status(409).json(missing)
@@ -213,7 +270,7 @@ function createLegislativeReviewRoutes({
       const { comment } = req.body
       const { data: existing, error: fetchErr } = await supabase.from(table).select('*').eq('id', id).single()
       if (fetchErr || !existing) return res.status(404).json({ error: `${singularLabel} not found.` })
-      if (!READING_STATUSES.includes(existing.status) && !['ready_to_publish', 'approved'].includes(existing.status)) {
+      if (!REVIEW_STATUSES.includes(existing.status) && !['ready_to_publish', 'approved'].includes(existing.status)) {
         return res.status(400).json({ error: `${singularLabel} can only be rejected during a reading, while ready to publish, or after the Vice-Mayor's approval.` })
       }
       try {
@@ -351,8 +408,9 @@ function createLegislativeReviewRoutes({
   // number this record may be published with for that year (latest published
   // + 1), in the office's usual format, so the Publish dialog can pre-fill it.
   // `year` is the numbering year the Secretary picked (any year — old records
-  // included); else the year of `date` (the approved date in the dialog); else
-  // the Vice-Mayor's approval date, else today.
+  // included); else, with numberContinuesLatest, the year of the latest
+  // published number; else the year of `date` (the approved date in the
+  // dialog); else the Vice-Mayor's approval date, else today.
   if (numberField) {
     router.get('/:id/next-number', verifyToken, secretaryOnly, async (req, res) => {
       const { id } = req.params
@@ -361,8 +419,13 @@ function createLegislativeReviewRoutes({
         if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
         const askedYear = Number(req.query.year)
         const parsed = typeof req.query.date === 'string' && req.query.date ? parseApprovedDay(req.query.date) : null
+        const latestYear = numberContinuesLatest
+          ? await latestPublishedYear({ table, numberField, excludeId: id })
+          : null
         const year = Number.isInteger(askedYear) && askedYear >= 1900 && askedYear <= 2100
           ? askedYear
+          : latestYear
+          ? latestYear
           : parsed
           ? parsed.getUTCFullYear()
           : yearInManila(existing[approvedDateField] || new Date())
@@ -514,24 +577,8 @@ function createLegislativeReviewRoutes({
         const current = await approvalFor(entityType, id, stage)
         if (current?.decision === 'approved') return res.status(400).json({ error: 'The author already approved this stage.' })
 
-        const { data, error } = await supabase.from('author_approvals').upsert({
-          entity_type: entityType, entity_id: Number(id), stage, official_id: author.id,
-          decision: 'pending', comment: null, on_behalf: false,
-          requested_by: req.user.id, requested_at: new Date().toISOString(),
-          decided_by_user_id: null, decided_at: null, reminder_sent_at: null,
-        }, { onConflict: 'entity_type,entity_id,stage' }).select().single()
+        const { data, error } = await sendApprovalRequest({ req, existing, stage, author, account })
         if (error) return res.status(500).json({ error: error.message })
-
-        await logActivity(req, 'REQUEST_AUTHOR_APPROVAL', activityModule,
-          `Requested ${author.full_name}'s approval (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
-        notify({
-          recipientId: account.id,
-          emailSubject: `Your Approval Is Needed: ${labelOf(existing)}`,
-          emailHtml: notificationEmailHtml(
-            'Your Approval Is Needed',
-            `As the author of <strong>${escapeHtml(labelOf(existing))}</strong>, your approval of the <strong>${STAGE_LABELS[stage]}</strong> is needed before it can move forward. Sign in and open <em>My Profile → Needs My Approval</em>.`
-          ),
-        })
         res.json({ success: true, data })
       } catch (err) {
         res.status(500).json({ error: err.message })

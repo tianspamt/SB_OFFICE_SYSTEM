@@ -47,6 +47,7 @@ import {
   pendingStatusesForRole,
   READY_TO_PUBLISH_STATUSES,
   READING_STATUSES,
+  REVIEW_STATUSES,
   isLockedStatus,
   useReviewWorkflow,
   useCommentThread,
@@ -55,6 +56,7 @@ import {
   useDeepLinkedTab,
   usePublishNumberDetection,
   nextNumberMismatch,
+  acceptSuccessMessage,
 } from "./useLegislativeReview";
 
 import {
@@ -294,7 +296,7 @@ export default function OrdinancesPage({
       `/api/ordinances/${id}/accept`,
       { method: "PUT" },
       (d) => ({ status: d.status }),
-      "Accepted — now in First Reading!"
+      acceptSuccessMessage
     );
 
   const handleAdvanceReading = (id) => {
@@ -302,6 +304,8 @@ export default function OrdinancesPage({
     const successMsg =
       label === "Send for VM Approval"
         ? "Third reading complete — sent to the Vice-Mayor!"
+        : label === "Proceed to First Reading"
+        ? "Now in First Reading!"
         : label
         ? `${label.replace("Mark ", "")}!`
         : undefined;
@@ -1234,7 +1238,7 @@ export default function OrdinancesPage({
                       approved/rejected — see isLockedStatus. */}
                   {(isSecretary || isClerk) &&
                     (!isLockedStatus(viewTarget.status) ||
-                      READING_STATUSES.includes(viewTarget.status) ||
+                      REVIEW_STATUSES.includes(viewTarget.status) ||
                       ["ready_to_publish", "approved"].includes(viewTarget.status)) && (
                     <div style={{ marginBottom: 16 }}>
                       <div
@@ -1345,7 +1349,7 @@ export default function OrdinancesPage({
                     // — except mid-reading, where the Secretary needs this
                     // same box to type a required reason before Reject.
                     (!isLockedStatus(viewTarget.status) ||
-                      READING_STATUSES.includes(viewTarget.status) ||
+                      REVIEW_STATUSES.includes(viewTarget.status) ||
                       ["ready_to_publish", "approved"].includes(viewTarget.status)) && (
                     <div className={lStyles.commentInputRow}>
                       <textarea
@@ -1365,7 +1369,7 @@ export default function OrdinancesPage({
                     </div>
                   )}
 
-                  {(READING_STATUSES.includes(viewTarget.status) || viewTarget.status === "approved") && (
+                  {(REVIEW_STATUSES.includes(viewTarget.status) || viewTarget.status === "approved") && (
                     <AuthorApprovalPanel
                       key={viewTarget.id}
                       route="ordinances"
@@ -1410,7 +1414,7 @@ export default function OrdinancesPage({
                       </div>
                     )}
 
-                    {isSecretary && READING_STATUSES.includes(viewTarget.status) && (
+                    {isSecretary && REVIEW_STATUSES.includes(viewTarget.status) && (
                       <div className={lStyles.pendingActionsRow}>
                         <button
                           className={`${lStyles.pillActionBtn} ${lStyles.pillReject}`}

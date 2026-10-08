@@ -527,6 +527,8 @@ router.use('/', createLegislativeReviewRoutes({
   approvedDateField: 'approved_on',
   hasReadings: true,
   defaultNumberFormat: (year, seq) => `RESOLUTION NO. ${String(seq).padStart(2, '0')}-${year}`,
+  // Suggest the latest published resolution number + 1, even into a new year.
+  numberContinuesLatest: true,
 }))
 
 // Co-Author/Sponsor tagging — see helpers/officialRoleRoutes.js.

@@ -11,6 +11,7 @@ import { READING_STATUSES } from "./useLegislativeReview";
 export const STATUS_MAP = {
   pending: { label: "● Pending Review", cls: styles.statusPending },
   needs_revision: { label: "Needs Revision", cls: styles.statusRejected },
+  accepted: { label: "Accepted – Awaiting Author", cls: styles.statusApproved },
   first_reading: { label: "First Reading", cls: styles.statusApproved },
   second_reading: { label: "Second Reading", cls: styles.statusApproved },
   third_reading: { label: "Third Reading", cls: styles.statusApproved },
@@ -29,11 +30,13 @@ export function statusLabel(status) {
 }
 
 // Label for the Secretary's action button while an ordinance/resolution is
-// mid-reading (see READING_STATUSES) — walks first_reading -> second_reading
+// accepted or mid-reading (see REVIEW_STATUSES) — walks accepted ->
+// first_reading -> second_reading
 // -> third_reading -> "send to the Vice-Mayor", matching what PUT
 // /:id/advance-reading actually does at each step. Returns null for any
 // other status, so callers can use it directly as a render guard.
 export function nextReadingActionLabel(status) {
+  if (status === "accepted") return "Proceed to First Reading";
   const idx = READING_STATUSES.indexOf(status);
   if (idx === -1) return null;
   if (idx === READING_STATUSES.length - 1) return "Send for VM Approval";

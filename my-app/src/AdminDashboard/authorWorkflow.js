@@ -57,11 +57,21 @@ export function accountLinkMessage(data, fallback) {
 // ── Author approval (AuthorApprovalPanel.jsx) ────────────────────────────────
 
 export const STAGE_LABELS = {
+  accepted: "Acceptance (before First Reading)",
   first_reading: "First Reading",
   second_reading: "Second Reading",
   third_reading: "Third Reading",
   publish: "Final approval to publish",
 };
+
+// Success modal text after the author decides — shared by the approval panel
+// and My Profile's "Needs My Approval" tab.
+export function decisionSuccess(decision, stage, title) {
+  const what = `the ${STAGE_LABELS[stage] || "request"}${title ? ` of "${title}"` : ""}`;
+  return decision === "approved"
+    ? { title: "Approved", message: `You approved ${what}. The Secretary has been notified and can now move it forward.` }
+    : { title: "Decision Recorded", message: `You declined ${what}. The Secretary has been notified and will follow up with you.` };
+}
 
 // Shared with My Profile's "Needs My Approval" tab. Returns { ok, error? }.
 export async function decideAuthorApproval(route, id, decision, comment) {

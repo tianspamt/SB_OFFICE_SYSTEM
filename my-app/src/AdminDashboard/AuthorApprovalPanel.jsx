@@ -15,7 +15,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Clock, XCircle, Send, UserCheck } from "lucide-react";
 import { API, authFetch, extractErrorMsg } from "./AdminContext";
-import { STAGE_LABELS, decideAuthorApproval } from "./authorWorkflow";
+import { STAGE_LABELS, decideAuthorApproval, decisionSuccess } from "./authorWorkflow";
+import ConfirmModal from "./ConfirmModal";
+import BusySpinner from "./BusySpinner";
 
 const POLL_MS = 20000;
 
@@ -86,6 +88,10 @@ export default function AuthorApprovalPanel({ route, record, isSecretary, onGate
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
   const [note, setNote] = useState("");
+  // The author's Approve / Decline: which one is in flight, and the success
+  // modal shown once it's saved.
+  const [deciding, setDeciding] = useState(null);
+  const [done, setDone] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -135,13 +141,21 @@ export default function AuthorApprovalPanel({ route, record, isSecretary, onGate
   };
 
   const decide = async (decision) => {
-    setBusy(true);
+    setDeciding(decision);
     setError("");
     const result = await decideAuthorApproval(route, record.id, decision, comment.trim());
-    setBusy(false);
-    if (!result.ok) return setError(result.error);
+    if (!result.ok) {
+      setDeciding(null);
+      return setError(result.error);
+    }
     setComment("");
     await load();
+    setDeciding(null);
+    setDone(decisionSuccess(decision, stage, record.title));
+  };
+
+  const closeDone = () => {
+    setDone(null);
     onDecided?.();
   };
 
@@ -186,17 +200,31 @@ export default function AuthorApprovalPanel({ route, record, isSecretary, onGate
               <textarea
                 style={textarea}
                 placeholder="Comment (optional)"
+                disabled={!!deciding}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
               />
               <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={btn("#fed7d7", "#c53030")} disabled={busy} onClick={() => decide("declined")}>
-                  <XCircle size={14} /> Decline
+                <button
+                  style={{ ...btn("#fed7d7", "#c53030"), opacity: deciding && deciding !== "declined" ? 0.5 : 1, cursor: deciding ? "wait" : "pointer" }}
+                  disabled={!!deciding}
+                  onClick={() => decide("declined")}
+                >
+                  {deciding === "declined" ? <><BusySpinner size={14} /> Declining…</> : <><XCircle size={14} /> Decline</>}
                 </button>
-                <button style={btn("#2f855a")} disabled={busy} onClick={() => decide("approved")}>
-                  <CheckCircle2 size={14} /> Approve
+                <button
+                  style={{ ...btn("#2f855a"), opacity: deciding && deciding !== "approved" ? 0.5 : 1, cursor: deciding ? "wait" : "pointer" }}
+                  disabled={!!deciding}
+                  onClick={() => decide("approved")}
+                >
+                  {deciding === "approved" ? <><BusySpinner size={14} /> Approving…</> : <><CheckCircle2 size={14} /> Approve</>}
                 </button>
               </div>
+              {deciding && (
+                <p style={{ fontSize: 12, color: "#4a5568", margin: "6px 0 0" }}>
+                  Saving your decision and notifying the Secretary…
+                </p>
+              )}
             </div>
           )}
 
@@ -249,6 +277,18 @@ export default function AuthorApprovalPanel({ route, record, isSecretary, onGate
       )}
 
       {error && <p style={{ fontSize: 12, color: "#c53030", fontWeight: 600, margin: "8px 0 0" }}>{error}</p>}
+
+      {done && (
+        <ConfirmModal
+          type="success"
+          title={done.title}
+          message={done.message}
+          confirmLabel="OK"
+          cancelLabel={false}
+          onConfirm={closeDone}
+          onCancel={closeDone}
+        />
+      )}
     </div>
   );
 }

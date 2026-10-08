@@ -12,6 +12,7 @@
 // />
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 const CONFIGS = {
   success: {
@@ -104,7 +105,10 @@ export default function ConfirmModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onCancel, loading]);
 
-  return (
+  // Rendered into <body>, not where it's used: an ancestor with a transform
+  // or backdrop-filter (e.g. the record View window) would otherwise trap
+  // this fixed overlay inside it, clipped or hidden behind other content.
+  return createPortal(
     <>
       <style>{`
         .cm-overlay {
@@ -222,6 +226,7 @@ export default function ConfirmModal({
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

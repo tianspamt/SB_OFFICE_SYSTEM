@@ -6,12 +6,14 @@ const supabase = require('../config/supabase')
 
 const READING_STATUSES = ['first_reading', 'second_reading', 'third_reading']
 
-// Which approval stage a record's current status waits on — each reading, then
-// a final 'publish' approval once the Vice-Mayor has approved. null = none.
+// Which approval stage a record's current status waits on — acceptance (before
+// the first reading starts, migrations/033), each reading, then a final
+// 'publish' approval once the Vice-Mayor has approved. null = none.
 const stageForStatus = (status) =>
-  READING_STATUSES.includes(status) ? status : status === 'approved' ? 'publish' : null
+  status === 'accepted' || READING_STATUSES.includes(status) ? status : status === 'approved' ? 'publish' : null
 
 const STAGE_LABELS = {
+  accepted: 'acceptance (before First Reading)',
   first_reading: 'First Reading',
   second_reading: 'Second Reading',
   third_reading: 'Third Reading',
