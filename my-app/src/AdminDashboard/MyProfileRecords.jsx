@@ -18,6 +18,7 @@ import { statusLabel } from "./legislativeStatus";
 import { STAGE_LABELS, decideAuthorApproval, decisionSuccess } from "./authorWorkflow";
 import ConfirmModal from "./ConfirmModal";
 import BusySpinner from "./BusySpinner";
+import RecordHistory from "./RecordHistory";
 
 const TYPE_LABEL = { ordinance: "Ordinance", resolution: "Resolution" };
 const ROUTE = { ordinance: "ordinances", resolution: "resolutions" };
@@ -62,8 +63,9 @@ function RecordRow({ item, styles, onPreview }) {
 }
 
 function RejectedRow({ item, styles }) {
+  const [showHistory, setShowHistory] = useState(false);
   return (
-    <div className={styles.officialRecordItem}>
+    <div className={styles.officialRecordItem} style={{ flexWrap: "wrap" }}>
       <div className={`${styles.officialRecordIcon} ${styles.officialRecordIconRejected}`}>
         <XCircle size={16} strokeWidth={1.5} />
       </div>
@@ -77,6 +79,25 @@ function RejectedRow({ item, styles }) {
         )}
       </div>
       <span className={styles.officialTypeTag}>{TYPE_LABEL[item.entity_type]}</span>
+      <button
+        onClick={() => setShowHistory((v) => !v)}
+        style={{
+          border: "none",
+          background: "none",
+          color: "#1a365d",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          padding: "2px 4px",
+        }}
+      >
+        {showHistory ? "Hide history" : "View history"}
+      </button>
+      {showHistory && (
+        <div style={{ flexBasis: "100%" }}>
+          <RecordHistory route={ROUTE[item.entity_type]} recordId={item.id} status={item.status} />
+        </div>
+      )}
     </div>
   );
 }

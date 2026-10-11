@@ -20,6 +20,7 @@ const { createOfficialRoleRoutes, syncRoleLinks } = require('../helpers/official
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 const { memberForUser } = require('../helpers/accountLinks')
 const { clearApprovalsForReplacedAuthor, clearCurrentStageApproval } = require('../helpers/authorApprovals')
+const { recordHistory } = require('../helpers/recordHistory')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -360,6 +361,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     }
 
     await logActivity(req, 'UPLOAD', 'Ordinances', `Uploaded ordinance: ${title}`)
+    await recordHistory(req, { entityType: 'ordinance', entityId: ordinance.id, action: 'uploaded' })
     notifyByPosition('secretary', {
       message: `New ordinance draft submitted: ${title}`,
       entityType: 'ordinance', entityId: ordinance.id,
@@ -484,6 +486,7 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     }
 
     await logActivity(req, 'UPDATE', 'Ordinances', `Updated ordinance: ${title}`)
+    await recordHistory(req, { entityType: 'ordinance', entityId: id, action: existing.status === 'needs_revision' ? 'resubmitted' : 'updated' })
     res.json({ success: true, data: updated })
   } catch (err) {
     console.error('Ordinance update error:', err)
@@ -529,6 +532,7 @@ router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file
     await clearCurrentStageApproval('ordinance', existing)
 
     await logActivity(req, 'REPLACE_FILE', 'Ordinances', `Replaced draft file for ordinance: ${existing.title}`)
+    await recordHistory(req, { entityType: 'ordinance', entityId: id, action: existing.status === 'needs_revision' ? 'resubmitted' : 'file_replaced' })
     res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })

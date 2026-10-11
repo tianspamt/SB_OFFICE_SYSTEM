@@ -72,6 +72,7 @@ import { statusLabel, nextReadingActionLabel } from "./legislativeStatus";
 import { ModalAlert } from "./AdminComponents";
 import ConfirmModal from "./ConfirmModal";
 import AuthorApprovalPanel from "./AuthorApprovalPanel";
+import RecordHistory from "./RecordHistory";
 import LoadingModal from "./LoadingModal";
 
 const CATEGORIES = RESOLUTION_CATEGORIES;
@@ -1155,6 +1156,19 @@ export default function ResolutionsPage({
                 );
               })()}
 
+              {/* ── Record history: upload → publish/reject (staff only — see RecordHistory.jsx) ── */}
+              {["published", "rejected"].includes(viewTarget.status) && (
+                <>
+                  <div className={lStyles.viewModalDivider} />
+                  <RecordHistory
+                    key={`history-${viewTarget.id}`}
+                    route="resolutions"
+                    recordId={viewTarget.id}
+                    status={viewTarget.status}
+                  />
+                </>
+              )}
+
               {/* ── Review workflow (hidden once published) ── */}
               {viewTarget.status !== "published" && (
                 <>
@@ -1306,6 +1320,7 @@ export default function ResolutionsPage({
                       onDecided={onRefresh}
                     />
                   )}
+
 
                   <div
                     className={lStyles.viewModalFileActions}

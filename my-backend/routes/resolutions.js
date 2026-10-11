@@ -19,6 +19,7 @@ const { createOfficialRoleRoutes, syncRoleLinks } = require('../helpers/official
 const { notifyByPosition, notificationEmailHtml } = require('../helpers/notify')
 const { memberForUser } = require('../helpers/accountLinks')
 const { clearApprovalsForReplacedAuthor, clearCurrentStageApproval } = require('../helpers/authorApprovals')
+const { recordHistory } = require('../helpers/recordHistory')
 
 // Historical-accuracy note: `term.position` is the specific membership
 // current when this official was linked (see resolveCurrentTermId and
@@ -297,6 +298,7 @@ router.post('/upload', verifyToken, canCreateDraft, upload.single('file'), handl
     }
 
     await logActivity(req, 'UPLOAD', 'Resolutions', `Uploaded resolution: ${title}`)
+    await recordHistory(req, { entityType: 'resolution', entityId: resolution.id, action: 'uploaded' })
     notifyByPosition('secretary', {
       message: `New resolution draft submitted: ${title}`,
       entityType: 'resolution', entityId: resolution.id,
@@ -409,6 +411,7 @@ router.put('/:id', verifyToken, upload.single('file'), handleMulterError, async 
     }
 
     await logActivity(req, 'UPDATE', 'Resolutions', `Updated resolution: ${title}`)
+    await recordHistory(req, { entityType: 'resolution', entityId: id, action: existing.status === 'needs_revision' ? 'resubmitted' : 'updated' })
     res.json({ success: true, data: updated })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -505,6 +508,7 @@ router.put('/:id/replace-file', verifyToken, pendingEditors, upload.single('file
     await clearCurrentStageApproval('resolution', existing)
 
     await logActivity(req, 'REPLACE_FILE', 'Resolutions', `Replaced draft file for resolution: ${existing.title}`)
+    await recordHistory(req, { entityType: 'resolution', entityId: id, action: existing.status === 'needs_revision' ? 'resubmitted' : 'file_replaced' })
     res.json({ success: true, data })
   } catch (err) {
     res.status(500).json({ error: err.message })

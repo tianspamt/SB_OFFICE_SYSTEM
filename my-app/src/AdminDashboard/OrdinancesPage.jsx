@@ -74,6 +74,7 @@ import {
 import { statusLabel, nextReadingActionLabel } from "./legislativeStatus";
 import ConfirmModal from "./ConfirmModal";
 import AuthorApprovalPanel from "./AuthorApprovalPanel";
+import RecordHistory from "./RecordHistory";
 import LoadingModal from "./LoadingModal";
 import { ModalAlert } from "./AdminComponents";
 
@@ -1226,6 +1227,19 @@ export default function OrdinancesPage({
                 );
               })()}
 
+              {/* ── Record history: upload → publish/reject (staff only — see RecordHistory.jsx) ── */}
+              {["published", "rejected"].includes(viewTarget.status) && (
+                <>
+                  <div className={lStyles.viewModalDivider} />
+                  <RecordHistory
+                    key={`history-${viewTarget.id}`}
+                    route="ordinances"
+                    recordId={viewTarget.id}
+                    status={viewTarget.status}
+                  />
+                </>
+              )}
+
               {/* ── Review workflow (hidden once published) ── */}
               {viewTarget.status !== "published" && (
                 <>
@@ -1379,6 +1393,7 @@ export default function OrdinancesPage({
                       onDecided={onRefresh}
                     />
                   )}
+
 
                   {/* Status + role driven actions */}
                   <div

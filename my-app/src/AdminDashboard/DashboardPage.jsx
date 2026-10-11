@@ -27,6 +27,7 @@ import {
 import styles from "./AdminDashboard.module.css";
 import lStyles from "./LegislativeModule.module.css";
 import PendingRecordsWidget from "./PendingRecordsWidget";
+import RecordHistory from "./RecordHistory";
 import { pendingStatusesForRole } from "./useLegislativeReview";
 import { PresentOverlay } from "./LegislativeComponents";
 import { ToastContainer } from "./Toast";
@@ -1025,6 +1026,19 @@ const DashboardPage = ({
                           ))}
                         </div>
                       </div>
+                    </>
+                  )}
+
+                  {/* Record history: upload → publish/reject (staff only — see RecordHistory.jsx). */}
+                  {["published", "rejected"].includes(viewTarget.item.status) && (
+                    <>
+                      <div className={lStyles.viewModalDivider} />
+                      <RecordHistory
+                        key={`history-${viewTarget.type}-${viewTarget.item.id}`}
+                        route={viewTarget.type === "ordinance" ? "ordinances" : "resolutions"}
+                        recordId={viewTarget.item.id}
+                        status={viewTarget.item.status}
+                      />
                     </>
                   )}
                 </>

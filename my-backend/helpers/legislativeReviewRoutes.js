@@ -8,6 +8,7 @@ const { notify, notifyByPosition, notifyAllStaff, notificationEmailHtml } = requ
 const { STAGE_LABELS, stageForStatus, authorOf, approvalFor } = require('./authorApprovals')
 const { memberForUser, userForMember } = require('./accountLinks')
 const { nextNumberFor, sequentialNumberError, latestPublishedYear } = require('./recordNumbers')
+const { HISTORY_VIEWER_POSITIONS, recordHistory, historyFor } = require('./recordHistory')
 
 // Builds the shared review-workflow routes — accept / request-changes /
 // vm-approve / publish / archive (plus advance-reading for ordinances/
@@ -149,6 +150,7 @@ function createLegislativeReviewRoutes({
     if (error) return { error }
     await logActivity(req, 'REQUEST_AUTHOR_APPROVAL', activityModule,
       `Requested ${author.full_name}'s approval (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
+    await recordHistory(req, { entityType, entityId: existing.id, action: 'author_approval_requested', stage })
     notify({
       recipientId: account.id,
       emailSubject: `Your Approval Is Needed: ${labelOf(existing)}`,
@@ -189,6 +191,7 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'ACCEPT', activityModule, `Accepted draft: ${labelOf(existing)}`)
+      await recordHistory(req, { entityType, entityId: id, action: 'accepted' })
       // hasReadings types don't notify the Vice-Mayor yet — that happens once
       // /advance-reading actually reaches 'ready_to_publish'.
       if (!hasReadings) notifyVmReadyForApproval(existing, id)
@@ -242,6 +245,7 @@ function createLegislativeReviewRoutes({
           req, 'ADVANCE_READING', activityModule,
           `${isFinalReading ? 'Completed third reading' : `Marked ${nextStatus.replace('_', ' ')}`}: ${labelOf(existing)}`
         )
+        await recordHistory(req, { entityType, entityId: id, action: 'advanced', stage: nextStatus })
         if (isFinalReading) notifyVmReadyForApproval(existing, id)
         res.json({ success: true, data })
       } catch (err) {
@@ -291,6 +295,7 @@ function createLegislativeReviewRoutes({
         if (conflict) return conflictResponse(res)
         if (error) return res.status(500).json({ error: error.message })
         await logActivity(req, 'REJECT', activityModule, `Rejected: ${labelOf(existing)}`)
+        await recordHistory(req, { entityType, entityId: id, action: 'rejected', stage: existing.status, comment })
         // A rejected record is private to its Author (it shows only in their
         // My Profile), so the email goes to the Author's linked account — not
         // to whoever uploaded the draft. No linked account = no email.
@@ -355,6 +360,7 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'REQUEST_CHANGES', activityModule, `Requested changes on draft: ${labelOf(existing)}`)
+      await recordHistory(req, { entityType, entityId: id, action: 'changes_requested', comment: reason })
       notify({
         recipientId: existing.created_by,
         message: `Changes requested on your ${lower}: ${labelOf(existing)}`,
@@ -389,6 +395,7 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'VM_APPROVE', activityModule, `Vice-Mayor approved: ${labelOf(existing)}`)
+      await recordHistory(req, { entityType, entityId: id, action: 'vm_approved' })
       notifyByPosition('secretary', {
         message: `Vice-Mayor approved, ready to publish: ${labelOf(existing)}`,
         entityType, entityId: id,
@@ -500,6 +507,7 @@ function createLegislativeReviewRoutes({
       if (conflict) return conflictResponse(res)
       if (error) return res.status(500).json({ error: error.message })
       await logActivity(req, 'PUBLISH', activityModule, `Published: ${labelOf(existing)}`)
+      await recordHistory(req, { entityType, entityId: id, action: 'published', comment: numberField ? patch[numberField] : null })
       // Broadcast to every active staff account (Secretary/Clerk/Councilor/
       // Vice-Mayor), same as "new session minutes recorded"/"new session
       // agenda posted" — publishing is the record going officially live, a
@@ -552,6 +560,21 @@ function createLegislativeReviewRoutes({
           is_author: !!(author && myMember && myMember.id === author.id),
           approvals: approvals || [],
         })
+      } catch (err) {
+        res.status(500).json({ error: err.message })
+      }
+    })
+
+    // GET /:id/history — the record's full trail, upload to publish/reject,
+    // for its details view (helpers/recordHistory.js, migrations/034). Staff
+    // positions only — never part of anything public.
+    router.get('/:id/history', verifyToken, async (req, res) => {
+      if (!HISTORY_VIEWER_POSITIONS.includes(req.user.position))
+        return res.status(403).json({ error: 'You are not allowed to view this record history.' })
+      try {
+        const { data: existing } = await supabase.from(table).select('id').eq('id', req.params.id).maybeSingle()
+        if (!existing) return res.status(404).json({ error: `${singularLabel} not found.` })
+        res.json({ success: true, data: await historyFor(entityType, req.params.id) })
       } catch (err) {
         res.status(500).json({ error: err.message })
       }
@@ -616,6 +639,10 @@ function createLegislativeReviewRoutes({
         const verb = decision === 'approved' ? 'approved' : 'declined'
         await logActivity(req, decision === 'approved' ? 'AUTHOR_APPROVE' : 'AUTHOR_DECLINE', activityModule,
           `Author ${verb} (${STAGE_LABELS[stage]}): ${labelOf(existing)}`)
+        await recordHistory(req, {
+          entityType, entityId: id, action: decision === 'approved' ? 'author_approved' : 'author_declined',
+          stage, comment, actorName: author.full_name,
+        })
         notifyByPosition('secretary', {
           emailSubject: `Author ${decision === 'approved' ? 'Approved' : 'Declined'}: ${labelOf(existing)}`,
           emailHtml: notificationEmailHtml(
@@ -661,6 +688,7 @@ function createLegislativeReviewRoutes({
 
         await logActivity(req, 'AUTHOR_APPROVE_ON_BEHALF', activityModule,
           `Recorded author approval on behalf of ${author?.full_name || 'the author'} (${STAGE_LABELS[stage]}): ${labelOf(existing)} — ${note}`)
+        await recordHistory(req, { entityType, entityId: id, action: 'author_approved_on_behalf', stage, comment: note })
         res.json({ success: true, data })
       } catch (err) {
         res.status(500).json({ error: err.message })
